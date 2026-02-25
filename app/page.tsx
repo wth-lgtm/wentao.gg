@@ -1,13 +1,30 @@
+import dynamic from "next/dynamic";
 import Navigation from "./components/Navigation";
 import ScrollProgress from "./components/ScrollProgress";
-import InteractiveEffects from "./components/InteractiveEffects";
 import Hero from "./components/Hero";
-import Education from "./components/Education";
-import Experience from "./components/Experience";
 import Projects from "./components/Projects";
-import SiteStats from "./components/CommitHeatmap";
-import Connect from "./components/Connect";
 import Footer from "./components/Footer";
+
+// Code-split heavy/below-fold components into separate chunks
+const InteractiveEffects = dynamic(
+  () => import("./components/InteractiveEffects")
+);
+
+const Experience = dynamic(() => import("./components/Experience"), {
+  loading: () => <section className="py-24 px-6" />,
+});
+
+const Education = dynamic(() => import("./components/Education"), {
+  loading: () => <section className="py-24 px-6" />,
+});
+
+const SiteStats = dynamic(() => import("./components/CommitHeatmap"), {
+  loading: () => <section className="py-16 px-6" />,
+});
+
+const Connect = dynamic(() => import("./components/Connect"), {
+  loading: () => <section className="py-24 px-6" />,
+});
 
 export default function Home() {
   return (

@@ -7,7 +7,7 @@ export default function InteractiveEffects() {
   const [isMobile, setIsMobile] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  // Set mounted and detect mobile
+  // Detect mobile on mount
   useEffect(() => {
     setMounted(true);
     const hasTouch = "ontouchstart" in window || navigator.maxTouchPoints > 0;
@@ -57,8 +57,19 @@ export default function InteractiveEffects() {
       }
     };
 
-    // Defer fluid initialization to after initial paint
-    timeoutId = setTimeout(initFluid, 100);
+    // Defer fluid initialization until browser is idle, well after LCP
+    if ("requestIdleCallback" in window) {
+      const idleId = (window as any).requestIdleCallback(
+        () => { timeoutId = setTimeout(initFluid, 500); },
+        { timeout: 3000 }
+      );
+      return () => {
+        (window as any).cancelIdleCallback(idleId);
+        clearTimeout(timeoutId);
+        fluidInstance = null;
+      };
+    }
+    timeoutId = setTimeout(initFluid, 2000);
 
     return () => {
       clearTimeout(timeoutId);
