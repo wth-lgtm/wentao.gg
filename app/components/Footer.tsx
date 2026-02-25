@@ -56,7 +56,7 @@ export default function Footer() {
               <Instagram size={18} />
             </a>
             <a
-              href="mailto:wentao0813@gmail.com"
+              href="mailto:me@wentao.gg"
               className="text-muted hover:text-foreground transition-colors"
             >
               <Mail size={18} />

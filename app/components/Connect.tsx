@@ -21,7 +21,7 @@ const socialLinks = [
   },
   {
     name: "Email",
-    href: "mailto:wentao0813@gmail.com",
+    href: "mailto:me@wentao.gg",
     icon: Mail,
   },
 ];
