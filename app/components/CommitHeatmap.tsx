@@ -48,10 +48,10 @@ export default function SiteStats() {
       try {
         // Fetch both endpoints in parallel for faster loading
         const [commitsRes, langRes] = await Promise.all([
-          fetch("https://api.github.com/repos/wth-gg/wentao.gg/commits?per_page=100", {
+          fetch("https://api.github.com/repos/wth-lgtm/wentao.gg/commits?per_page=100", {
             next: { revalidate: 300 }, // Cache for 5 minutes
           }),
-          fetch("https://api.github.com/repos/wth-gg/wentao.gg/languages", {
+          fetch("https://api.github.com/repos/wth-lgtm/wentao.gg/languages", {
             next: { revalidate: 300 },
           }),
         ]);
@@ -133,7 +133,7 @@ export default function SiteStats() {
               <span className="text-sm font-medium">wentao.gg</span>
             </div>
             <a
-              href="https://github.com/wth-gg/wentao.gg"
+              href="https://github.com/wth-lgtm/wentao.gg"
               target="_blank"
               rel="noopener noreferrer"
               className="text-xs text-accent hover:underline"

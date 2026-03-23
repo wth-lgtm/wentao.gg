@@ -11,7 +11,7 @@ const socialLinks = [
   },
   {
     name: "GitHub",
-    href: "https://github.com/wth-gg",
+    href: "https://github.com/wth-lgtm",
     icon: Github,
   },
   {

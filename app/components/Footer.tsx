@@ -40,7 +40,7 @@ export default function Footer() {
               <Linkedin size={18} />
             </a>
             <a
-              href="https://github.com/wth-gg"
+              href="https://github.com/wth-lgtm"
               target="_blank"
               rel="noopener noreferrer"
               className="text-muted hover:text-foreground transition-colors"
