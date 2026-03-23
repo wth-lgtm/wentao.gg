@@ -62,6 +62,7 @@ const experiences: Experience[] = [
   {
     title: "Machine Learning Engineer",
     company: "Jefferson Street Technologies",
+    companyUrl: "https://www.jeffersonst.io/",
     logo: "/images/profile/jefferson_street_technologies_logo.jpeg",
     period: "May 2020 - Oct 2021",
     location: "Remote",
