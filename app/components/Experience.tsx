@@ -40,7 +40,7 @@ const experiences: Experience[] = [
     technologies: ["Python", "SQL", "Java", "PHP", "Spark", "Presto"],
   },
   {
-    title: "Data Engineer",
+    title: "Software Engineer",
     company: "Cherre",
     companyUrl: "https://cherre.com/",
     logo: "/images/profile/cherre_logo.jpeg",
@@ -50,7 +50,7 @@ const experiences: Experience[] = [
     technologies: ["Python", "SQL", "PyTorch", "Postgres", "BigQuery", "Airflow", "dbt", "AWS", "GCP", "Docker", "Kubernetes"],
   },
   {
-    title: "Data Engineer",
+    title: "Software Engineer",
     company: "Mashey",
     companyUrl: "https://www.analytics8.com/blog/analytics8-acquires-mashey-investing-more-in-the-future-of-data-and-analytics-consulting/",
     logo: "/images/profile/mashey_logo.jpeg",
