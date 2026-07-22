@@ -84,17 +84,7 @@ export default function HLWhaleTracker() {
           transition={{ duration: 0.3 }}
           className="text-center mb-4 sm:mb-6"
         >
-          <h2 className="text-xl sm:text-2xl md:text-3xl font-bold mb-1 sm:mb-2 flex items-center justify-center gap-2">
-            <Image
-              src="/images/icons/HL symbol_mint green.png"
-              alt="Hyperliquid"
-              width={32}
-              height={32}
-              className="w-6 h-6 sm:w-7 sm:h-7 md:w-8 md:h-8"
-            />
-            🐋 Tracker
-          </h2>
-          <p className="text-muted text-xs sm:text-sm hidden sm:block">
+          <p className="text-muted text-sm sm:text-base">
             Track top traders by PnL, ROI, and volume
           </p>
         </motion.div>
