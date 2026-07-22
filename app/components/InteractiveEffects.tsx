@@ -68,9 +68,9 @@ export default function InteractiveEffects() {
             BACK_COLOR: { r: 0, g: 0, b: 0 },
             TRANSPARENT: true,
             BLOOM: !isMobile,
-            BLOOM_INTENSITY: 0.8,
+            BLOOM_INTENSITY: 0.3,
             SUNRAYS: !isMobile,
-            SUNRAYS_WEIGHT: 1.2,
+            SUNRAYS_WEIGHT: 0.5,
           };
           fluidInstance = WebGLFluid(canvasRef.current, config);
         }
