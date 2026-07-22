@@ -42,6 +42,8 @@ next-env.d.ts
 
 #CLAUDE
 CLAUDE.md
+# personal, machine-specific permission allowlist — shared commands live in .claude/commands/
+.claude/settings.local.json
 
 # Ideas/Planning
 /ideas
