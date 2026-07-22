@@ -8,7 +8,8 @@ import "./globals.css";
 const spaceGrotesk = Space_Grotesk({
   variable: "--font-space-grotesk",
   subsets: ["latin"],
-  weight: ["400", "700"],
+  // Variable font: omit `weight` to load the full 300–700 axis so 500/600 render
+  // as true weights instead of synthesized faux-bold from the 400/700 masters.
   display: "swap",
   preload: true,
 });
