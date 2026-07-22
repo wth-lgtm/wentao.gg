@@ -41,7 +41,7 @@ export default function Hero() {
           style={{ animationDelay: "2s", opacity: 0, animationFillMode: "forwards" }}
         >
           <a
-            href="#projects"
+            href="#experience"
             className="text-muted hover:text-foreground transition-colors inline-block"
           >
             <ArrowDown size={24} className="animate-bounce" />

@@ -8,9 +8,9 @@ import ThemeToggle from "./ThemeToggle";
 
 const navItems = [
   { name: "About", href: "#about" },
-  { name: "Projects", href: "#projects", hasDropdown: true },
   { name: "Experience", href: "#experience" },
   { name: "Education", href: "#education" },
+  { name: "Projects", href: "#projects", hasDropdown: true },
   { name: "Contact", href: "#connect", isButton: true },
 ];
 
