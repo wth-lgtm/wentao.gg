@@ -124,7 +124,7 @@ export default function SiteStats() {
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
           transition={{ duration: 0.5 }}
-          className="bg-white/5 backdrop-blur-lg rounded-2xl border border-white/10 p-6 sm:p-8 pointer-events-auto"
+          className="bg-card/60 backdrop-blur-lg rounded-2xl border border-border p-6 sm:p-8 pointer-events-auto"
         >
           {/* Header */}
           <div className="flex items-center justify-between mb-6">

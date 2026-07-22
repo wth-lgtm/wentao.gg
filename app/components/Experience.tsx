@@ -118,7 +118,7 @@ function ExperienceCard({
         </div>
 
         {/* Card content */}
-        <div className="flex-1 bg-white/5 backdrop-blur-lg hover:bg-white/10 rounded-xl transition-all duration-300 border border-white/10 hover:border-white/20 hover:card-shadow group pointer-events-auto overflow-hidden">
+        <div className="flex-1 bg-card/60 backdrop-blur-lg hover:bg-card-hover/70 rounded-xl transition-all duration-300 border border-border hover:border-muted/40 hover:card-shadow group pointer-events-auto overflow-hidden">
           {/* Clickable header */}
           <button
             onClick={onToggle}
