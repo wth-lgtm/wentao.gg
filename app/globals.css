@@ -4,12 +4,12 @@
 :root, .dark {
   --background: #0a0a0b;
   --foreground: #fafafa;
-  --muted: #71717a;
+  --muted: #8b8b94; /* ~5.9:1 on --background — passes WCAG AA for text */
   --accent: #3b82f6;
   --accent-hover: #2563eb;
   --card: #18181b;
-  --card-hover: #27272a;
-  --border: #27272a;
+  --card-hover: #212124; /* distinct rung: bg < card < card-hover < border */
+  --border: #2e2e33;
 }
 
 /* Light theme */
@@ -20,8 +20,8 @@
   --accent: #2563eb;
   --accent-hover: #1d4ed8;
   --card: #f4f4f5;
-  --card-hover: #e4e4e7;
-  --border: #e4e4e7;
+  --card-hover: #ececee; /* distinct rung: bg > card > card-hover > border */
+  --border: #dcdce0;
 }
 
 @theme inline {
@@ -74,11 +74,6 @@ p {
 /* Small text / labels */
 small, .text-sm, .text-xs {
   letter-spacing: 0;
-}
-
-/* Improve readability for muted text */
-.text-muted {
-  font-weight: 450;
 }
 
 /* Buttons and interactive elements */
