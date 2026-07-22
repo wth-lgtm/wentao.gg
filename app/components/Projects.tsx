@@ -124,7 +124,7 @@ function ProjectCard({ project }: { project: Project }) {
   return (
     <Link
       href={project.href}
-      className="group block bg-card/60 backdrop-blur-lg rounded-xl overflow-hidden border border-border hover:border-muted/40 hover:card-shadow card-lift transition-all duration-300 h-full pointer-events-auto"
+      className="group block bg-card/60 backdrop-blur-lg rounded-xl overflow-hidden border border-border hover:border-muted/40 card-lift h-full pointer-events-auto"
     >
       <div className="relative h-36 sm:h-48 bg-background overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-br from-accent/20 to-accent/5 flex items-center justify-center">

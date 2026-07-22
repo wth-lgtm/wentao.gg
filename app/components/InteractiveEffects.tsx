@@ -19,6 +19,9 @@ export default function InteractiveEffects() {
   useEffect(() => {
     if (!mounted || !canvasRef.current) return;
 
+    // Respect prefers-reduced-motion: skip the fluid sim entirely (no WebGL context, no rAF).
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
     let fluidInstance: any = null;
     let timeoutId: ReturnType<typeof setTimeout>;
 
@@ -27,30 +30,49 @@ export default function InteractiveEffects() {
         const WebGLFluid = (await import("webgl-fluid")).default;
         if (canvasRef.current) {
           // Use lower resolution on mobile for better performance
-          const simRes = isMobile ? 256 : 512;
+          const simRes = 256;
           const dyeRes = isMobile ? 1024 : 2048;
 
-          fluidInstance = WebGLFluid(canvasRef.current, {
-            IMMEDIATE: false,
+          // webgl-fluid@0.3.9 supports these keys at runtime, but its bundled types
+          // omit some — widen the config type rather than casting to `any`.
+          type FluidConfig = NonNullable<Parameters<typeof WebGLFluid>[1]> & {
+            SPLAT_COUNT?: number;
+            BLOOM_INTENSITY?: number;
+            SUNRAYS?: boolean;
+            SUNRAYS_WEIGHT?: number;
+          };
+          const config: FluidConfig = {
+            // A small ignition bloom on load so the canvas isn't dead-black, then the
+            // fluid is driven purely by the real cursor (TRIGGER: "hover") — no synthetic
+            // ambient strokes.
+            IMMEDIATE: true,
+            SPLAT_COUNT: 4,
             TRIGGER: "hover",
             SIM_RESOLUTION: simRes,
             DYE_RESOLUTION: dyeRes,
             CAPTURE_RESOLUTION: 256,
-            DENSITY_DISSIPATION: 6,
-            VELOCITY_DISSIPATION: 1,
-            PRESSURE: 0.5,
-            PRESSURE_ITERATIONS: isMobile ? 20 : 40,
-            CURL: 1,
-            SPLAT_RADIUS: 0.05,
-            SPLAT_FORCE: 10000,
+            // Fuller + more painterly: dye lingers (low dissipation), the field keeps
+            // swirling (low velocity dissipation + high curl), strokes are bolder, and
+            // bloom + sunrays add a luminous glow (desktop only for perf).
+            DENSITY_DISSIPATION: 2.2,
+            VELOCITY_DISSIPATION: 0.5,
+            PRESSURE: 0.8,
+            PRESSURE_ITERATIONS: isMobile ? 20 : 24,
+            CURL: 15,
+            SPLAT_RADIUS: 0.1,
+            SPLAT_FORCE: 7500,
             SHADING: !isMobile,
             COLORFUL: true,
-            COLOR_UPDATE_SPEED: 12,
+            COLOR_UPDATE_SPEED: 5,
             PAUSED: false,
             BACK_COLOR: { r: 0, g: 0, b: 0 },
             TRANSPARENT: true,
-            BLOOM: false,
-          });
+            BLOOM: !isMobile,
+            BLOOM_INTENSITY: 0.15,
+            SUNRAYS: !isMobile,
+            SUNRAYS_WEIGHT: 0.3,
+          };
+          fluidInstance = WebGLFluid(canvasRef.current, config);
         }
       } catch (error) {
         console.error("Failed to initialize WebGL Fluid:", error);

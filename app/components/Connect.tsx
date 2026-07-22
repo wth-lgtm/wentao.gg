@@ -60,12 +60,12 @@ export default function Connect() {
               viewport={{ once: true }}
               transition={{ delay: index * 0.1 }}
               whileHover={{
-                y: -8,
-                scale: 1.15,
-                transition: { type: "spring", stiffness: 700, damping: 12 }
+                y: -4,
+                scale: 1.03,
+                transition: { type: "spring", stiffness: 300, damping: 20 }
               }}
-              whileTap={{ scale: 0.92, transition: { type: "spring", stiffness: 800, damping: 15 } }}
-              className="group bg-card/60 backdrop-blur-lg hover:bg-card-hover/70 rounded-xl p-5 border border-border hover:border-muted/40 hover:card-shadow transition-colors duration-150 pointer-events-auto animate-breathe"
+              whileTap={{ scale: 0.96, transition: { type: "spring", stiffness: 400, damping: 22 } }}
+              className="group bg-card/60 backdrop-blur-lg hover:bg-card-hover/70 rounded-xl p-5 border border-border hover:border-muted/40 transition-colors duration-150 pointer-events-auto animate-breathe"
               aria-label={link.name}
             >
               <div className="flex items-center justify-center w-12 h-12 bg-background rounded-xl group-hover:bg-accent/10 transition-colors">
