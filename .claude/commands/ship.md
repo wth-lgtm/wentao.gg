@@ -27,6 +27,10 @@ Run these steps in order. Stop and report if any step fails — do not push brok
 
 6. **Report.**
    - On `ERROR`: call `mcp__vercel__get_deployment_build_logs` and show the actual failure. Diagnose it.
+   - On `BLOCKED`: the build never started, so **there will be no build logs** — do not report "no logs" as if it were a mystery. This repo is private, so Vercel enforces "no seat, no build": the commit author must map to a GitHub account with a Vercel seat. Verify with
+     `git log -1 --format='%ae'` (must be `268091676+wth-lgtm@users.noreply.github.com`, set repo-locally) and
+     `gh api repos/wth-lgtm/wentao.gg/commits/<sha> --jq '.author.login'` (must be `wth-lgtm`, not null).
+     If it drifted back to a personal address, re-set `git config user.email`, `git commit --amend --reset-author --no-edit`, and `git push --force-with-lease`.
    - On `READY`: call `mcp__vercel__get_runtime_errors` for the project to confirm nothing is throwing post-deploy, then report the live URL and a one-line summary of what shipped.
 
 Be honest about the outcome. If the build failed or runtime errors appeared, lead with that — do not bury it under a success summary.
