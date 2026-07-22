@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, type ReactNode } from "react";
+import { useReducedMotion } from "framer-motion";
 
 // ============================================================================
 // Constants
@@ -110,14 +111,21 @@ function ScrambleText({
   const prevTextRef = useRef(text);
   const frameRef = useRef<number>(0);
   const revealedRef = useRef(0);
+  const reduceMotion = useReducedMotion();
 
   useEffect(() => {
+    // Reduced motion: skip the scramble, show the final text immediately.
+    if (reduceMotion) {
+      setDisplayText(text);
+      setIsScrambling(false);
+      return;
+    }
     if (text !== prevTextRef.current || displayText === "") {
       prevTextRef.current = text;
       revealedRef.current = 0;
       setIsScrambling(true);
     }
-  }, [text, displayText]);
+  }, [text, displayText, reduceMotion]);
 
   useEffect(() => {
     if (!isScrambling || !text) return;
@@ -167,14 +175,18 @@ function useRotatingContent({
   greetings,
   personas,
   personaTypingSpeed = 6,
+  descriptionTypingSpeed = 6,
   personaDeleteSpeed = 3,
   displayDuration = 4000,
+  reduceMotion = false,
 }: {
   greetings: string[];
   personas: Persona[];
   personaTypingSpeed?: number;
+  descriptionTypingSpeed?: number;
   personaDeleteSpeed?: number;
   displayDuration?: number;
+  reduceMotion?: boolean;
 }) {
   const [greetingIndex, setGreetingIndex] = useState(0);
   const [personaIndex, setPersonaIndex] = useState(0);
@@ -199,21 +211,30 @@ function useRotatingContent({
 
   // Main animation state machine
   useEffect(() => {
+    // Reduced motion: render the current persona fully; no typing/deleting loop.
+    if (reduceMotion) {
+      setPositionText(positionTarget);
+      setDescriptionText(descriptionTarget);
+      return;
+    }
+
     let timeout: ReturnType<typeof setTimeout>;
 
     if (phase === "typing") {
-      const isDone = positionText.length >= positionTarget.length &&
-                     descriptionText.length >= descriptionTarget.length;
+      const positionDone = positionText.length >= positionTarget.length;
+      const descriptionDone = descriptionText.length >= descriptionTarget.length;
 
-      if (!isDone) {
+      if (!positionDone || !descriptionDone) {
+        // Type the position line first, then the (longer) description — one at a time.
+        const baseSpeed = !positionDone ? personaTypingSpeed : descriptionTypingSpeed;
+        const jitter = Math.random() * 24 - 12; // ±12ms for a hand-typed cadence
         timeout = setTimeout(() => {
-          if (positionText.length < positionTarget.length) {
+          if (!positionDone) {
             setPositionText(positionTarget.slice(0, positionText.length + 1));
-          }
-          if (descriptionText.length < descriptionTarget.length) {
+          } else {
             setDescriptionText(descriptionTarget.slice(0, descriptionText.length + 1));
           }
-        }, personaTypingSpeed);
+        }, Math.max(baseSpeed + jitter, 0));
       } else {
         timeout = setTimeout(() => setPhase("deleting"), displayDuration);
       }
@@ -241,8 +262,8 @@ function useRotatingContent({
 
     return () => clearTimeout(timeout);
   }, [phase, positionText, descriptionText, positionTarget, descriptionTarget,
-      personaTypingSpeed, personaDeleteSpeed, displayDuration,
-      greetings.length, personas.length]);
+      personaTypingSpeed, descriptionTypingSpeed, personaDeleteSpeed, displayDuration,
+      reduceMotion, greetings.length, personas.length]);
 
   const isDescriptionComplete = phase === "deleting" ||
     (descriptionText.length >= descriptionTarget.length && descriptionText.length > 0);
@@ -299,6 +320,7 @@ export default function HeroAnimations({ children }: { children: ReactNode }) {
   const [mounted, setMounted] = useState(false);
   const [greetingData, setGreetingData] = useState<GreetingData>({ timePeriod: "morning", location: "" });
   const [visitorLine, setVisitorLine] = useState("");
+  const reduceMotion = useReducedMotion() ?? false;
 
   useEffect(() => {
     setMounted(true);
@@ -318,9 +340,11 @@ export default function HeroAnimations({ children }: { children: ReactNode }) {
   } = useRotatingContent({
     greetings,
     personas,
-    personaTypingSpeed: 3,
-    personaDeleteSpeed: 2,
-    displayDuration: 2500,
+    personaTypingSpeed: 45,
+    descriptionTypingSpeed: 34,
+    personaDeleteSpeed: 26,
+    displayDuration: 4000,
+    reduceMotion,
   });
 
   return (
@@ -331,7 +355,7 @@ export default function HeroAnimations({ children }: { children: ReactNode }) {
           {mounted && (
             <ScrambleText
               text={visitorLine}
-              className="text-muted/60 text-xs font-medium tracking-wide"
+              className="text-muted text-xs font-medium tracking-wide hero-legible"
               scrambleSpeed={15}
               revealSpeed={12}
             />
@@ -343,7 +367,7 @@ export default function HeroAnimations({ children }: { children: ReactNode }) {
               <span className="text-accent/50 text-sm">└</span>
               <ScrambleText
                 text={greetingTarget}
-                className="text-accent text-sm font-medium tracking-wide"
+                className="text-accent text-sm font-medium tracking-wide hero-legible"
                 scrambleSpeed={20}
                 revealSpeed={15}
               />
@@ -359,7 +383,7 @@ export default function HeroAnimations({ children }: { children: ReactNode }) {
         {/* Position — typed after mount */}
         <div className="min-h-[2rem] md:min-h-[2.5rem]">
           {mounted && (
-            <span className="block text-xl md:text-3xl font-medium tracking-[-0.01em] text-muted">
+            <span className="block text-xl md:text-3xl font-medium tracking-[-0.01em] text-muted hero-legible">
               {positionText}
             </span>
           )}
@@ -368,7 +392,7 @@ export default function HeroAnimations({ children }: { children: ReactNode }) {
         {/* Description with cursor — typed after mount */}
         <div className="min-h-[1.75rem] md:min-h-[2rem]">
           {mounted && (
-            <span className="text-base md:text-lg text-muted/80 leading-[1.7]" style={{ display: "inline" }}>
+            <span className="text-base md:text-lg text-muted/80 leading-[1.7] hero-legible" style={{ display: "inline" }}>
               {descriptionText}
               <span
                 className={`bg-accent ${isDescriptionComplete && showCursor ? "opacity-100" : "opacity-0"}`}

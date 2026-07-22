@@ -19,6 +19,9 @@ export default function InteractiveEffects() {
   useEffect(() => {
     if (!mounted || !canvasRef.current) return;
 
+    // Respect prefers-reduced-motion: skip the fluid sim entirely (no WebGL context, no rAF).
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
     let fluidInstance: any = null;
     let timeoutId: ReturnType<typeof setTimeout>;
 
@@ -27,30 +30,43 @@ export default function InteractiveEffects() {
         const WebGLFluid = (await import("webgl-fluid")).default;
         if (canvasRef.current) {
           // Use lower resolution on mobile for better performance
-          const simRes = isMobile ? 256 : 512;
+          const simRes = 256;
           const dyeRes = isMobile ? 1024 : 2048;
 
-          fluidInstance = WebGLFluid(canvasRef.current, {
-            IMMEDIATE: false,
+          // webgl-fluid@0.3.9 supports AUTO / INTERVAL / SPLAT_COUNT at runtime, but its
+          // bundled types omit them — widen the config type rather than casting to `any`.
+          type FluidConfig = NonNullable<Parameters<typeof WebGLFluid>[1]> & {
+            AUTO?: boolean;
+            INTERVAL?: number;
+            SPLAT_COUNT?: number;
+          };
+          const config: FluidConfig = {
+            // Alive on arrival: an initial ignition bloom, plus a gentle idle drift on
+            // desktop so the canvas isn't dead until the cursor moves. Hover stays the star.
+            IMMEDIATE: true,
+            AUTO: !isMobile,
+            INTERVAL: 5000,
+            SPLAT_COUNT: 4,
             TRIGGER: "hover",
             SIM_RESOLUTION: simRes,
             DYE_RESOLUTION: dyeRes,
             CAPTURE_RESOLUTION: 256,
-            DENSITY_DISSIPATION: 6,
+            DENSITY_DISSIPATION: 4,
             VELOCITY_DISSIPATION: 1,
             PRESSURE: 0.5,
-            PRESSURE_ITERATIONS: isMobile ? 20 : 40,
-            CURL: 1,
+            PRESSURE_ITERATIONS: isMobile ? 20 : 24,
+            CURL: 3,
             SPLAT_RADIUS: 0.05,
-            SPLAT_FORCE: 10000,
+            SPLAT_FORCE: 6500,
             SHADING: !isMobile,
             COLORFUL: true,
-            COLOR_UPDATE_SPEED: 12,
+            COLOR_UPDATE_SPEED: 3,
             PAUSED: false,
             BACK_COLOR: { r: 0, g: 0, b: 0 },
             TRANSPARENT: true,
             BLOOM: false,
-          });
+          };
+          fluidInstance = WebGLFluid(canvasRef.current, config);
         }
       } catch (error) {
         console.error("Failed to initialize WebGL Fluid:", error);
