@@ -33,19 +33,16 @@ export default function InteractiveEffects() {
           const simRes = 256;
           const dyeRes = isMobile ? 1024 : 2048;
 
-          // webgl-fluid@0.3.9 supports AUTO / INTERVAL / SPLAT_COUNT at runtime, but its
-          // bundled types omit them — widen the config type rather than casting to `any`.
+          // webgl-fluid@0.3.9 supports SPLAT_COUNT at runtime, but its bundled types
+          // omit it — widen the config type rather than casting to `any`.
           type FluidConfig = NonNullable<Parameters<typeof WebGLFluid>[1]> & {
-            AUTO?: boolean;
-            INTERVAL?: number;
             SPLAT_COUNT?: number;
           };
           const config: FluidConfig = {
-            // Alive on arrival: an initial ignition bloom, plus a gentle idle drift on
-            // desktop so the canvas isn't dead until the cursor moves. Hover stays the star.
+            // Alive on arrival: an initial ignition bloom. Idle motion is driven by a
+            // custom organic drift (see effect below) rather than the library's
+            // fixed-interval AUTO, so it never settles into a repetitive cadence.
             IMMEDIATE: true,
-            AUTO: !isMobile,
-            INTERVAL: 5000,
             SPLAT_COUNT: 4,
             TRIGGER: "hover",
             SIM_RESOLUTION: simRes,
@@ -126,6 +123,80 @@ export default function InteractiveEffects() {
       document.removeEventListener("touchstart", handleTouchStart);
       document.removeEventListener("touchmove", handleTouchMove);
       document.removeEventListener("touchend", handleTouchEnd);
+    };
+  }, [mounted, isMobile]);
+
+  // Organic idle drift — a slow "invisible cursor" that wanders the canvas with varied
+  // speed, direction, stroke length and pauses, so the ambient motion never loops.
+  // Desktop + non-reduced-motion only; the real cursor still leads on hover.
+  useEffect(() => {
+    if (!mounted || isMobile || !canvasRef.current) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+    const canvas = canvasRef.current;
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout>;
+    let rafId = 0;
+
+    const dispatch = (type: string, x: number, y: number) =>
+      canvas.dispatchEvent(
+        new MouseEvent(type, { clientX: x, clientY: y, bubbles: true, cancelable: true, view: window })
+      );
+
+    // One gently curved stroke from a random point — varied length, direction and steps.
+    const stroke = (done: () => void) => {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      const sx = Math.random() * w;
+      const sy = Math.random() * h;
+      const angle = Math.random() * Math.PI * 2;
+      const len = 80 + Math.random() * Math.min(w, h) * 0.45;
+      const ex = sx + Math.cos(angle) * len;
+      const ey = sy + Math.sin(angle) * len;
+      // quadratic-bezier control point for a natural arc
+      const cx = (sx + ex) / 2 + (Math.random() - 0.5) * len * 0.7;
+      const cy = (sy + ey) / 2 + (Math.random() - 0.5) * len * 0.7;
+      const steps = 8 + Math.floor(Math.random() * 12);
+      // mousedown resets the sim's pointer reference so the stroke doesn't streak
+      // across the screen from wherever the previous one ended.
+      dispatch("mousedown", sx, sy);
+      let i = 0;
+      const step = () => {
+        if (cancelled) return;
+        i += 1;
+        const t = i / steps;
+        const mt = 1 - t;
+        const x = mt * mt * sx + 2 * mt * t * cx + t * t * ex;
+        const y = mt * mt * sy + 2 * mt * t * cy + t * t * ey;
+        dispatch("mousemove", x, y);
+        if (i < steps) {
+          rafId = requestAnimationFrame(step);
+        } else {
+          dispatch("mouseup", ex, ey);
+          done();
+        }
+      };
+      rafId = requestAnimationFrame(step);
+    };
+
+    const loop = () => {
+      if (cancelled) return;
+      stroke(() => {
+        if (cancelled) return;
+        // ~30% of the time chain a quick second stroke; otherwise a long randomized pause
+        const quickFollow = Math.random() < 0.3;
+        const gap = quickFollow ? 200 + Math.random() * 250 : 1600 + Math.random() * 3800;
+        timeoutId = setTimeout(loop, gap);
+      });
+    };
+
+    // start after the arrival bloom + fluid init settle
+    timeoutId = setTimeout(loop, 2500);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+      cancelAnimationFrame(rafId);
     };
   }, [mounted, isMobile]);
 
