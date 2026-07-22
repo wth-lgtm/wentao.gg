@@ -54,12 +54,12 @@ export default function InteractiveEffects() {
             // Fuller + more painterly: dye lingers (low dissipation), the field keeps
             // swirling (low velocity dissipation + high curl), strokes are bolder, and
             // bloom + sunrays add a luminous glow (desktop only for perf).
-            DENSITY_DISSIPATION: 1.5,
+            DENSITY_DISSIPATION: 2.2,
             VELOCITY_DISSIPATION: 0.5,
             PRESSURE: 0.8,
             PRESSURE_ITERATIONS: isMobile ? 20 : 24,
             CURL: 15,
-            SPLAT_RADIUS: 0.18,
+            SPLAT_RADIUS: 0.1,
             SPLAT_FORCE: 7500,
             SHADING: !isMobile,
             COLORFUL: true,
@@ -68,9 +68,9 @@ export default function InteractiveEffects() {
             BACK_COLOR: { r: 0, g: 0, b: 0 },
             TRANSPARENT: true,
             BLOOM: !isMobile,
-            BLOOM_INTENSITY: 0.3,
+            BLOOM_INTENSITY: 0.15,
             SUNRAYS: !isMobile,
-            SUNRAYS_WEIGHT: 0.5,
+            SUNRAYS_WEIGHT: 0.3,
           };
           fluidInstance = WebGLFluid(canvasRef.current, config);
         }
