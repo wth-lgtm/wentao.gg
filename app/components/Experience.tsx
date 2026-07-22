@@ -118,7 +118,7 @@ function ExperienceCard({
         </div>
 
         {/* Card content */}
-        <div className="flex-1 bg-card/60 backdrop-blur-lg hover:bg-card-hover/70 rounded-xl transition-all duration-300 border border-border hover:border-muted/40 hover:card-shadow group pointer-events-auto overflow-hidden">
+        <div className="flex-1 bg-card/60 backdrop-blur-lg hover:bg-card-hover rounded-xl transition-all duration-300 border border-border hover:border-muted/60 hover:card-shadow group pointer-events-auto overflow-hidden">
           {/* Clickable header */}
           <button
             onClick={onToggle}
@@ -138,7 +138,7 @@ function ExperienceCard({
               )}
               <div className="flex-1 min-w-0">
                 <h3
-                  className={`text-xl md:text-2xl font-semibold text-foreground group-hover:text-accent transition-colors ${experience.companyUrl ? "hover:underline cursor-pointer" : ""}`}
+                  className={`text-xl md:text-2xl font-semibold text-foreground group-hover:text-accent transition-colors ${experience.companyUrl ? "cursor-pointer" : ""}`}
                   onClick={experience.companyUrl ? (e) => { e.stopPropagation(); window.open(experience.companyUrl, "_blank", "noopener,noreferrer"); } : undefined}
                 >
                   {experience.company}
