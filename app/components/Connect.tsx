@@ -65,7 +65,7 @@ export default function Connect() {
                 transition: { type: "spring", stiffness: 700, damping: 12 }
               }}
               whileTap={{ scale: 0.92, transition: { type: "spring", stiffness: 800, damping: 15 } }}
-              className="group bg-white/5 backdrop-blur-lg hover:bg-white/10 rounded-xl p-5 border border-white/10 hover:border-white/20 hover:card-shadow transition-colors duration-150 pointer-events-auto animate-breathe"
+              className="group bg-card/60 backdrop-blur-lg hover:bg-card-hover/70 rounded-xl p-5 border border-border hover:border-muted/40 hover:card-shadow transition-colors duration-150 pointer-events-auto animate-breathe"
               aria-label={link.name}
             >
               <div className="flex items-center justify-center w-12 h-12 bg-background rounded-xl group-hover:bg-accent/10 transition-colors">

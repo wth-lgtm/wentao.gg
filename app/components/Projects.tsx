@@ -89,7 +89,7 @@ const itemVariants = {
 function ProjectCard({ project }: { project: Project }) {
   if (project.comingSoon) {
     return (
-      <div className="group block bg-white/5 backdrop-blur-lg rounded-xl overflow-hidden border border-white/10 border-dashed transition-all duration-300 h-full cursor-default pointer-events-auto opacity-70">
+      <div className="group block bg-card/60 backdrop-blur-lg rounded-xl overflow-hidden border border-border border-dashed transition-all duration-300 h-full cursor-default pointer-events-auto opacity-70">
         <div className="relative h-36 sm:h-48 bg-background overflow-hidden">
           <div className="absolute inset-0 bg-gradient-to-br from-muted/15 to-muted/5 flex items-center justify-center">
             <project.icon className="w-10 h-10 sm:w-12 sm:h-12 text-muted/50" />
@@ -124,7 +124,7 @@ function ProjectCard({ project }: { project: Project }) {
   return (
     <Link
       href={project.href}
-      className="group block bg-white/5 backdrop-blur-lg rounded-xl overflow-hidden border border-white/10 hover:border-white/20 hover:card-shadow card-lift transition-all duration-300 h-full pointer-events-auto"
+      className="group block bg-card/60 backdrop-blur-lg rounded-xl overflow-hidden border border-border hover:border-muted/40 hover:card-shadow card-lift transition-all duration-300 h-full pointer-events-auto"
     >
       <div className="relative h-36 sm:h-48 bg-background overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-br from-accent/20 to-accent/5 flex items-center justify-center">
