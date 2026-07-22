@@ -132,13 +132,25 @@ button:active, .btn:active {
   transform: scale(0.98);
 }
 
-/* Card hover lift */
+/* Card hover lift — subtle rise + soft theme-tuned shadow, shared across content cards.
+   Also transitions colors so cards using it can drop `transition-all` cleanly. */
 .card-lift {
-  transition: transform var(--dur-base) var(--ease-entrance), box-shadow var(--dur-base) var(--ease-entrance);
+  transition: transform var(--dur-base) var(--ease-entrance),
+              box-shadow var(--dur-base) var(--ease-entrance),
+              background-color var(--dur-base) var(--ease-entrance),
+              border-color var(--dur-base) var(--ease-entrance);
 }
 
 .card-lift:hover {
   transform: translateY(-4px);
+}
+
+.dark .card-lift:hover {
+  box-shadow: 0 12px 32px -8px rgba(0, 0, 0, 0.45);
+}
+
+.light .card-lift:hover {
+  box-shadow: 0 12px 32px -8px rgba(0, 0, 0, 0.12);
 }
 
 /* Focus ring animation */
