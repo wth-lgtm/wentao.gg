@@ -136,9 +136,6 @@ export default function ProgDash() {
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-green-500/10 border border-green-500/20 mb-4">
             <FileSpreadsheet size={32} className="text-green-500" />
           </div>
-          <h2 className="text-xl sm:text-2xl md:text-3xl font-bold mb-2">
-            ProgDash
-          </h2>
           <p className="text-muted text-sm sm:text-base max-w-md mx-auto">
             Load your powerlifting program from Google Sheets into a clean,
             readable training view.

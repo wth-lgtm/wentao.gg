@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { GitCommit, Code, Github } from "lucide-react";
 
@@ -28,14 +28,11 @@ function formatNumber(num: number): string {
   return num.toString();
 }
 
-// Cache for GitHub API responses (persists across re-renders)
-const apiCache: { data: any; timestamp: number } | null = null;
-const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
-
 export default function SiteStats() {
   const [commitData, setCommitData] = useState<Map<string, number>>(new Map());
   const [stats, setStats] = useState<RepoStats>({ commits: 0, linesOfCode: 0, languages: [] });
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
 
   // Detect mobile on mount
@@ -56,7 +53,14 @@ export default function SiteStats() {
           }),
         ]);
 
-        const commits = commitsRes.ok ? await commitsRes.json() : [];
+        // GitHub's unauthenticated API rate-limits anonymous requests (HTTP 403);
+        // surface that as an honest "unavailable" state instead of fake zeroes.
+        if (!commitsRes.ok) {
+          setError(true);
+          return;
+        }
+
+        const commits = await commitsRes.json();
         const languages = langRes.ok ? await langRes.json() : {};
 
         const countMap = new Map<string, number>();
@@ -82,8 +86,9 @@ export default function SiteStats() {
           linesOfCode: estimatedLines,
           languages: langArray,
         });
-      } catch (error) {
-        console.error("Error fetching data:", error);
+      } catch (err) {
+        console.error("Error fetching data:", err);
+        setError(true);
       } finally {
         setLoading(false);
       }
@@ -146,6 +151,21 @@ export default function SiteStats() {
             <div className="flex items-center justify-center py-12">
               <div className="w-5 h-5 border-2 border-accent border-t-transparent rounded-full animate-spin" />
             </div>
+          ) : error ? (
+            <div className="py-10 text-center">
+              <p className="text-sm text-muted">
+                Live GitHub stats are unavailable right now (the public API rate-limits
+                anonymous requests).
+              </p>
+              <a
+                href="https://github.com/wth-lgtm/wentao.gg"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-2 inline-block text-sm text-accent hover:underline"
+              >
+                Browse the repo on GitHub →
+              </a>
+            </div>
           ) : (
             <>
               {/* Stats Row */}
@@ -161,7 +181,7 @@ export default function SiteStats() {
                     <GitCommit size={18} className="text-accent" />
                   </div>
                   <div>
-                    <div className="text-xl font-bold">{stats.commits}+</div>
+                    <div className="text-xl font-bold">{stats.commits}{stats.commits >= 100 ? "+" : ""}</div>
                     <div className="text-xs text-muted">Commits</div>
                   </div>
                 </motion.div>
@@ -177,7 +197,7 @@ export default function SiteStats() {
                     <Code size={18} className="text-accent" />
                   </div>
                   <div>
-                    <div className="text-xl font-bold">{formatNumber(stats.linesOfCode)}</div>
+                    <div className="text-xl font-bold">~{formatNumber(stats.linesOfCode)}</div>
                     <div className="text-xs text-muted">Lines of code</div>
                   </div>
                 </motion.div>
@@ -189,7 +209,7 @@ export default function SiteStats() {
                   transition={{ delay: 0.3 }}
                   className="col-span-2 sm:col-span-1 flex items-center gap-2 flex-wrap"
                 >
-                  {stats.languages.map((lang, i) => (
+                  {stats.languages.map((lang) => (
                     <span
                       key={lang.name}
                       className="text-xs px-2 py-1 bg-background rounded-full text-muted"
