@@ -34,9 +34,9 @@ export default function Home() {
       <Navigation />
       <main className="pb-20">
         <Hero />
-        <Projects />
         <Experience />
         <Education />
+        <Projects />
         <SiteStats />
         <Connect />
       </main>

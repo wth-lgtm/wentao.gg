@@ -18,7 +18,7 @@ interface Experience {
 
 const experiences: Experience[] = [
   {
-    title: "Software Engineer",
+    title: "Engineering Lead",
     company: "Mercor",
     companyUrl: "https://www.mercor.com/",
     logo: "/images/profile/mercor_logo.png",
