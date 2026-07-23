@@ -209,7 +209,7 @@ function EducationCard({
 
 export default function Education() {
   return (
-    <section id="education" className="py-24 px-6 relative z-20 pointer-events-none">
+    <section id="education" className="py-20 md:py-24 px-6 relative z-20 pointer-events-none">
       <div className="max-w-5xl mx-auto">
         <motion.div
           initial={{ opacity: 0, y: 40 }}

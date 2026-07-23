@@ -175,7 +175,7 @@ export default function SiteStats() {
     `${day.date}: ${day.count} commit${day.count !== 1 ? "s" : ""}`;
 
   return (
-    <section className="py-16 px-6 relative z-20 pointer-events-none">
+    <section className="py-20 md:py-24 px-6 relative z-20 pointer-events-none">
       <div className="max-w-5xl mx-auto">
         <motion.div
           initial={{ opacity: 0, y: 30 }}

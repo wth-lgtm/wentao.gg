@@ -11,19 +11,19 @@ const InteractiveEffects = dynamic(
 );
 
 const Experience = dynamic(() => import("./components/Experience"), {
-  loading: () => <section className="py-24 px-6" />,
+  loading: () => <section className="py-20 md:py-24 px-6" />,
 });
 
 const Education = dynamic(() => import("./components/Education"), {
-  loading: () => <section className="py-24 px-6" />,
+  loading: () => <section className="py-20 md:py-24 px-6" />,
 });
 
 const SiteStats = dynamic(() => import("./components/CommitHeatmap"), {
-  loading: () => <section className="py-16 px-6" />,
+  loading: () => <section className="py-20 md:py-24 px-6" />,
 });
 
 const Connect = dynamic(() => import("./components/Connect"), {
-  loading: () => <section className="py-24 px-6" />,
+  loading: () => <section className="py-20 md:py-24 px-6" />,
 });
 
 export default function Home() {
