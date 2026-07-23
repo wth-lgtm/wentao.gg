@@ -60,6 +60,15 @@ export function proxy(request: NextRequest) {
   const city = rawCity ? decodeURIComponent(rawCity) : "";
   const timezone = request.headers.get("x-vercel-ip-timezone") || "America/New_York";
 
+  // Visitor's own IP + approximate coordinates (Vercel edge headers). Echoed back to
+  // that visitor only (client-side) for the "how do you know that?!" delight moment —
+  // never stored, never exposed to anyone else. x-forwarded-for holds the client first.
+  const fwd = request.headers.get("x-forwarded-for") || "";
+  const rawIp = fwd.split(",")[0].trim() || request.headers.get("x-real-ip") || "";
+  const ip = rawIp.replace(/^::ffff:/, ""); // unwrap IPv4-mapped IPv6
+  const lat = request.headers.get("x-vercel-ip-latitude") || "";
+  const lon = request.headers.get("x-vercel-ip-longitude") || "";
+
   // Calculate local hour based on timezone
   let hour = new Date().getUTCHours();
   try {
@@ -111,6 +120,9 @@ export function proxy(request: NextRequest) {
   const greetingData = JSON.stringify({
     timePeriod,
     location: locationString,
+    ip,
+    lat,
+    lon,
   });
 
   // Set cookie for client to read
