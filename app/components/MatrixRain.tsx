@@ -182,8 +182,8 @@ export default function MatrixRain() {
       aria-hidden
       className="fixed inset-0 z-0 overflow-hidden pointer-events-none"
     >
-      {/* light needs more presence to read on white; dark stays ambient */}
-      <canvas ref={canvasRef} className="block h-full w-full" style={{ opacity: light ? 0.5 : 0.28 }} />
+      {/* light needs a touch more presence to read on white; dark stays ambient */}
+      <canvas ref={canvasRef} className="block h-full w-full" style={{ opacity: light ? 0.4 : 0.28 }} />
     </div>
   );
 }

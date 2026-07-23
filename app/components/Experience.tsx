@@ -127,7 +127,7 @@ function ExperienceCard({
           >
             <div className="flex items-center gap-4 mb-3">
               {experience.logo && (
-                <div className="flex-shrink-0 w-12 h-12 bg-white">
+                <div className="flex-shrink-0 w-12 h-12 bg-white rounded-[18px] overflow-hidden">
                   <Image
                     src={experience.logo}
                     alt={`${experience.company} logo`}

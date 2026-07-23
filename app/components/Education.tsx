@@ -119,7 +119,7 @@ function EducationCard({
         >
           <div className="flex items-center gap-4 mb-4">
             {school.logo && (
-              <div className="flex-shrink-0 w-12 h-12 bg-white">
+              <div className="flex-shrink-0 w-12 h-12 bg-white rounded-[18px] overflow-hidden">
                 <Image
                   src={school.logo}
                   alt={`${school.name} logo`}
