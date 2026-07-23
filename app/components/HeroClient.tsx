@@ -364,10 +364,10 @@ export default function HeroAnimations({ children }: { children: ReactNode }) {
         <div className="min-h-6 flex items-start gap-2">
           {mounted && (
             <>
-              <span className="text-accent/50 text-sm shrink-0">└</span>
+              <span className="text-muted/50 text-sm shrink-0">└</span>
               <ScrambleText
                 text={greetingTarget}
-                className="min-w-0 text-accent text-sm font-medium tracking-wide text-legible break-words"
+                className="min-w-0 text-foreground/75 text-sm font-medium tracking-wide text-legible break-words"
                 scrambleSpeed={20}
                 revealSpeed={15}
               />

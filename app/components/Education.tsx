@@ -218,8 +218,11 @@ export default function Education() {
           transition={{ duration: 0.6 }}
           className="mb-12"
         >
-          <h2 className="text-3xl md:text-4xl font-bold mb-4 tracking-tight heading-legible">Education</h2>
-          <div className="w-16 h-1 bg-accent" />
+          <div className="flex items-center gap-3 mb-3">
+            <span className="font-mono text-xs tracking-[0.25em] text-muted">02</span>
+            <span className="h-px w-12 bg-border" />
+          </div>
+          <h2 className="text-3xl md:text-4xl font-bold tracking-tight heading-legible">Education</h2>
         </motion.div>
 
         <div className="space-y-8 md:space-y-10">
