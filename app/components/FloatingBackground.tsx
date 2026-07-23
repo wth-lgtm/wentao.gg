@@ -343,7 +343,9 @@ function Pile({ count, accent, light }: { count: number; accent: string; light: 
               frustumCulled={false}
             >
               {geomFor(g.key)}
-              <meshPhysicalMaterial roughness={0.42} metalness={0} clearcoat={1} clearcoatRoughness={0.22} envMapIntensity={0.4} />
+              {/* Matte to match the site — no clearcoat gloss; form comes from diffuse shading only. */}
+              <meshStandardMaterial roughness={0.92} metalness={0} />
+
             </instancedMesh>
           </InstancedRigidBodies>
         );
