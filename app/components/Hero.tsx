@@ -39,7 +39,7 @@ export default function Hero() {
 
         {/* Scroll indicator */}
         <div
-          className="absolute bottom-10 left-1/2 -translate-x-1/2 z-20 pointer-events-auto animate-fade-in-up"
+          className="absolute bottom-24 left-1/2 -translate-x-1/2 z-20 pointer-events-auto animate-fade-in-up"
           style={{ animationDelay: "2s", opacity: 0, animationFillMode: "forwards" }}
         >
           <a
