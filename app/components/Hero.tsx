@@ -1,6 +1,7 @@
 import { ArrowDown } from "lucide-react";
 import HeroAnimations from "./HeroClient";
 import MagneticButton from "./MagneticButton";
+import HeroMeta from "./HeroMeta";
 
 export default function Hero() {
   return (
@@ -48,6 +49,16 @@ export default function Hero() {
           >
             <ArrowDown size={24} className="animate-bounce" />
           </a>
+        </div>
+      </div>
+
+      {/* Ambient corner metadata — aligned to the nav marks (max-w-6xl gutter) */}
+      <div
+        className="absolute bottom-8 left-0 right-0 z-20 pointer-events-none animate-fade-in-up"
+        style={{ animationDelay: "1.4s", opacity: 0, animationFillMode: "forwards" }}
+      >
+        <div className="max-w-6xl mx-auto px-6">
+          <HeroMeta />
         </div>
       </div>
     </section>

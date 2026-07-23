@@ -349,25 +349,25 @@ export default function HeroAnimations({ children }: { children: ReactNode }) {
 
   return (
     <>
-      {/* Visitor + Greeting lines — empty before mount, scramble after */}
-      <div className="space-y-1">
+      {/* Visitor + greeting — demoted to a quiet mono "terminal" eyebrow above the name */}
+      <div className="space-y-1 font-mono text-xs tracking-wide">
         <div className="min-h-5">
           {mounted && (
             <ScrambleText
               text={visitorLine}
-              className="block text-muted text-xs font-medium tracking-wide text-legible break-words"
+              className="block text-muted/70 text-legible break-words"
               scrambleSpeed={15}
               revealSpeed={12}
             />
           )}
         </div>
-        <div className="min-h-6 flex items-start gap-2">
+        <div className="min-h-5 flex items-start gap-2">
           {mounted && (
             <>
-              <span className="text-muted/50 text-sm shrink-0">└</span>
+              <span className="text-muted/40 shrink-0">└</span>
               <ScrambleText
                 text={greetingTarget}
-                className="min-w-0 text-foreground/75 text-sm font-medium tracking-wide text-legible break-words"
+                className="min-w-0 text-foreground/70 text-legible break-words"
                 scrambleSpeed={20}
                 revealSpeed={15}
               />
@@ -376,30 +376,30 @@ export default function HeroAnimations({ children }: { children: ReactNode }) {
         </div>
       </div>
 
-      <div className="space-y-4">
-        {/* Static heading passed from server component — always in HTML */}
+      <div className="space-y-3">
+        {/* Static heading passed from server component — always in HTML (the dominant statement) */}
         {children}
 
-        {/* Position — typed after mount */}
-        <div className="min-h-[2rem] md:min-h-[2.5rem]">
+        {/* Persona — the sub-headline (typed after mount), clearly subordinate to the name */}
+        <div className="min-h-[1.75rem] md:min-h-[2.25rem]">
           {mounted && (
-            <span className="block text-xl md:text-3xl font-medium tracking-[-0.01em] text-muted text-legible">
+            <span className="block text-lg md:text-2xl font-medium tracking-[-0.01em] text-foreground/85 text-legible">
               {positionText}
             </span>
           )}
         </div>
 
-        {/* Description with cursor — typed after mount */}
-        <div className="min-h-[1.75rem] md:min-h-[2rem]">
+        {/* Description with cursor — tertiary, quiet */}
+        <div className="min-h-[1.5rem] md:min-h-[1.75rem]">
           {mounted && (
-            <span className="text-base md:text-lg text-muted/80 leading-[1.7] text-legible" style={{ display: "inline" }}>
+            <span className="text-sm md:text-base text-muted leading-relaxed text-legible" style={{ display: "inline" }}>
               {descriptionText}
               <span
                 className={`bg-accent ${isDescriptionComplete && showCursor ? "opacity-100" : "opacity-0"}`}
                 style={{
                   display: "inline-block",
-                  width: "0.6em",
-                  height: "1.1em",
+                  width: "0.55em",
+                  height: "1.05em",
                   marginLeft: "3px",
                   verticalAlign: "text-bottom",
                 }}
