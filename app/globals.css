@@ -161,6 +161,31 @@ button:active, .btn:active {
   transition: outline-offset var(--dur-fast) var(--ease-entrance);
 }
 
+/* Skip-to-content link — off-screen until keyboard-focused, then slides in */
+.skip-link {
+  position: fixed;
+  top: 0.75rem;
+  left: 0.75rem;
+  z-index: 100;
+  padding: 0.6rem 1rem;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 0.5rem;
+  font-weight: 500;
+  font-size: 0.875rem;
+  transform: translateY(-160%);
+  transition: transform var(--dur-fast) var(--ease-entrance);
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+/* Don't paint a focus ring when focus lands on <main> via the skip link */
+main:focus {
+  outline: none;
+}
+
 /* Keep hero copy legible over the animated fluid without dimming the art */
 .hero-legible {
   text-shadow: 0 1px 2px var(--background), 0 0 10px var(--background);
