@@ -2,15 +2,15 @@
 
 import { useEffect, useRef } from "react";
 
-// Original "digital rain" — low-res / CRT feel, in the site's accent blue, confined to
-// the hero. Transparent overlay (trails fade via destination-out) so the fluid shows
-// through; pixelated upscale + scanlines + phosphor glow give the old-screen look.
-// Per-column variable speed + in-place glyph mutation for organic variation.
-// Decorative + reduced-motion aware.
+// Original "digital rain", confined to the hero and tuned to the site (accent blue,
+// crisp — not retro/pixelated). Each column is a CONTINUOUS trail: a bright leading
+// glyph with a solid, gradually-dimming tail of characters that mutate in place —
+// the film's look, redrawn on the site's palette. Transparent overlay so the fluid
+// shows through; masked to fade out toward the hero's bottom. Reduced-motion aware.
 
-// Half-width katakana (the narrow, movie-authentic glyphs) + digits + a few latin/symbols.
+// Half-width katakana (narrow, movie-authentic) + digits + a few latin/symbols.
 const KATAKANA = Array.from({ length: 0xff9d - 0xff66 + 1 }, (_, i) => String.fromCharCode(0xff66 + i)).join("");
-const GLYPHS = KATAKANA + "0123456789" + "ABCDEFGHKLMNПRSTZ" + ":.=*+<>|-";
+const GLYPHS = KATAKANA + "0123456789ABCDEFGHKLMNPRSTUVZ:.=*+<>";
 const randGlyph = () => GLYPHS[(Math.random() * GLYPHS.length) | 0];
 
 function parseColor(v: string): [number, number, number] {
@@ -40,92 +40,104 @@ export default function MatrixRain() {
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const cs = getComputedStyle(document.documentElement);
     const [ar, ag, ab] = parseColor(cs.getPropertyValue("--accent") || "#3b82f6");
-    const HEAD = "rgba(206,224,255,0.95)"; // bright phosphor head
-    const TRAIL = `rgba(${ar},${ag},${ab},0.78)`;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
 
-    const SCALE = 0.5; // half-res backing → pixelated upscale = chunky, low-res glyphs
-    const FONT = 14; // glyph size on the backing
-    const MIN_SPEED = 2.5; // rows/sec — slow
-    const MAX_SPEED = 9; // rows/sec — a bit quicker; per-column randomised for variation
+    const FONT = 16; // CSS px — crisp
+    const F = FONT * dpr; // backing px
+    const MIN_SPEED = 5; // rows/sec
+    const MAX_SPEED = 13;
 
     let cols = 0;
     let rows = 0;
     let y: Float32Array = new Float32Array(0); // head row (float) per column
-    let speed: Float32Array = new Float32Array(0); // rows/sec per column
-    let head: string[] = []; // current head glyph per column (stable until it steps a cell)
+    let speed: Float32Array = new Float32Array(0);
+    let trail: Int16Array = new Int16Array(0); // per-column trail length
+    let glyphs: string[][] = []; // [col][row] — stable, mutated occasionally
     let last = 0;
     let raf = 0;
 
-    const draw = (col: number, row: number, ch: string, color: string, glow: number) => {
-      ctx.shadowColor = `rgb(${ar},${ag},${ab})`;
-      ctx.shadowBlur = glow;
-      ctx.fillStyle = color;
-      ctx.fillText(ch, col * FONT, row * FONT);
+    const fresh = (i: number, startAbove: boolean) => {
+      y[i] = startAbove ? -Math.floor(Math.random() * rows) : -Math.floor(Math.random() * 14) - 2;
+      speed[i] = MIN_SPEED + Math.random() * (MAX_SPEED - MIN_SPEED);
+      trail[i] = 14 + ((Math.random() * 18) | 0);
+      const g: string[] = new Array(rows + 2);
+      for (let r = 0; r < g.length; r++) g[r] = randGlyph();
+      glyphs[i] = g;
     };
 
     const resize = () => {
       const w = wrap.clientWidth;
       const h = wrap.clientHeight;
       if (w === 0 || h === 0) return;
-      canvas.width = Math.max(1, Math.floor(w * SCALE));
-      canvas.height = Math.max(1, Math.floor(h * SCALE));
-      cols = Math.max(1, Math.floor(canvas.width / FONT));
-      rows = Math.ceil(canvas.height / FONT);
+      canvas.width = Math.max(1, Math.floor(w * dpr));
+      canvas.height = Math.max(1, Math.floor(h * dpr));
+      cols = Math.max(1, Math.floor(canvas.width / F));
+      rows = Math.ceil(canvas.height / F) + 2;
       y = new Float32Array(cols);
       speed = new Float32Array(cols);
-      head = new Array(cols);
-      for (let i = 0; i < cols; i++) {
-        y[i] = -Math.random() * rows; // staggered starts
-        speed[i] = MIN_SPEED + Math.random() * (MAX_SPEED - MIN_SPEED);
-        head[i] = randGlyph();
-      }
-      ctx.font = `${FONT}px "JetBrains Mono", ui-monospace, monospace`;
+      trail = new Int16Array(cols);
+      glyphs = new Array(cols);
+      for (let i = 0; i < cols; i++) fresh(i, true);
+      ctx.font = `${F}px "JetBrains Mono", ui-monospace, monospace`;
       ctx.textBaseline = "top";
     };
     resize();
     const ro = new ResizeObserver(resize);
     ro.observe(wrap);
 
+    const renderColumn = (i: number) => {
+      const hRow = Math.floor(y[i]);
+      const L = trail[i];
+      const col = glyphs[i];
+      for (let d = L; d >= 0; d--) {
+        const r = hRow - d;
+        if (r < 0 || r >= rows) continue;
+        const ch = col[r];
+        if (d === 0) {
+          ctx.shadowColor = `rgb(${ar},${ag},${ab})`;
+          ctx.shadowBlur = 7;
+          ctx.fillStyle = "rgba(216,232,255,0.95)"; // bright leading glyph
+        } else {
+          ctx.shadowBlur = 0;
+          const a = Math.pow(1 - d / L, 1.35) * 0.85; // solid trail fading to the tail
+          ctx.fillStyle = `rgba(${ar},${ag},${ab},${a})`;
+        }
+        ctx.fillText(ch, i * F, r * F);
+      }
+    };
+
     const step = (now: number) => {
       const dt = Math.min((now - last) / 1000 || 0.016, 1 / 20);
       last = now;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      ctx.globalCompositeOperation = "destination-out";
-      ctx.fillStyle = "rgba(0,0,0,0.05)"; // gentle fade → longer, softer trails
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.globalCompositeOperation = "source-over";
+      // occasional in-place glyph mutation (flicker), distributed across columns
+      const muts = Math.max(1, (cols * 0.4) | 0);
+      for (let k = 0; k < muts; k++) {
+        const i = (Math.random() * cols) | 0;
+        const g = glyphs[i];
+        if (g) g[(Math.random() * g.length) | 0] = randGlyph();
+      }
 
       for (let i = 0; i < cols; i++) {
-        const prev = Math.floor(y[i]);
+        renderColumn(i);
         y[i] += speed[i] * dt;
-        const row = Math.floor(y[i]);
-        if (row !== prev) head[i] = randGlyph(); // new glyph as the head steps down
-        if (row >= 0) draw(i, row, head[i], HEAD, 8); // bright head, drawn each frame
-
-        // reset past the bottom with a fresh speed + start
-        if (row > rows + 3 && Math.random() > 0.985) {
-          y[i] = -Math.random() * 12;
-          speed[i] = MIN_SPEED + Math.random() * (MAX_SPEED - MIN_SPEED);
-        }
-
-        // in-trail mutation: occasionally re-light a glyph behind the head (flicker)
-        if (Math.random() < 0.04) {
-          const fr = row - 1 - ((Math.random() * 16) | 0);
-          if (fr >= 0) draw(i, fr, randGlyph(), TRAIL, 3);
-        }
+        if (Math.floor(y[i]) - trail[i] > rows) fresh(i, false); // fully off the bottom → recycle
       }
       raf = requestAnimationFrame(step);
     };
 
     if (reduce) {
-      // sparse static frame — no animation
-      ctx.shadowColor = `rgb(${ar},${ag},${ab})`;
-      ctx.shadowBlur = 2;
+      // static, sparse frame — no animation
       for (let i = 0; i < cols; i++) {
-        const n = 2 + ((Math.random() * 4) | 0);
-        for (let k = 0; k < n; k++) {
-          ctx.fillStyle = `rgba(${ar},${ag},${ab},${0.12 + Math.random() * 0.25})`;
-          ctx.fillText(randGlyph(), i * FONT, ((Math.random() * rows) | 0) * FONT);
+        const hRow = (Math.random() * rows) | 0;
+        const L = trail[i];
+        for (let d = L; d >= 0; d--) {
+          const r = hRow - d;
+          if (r < 0 || r >= rows) continue;
+          ctx.shadowBlur = 0;
+          ctx.fillStyle = `rgba(${ar},${ag},${ab},${Math.pow(1 - d / L, 1.4) * 0.5})`;
+          ctx.fillText(glyphs[i][r], i * F, r * F);
         }
       }
     } else {
@@ -149,19 +161,7 @@ export default function MatrixRain() {
         WebkitMaskImage: "linear-gradient(to bottom, black 55%, transparent 92%)",
       }}
     >
-      <canvas
-        ref={canvasRef}
-        className="block h-full w-full"
-        style={{ imageRendering: "pixelated", opacity: 0.7 }}
-      />
-      <div
-        className="absolute inset-0"
-        style={{
-          backgroundImage:
-            "repeating-linear-gradient(to bottom, rgba(0,0,0,0.22), rgba(0,0,0,0.22) 1px, transparent 1px, transparent 3px)",
-          opacity: 0.5,
-        }}
-      />
+      <canvas ref={canvasRef} className="block h-full w-full" style={{ opacity: 0.6 }} />
     </div>
   );
 }
