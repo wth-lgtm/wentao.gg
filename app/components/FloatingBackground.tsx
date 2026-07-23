@@ -114,17 +114,26 @@ function Pile({ count, accent, light }: { count: number; accent: string; light: 
   const dir = useMemo(() => new THREE.Vector3(), []);
 
   const groups = useMemo<Group[]>(() => {
-    // Mix the accent toward a near-black on dark, or a light slate on light, so the pile
-    // reads as blue "lego" on either background instead of going too dark on white.
-    const base = new THREE.Color(light ? "#aeb9d6" : "#18181b");
+    // Level palette per theme. Dark: accent → near-black. Light: WHITE → accent, so the
+    // pile is a bright white-to-blue mix (with genuine white pieces) on the white card.
     const acc = new THREE.Color(accent || "#3b82f6");
-    const shades = [
-      acc.clone().lerp(base, 0.8),
-      acc.clone().lerp(base, 0.55),
-      acc.clone().lerp(base, 0.36),
-      acc.clone().lerp(base, 0.18),
-      acc.clone(),
-    ];
+    const white = new THREE.Color("#ffffff");
+    const dark = new THREE.Color("#18181b");
+    const shades = light
+      ? [
+          white.clone(),
+          acc.clone().lerp(white, 0.7),
+          acc.clone().lerp(white, 0.46),
+          acc.clone().lerp(white, 0.22),
+          acc.clone(),
+        ]
+      : [
+          acc.clone().lerp(dark, 0.8),
+          acc.clone().lerp(dark, 0.55),
+          acc.clone().lerp(dark, 0.36),
+          acc.clone().lerp(dark, 0.18),
+          acc.clone(),
+        ];
     const heights = [0.34, 0.62, 0.96, 1.35, 1.85];
     const gs: Group[] = SHAPE_DEFS.map((d) => ({ key: d.key, collider: d.collider, instances: [], colors: [] }));
     for (let i = 0; i < count; i++) {
