@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { useTheme } from "./ThemeProvider";
 
 // Original "digital rain", spanning the full page and tuned to the site (accent blue,
 // crisp — not retro/pixelated). Each column is a CONTINUOUS trail: a bright leading
@@ -29,6 +30,8 @@ function parseColor(v: string): [number, number, number] {
 }
 
 export default function MatrixRain() {
+  const { resolvedTheme } = useTheme();
+  const light = resolvedTheme === "light";
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -42,6 +45,10 @@ export default function MatrixRain() {
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const cs = getComputedStyle(document.documentElement);
     const [ar, ag, ab] = parseColor(cs.getPropertyValue("--accent") || "#3b82f6");
+    // On dark, the head is the brightest glyph (near-white); on white that vanishes, so
+    // the head becomes the DARKEST/most-saturated blue and the trail fades from there.
+    const headFill = light ? "rgba(23,58,138,0.98)" : "rgba(216,232,255,0.95)";
+    const headShadow = light ? 0 : 2; // glow muddies on white
     const dpr = Math.min(window.devicePixelRatio || 1, 1.5); // capped: full-page fill cost scales with device pixels
 
     const FONT = 18; // CSS px — crisp, a touch larger
@@ -98,8 +105,8 @@ export default function MatrixRain() {
         const ch = col[r];
         if (d === 0) {
           ctx.shadowColor = `rgb(${ar},${ag},${ab})`;
-          ctx.shadowBlur = 2; // tiny glow only — a full per-glyph gaussian is the top 2D cost at full-page scale
-          ctx.fillStyle = "rgba(216,232,255,0.95)"; // bright leading glyph
+          ctx.shadowBlur = headShadow; // tiny glow only (dark); off on light — a full per-glyph gaussian is the top 2D cost
+          ctx.fillStyle = headFill; // leading glyph — bright on dark, saturated-dark on light
         } else {
           ctx.shadowBlur = 0;
           const a = Math.pow(1 - d / L, 1.35) * 0.85; // solid trail fading to the tail
@@ -167,7 +174,7 @@ export default function MatrixRain() {
       ro.disconnect();
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, []);
+  }, [light]);
 
   return (
     <div
@@ -175,7 +182,8 @@ export default function MatrixRain() {
       aria-hidden
       className="fixed inset-0 z-0 overflow-hidden pointer-events-none"
     >
-      <canvas ref={canvasRef} className="block h-full w-full" style={{ opacity: 0.28 }} />
+      {/* light needs more presence to read on white; dark stays ambient */}
+      <canvas ref={canvasRef} className="block h-full w-full" style={{ opacity: light ? 0.5 : 0.28 }} />
     </div>
   );
 }

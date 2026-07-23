@@ -5,6 +5,7 @@ import Hero from "./components/Hero";
 import Projects from "./components/Projects";
 import Footer from "./components/Footer";
 import MatrixRain from "./components/MatrixRain";
+import HeroMeta from "./components/HeroMeta";
 
 // Code-split heavy/below-fold components into separate chunks
 const InteractiveEffects = dynamic(
@@ -36,6 +37,7 @@ export default function Home() {
       <MatrixRain />
       <InteractiveEffects />
       <Navigation />
+      <HeroMeta />
       <main id="main" tabIndex={-1} className="relative pb-20 overflow-x-clip">
         <Hero />
         <Experience />
