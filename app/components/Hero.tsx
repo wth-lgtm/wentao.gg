@@ -16,8 +16,8 @@ export default function Hero() {
         >
           <HeroAnimations>
             {/* LCP element: static heading in server HTML, visible instantly */}
-            <div className="min-h-[3.5rem] md:min-h-[5rem]">
-              <span className="text-5xl md:text-7xl font-bold tracking-[-0.04em] text-foreground text-shimmer">
+            <div className="min-h-[3.5rem] md:min-h-[8rem]">
+              <span className="block font-bold tracking-[-0.045em] leading-[0.92] text-foreground text-shimmer text-[clamp(3rem,12vw,8rem)]">
                 I&apos;m Wentao
               </span>
             </div>

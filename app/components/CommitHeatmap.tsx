@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPoi
 import dynamic from "next/dynamic";
 import { motion, useMotionValue, useSpring, useTransform, useReducedMotion } from "framer-motion";
 import { GitCommit, Code, Github, Flame, Zap } from "lucide-react";
+import { useTheme } from "./ThemeProvider";
 
 // Interactive floating-sphere background — client-only, lazy (three.js off the initial bundle).
 const FloatingBackground = dynamic(() => import("./FloatingBackground"), { ssr: false });
@@ -66,6 +67,7 @@ export default function SiteStats() {
   const [bgVisible, setBgVisible] = useState(false);
   const [accentHex, setAccentHex] = useState("#3b82f6");
   const reduceMotion = useReducedMotion() ?? false;
+  const { resolvedTheme } = useTheme();
 
   // Background canvas: mount/unmount as the card enters/leaves the viewport (frees the
   // 2nd WebGL context offscreen). Callback ref → fires exactly when the node attaches.
@@ -91,9 +93,16 @@ export default function SiteStats() {
     setMounted(true);
     setIsMobile(window.innerWidth < 640);
     setFinePointer(window.matchMedia("(hover: hover) and (pointer: fine)").matches);
-    const a = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim();
-    if (a) setAccentHex(a);
   }, []);
+
+  // Re-read the themed accent whenever the theme flips (light/dark accents differ).
+  useEffect(() => {
+    const readAccent = () => {
+      const a = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim();
+      if (a) setAccentHex(a);
+    };
+    readAccent();
+  }, [resolvedTheme]);
 
   useEffect(() => {
     async function fetchData() {
@@ -193,7 +202,7 @@ export default function SiteStats() {
               className="absolute z-0 overflow-hidden rounded-br-2xl"
               style={{ top: "30%", left: "36%", right: 0, bottom: 0 }}
             >
-              {bgVisible && <FloatingBackground accent={accentHex} />}
+              {bgVisible && <FloatingBackground accent={accentHex} light={resolvedTheme === "light"} />}
             </div>
           )}
 

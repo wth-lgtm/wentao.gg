@@ -91,7 +91,7 @@ interface Group {
   colors: THREE.Color[];
 }
 
-function Pile({ count, accent }: { count: number; accent: string }) {
+function Pile({ count, accent, light }: { count: number; accent: string; light: boolean }) {
   const { viewport, camera, pointer, gl } = useThree();
   const hw = viewport.width / 2;
   const hh = viewport.height / 2;
@@ -114,15 +114,26 @@ function Pile({ count, accent }: { count: number; accent: string }) {
   const dir = useMemo(() => new THREE.Vector3(), []);
 
   const groups = useMemo<Group[]>(() => {
-    const card = new THREE.Color("#18181b");
+    // Level palette per theme. Dark: accent → near-black. Light: WHITE → accent, so the
+    // pile is a bright white-to-blue mix (with genuine white pieces) on the white card.
     const acc = new THREE.Color(accent || "#3b82f6");
-    const shades = [
-      acc.clone().lerp(card, 0.8),
-      acc.clone().lerp(card, 0.55),
-      acc.clone().lerp(card, 0.36),
-      acc.clone().lerp(card, 0.18),
-      acc.clone(),
-    ];
+    const white = new THREE.Color("#ffffff");
+    const dark = new THREE.Color("#18181b");
+    const shades = light
+      ? [
+          white.clone(),
+          acc.clone().lerp(white, 0.7),
+          acc.clone().lerp(white, 0.46),
+          acc.clone().lerp(white, 0.22),
+          acc.clone(),
+        ]
+      : [
+          acc.clone().lerp(dark, 0.8),
+          acc.clone().lerp(dark, 0.55),
+          acc.clone().lerp(dark, 0.36),
+          acc.clone().lerp(dark, 0.18),
+          acc.clone(),
+        ];
     const heights = [0.34, 0.62, 0.96, 1.35, 1.85];
     const gs: Group[] = SHAPE_DEFS.map((d) => ({ key: d.key, collider: d.collider, instances: [], colors: [] }));
     for (let i = 0; i < count; i++) {
@@ -151,7 +162,7 @@ function Pile({ count, accent }: { count: number; accent: string }) {
       });
     }
     return gs.filter((g) => g.instances.length > 0);
-  }, [count, accent, hw, hh]);
+  }, [count, accent, hw, hh, light]);
 
   // One stable { current } holder per group, aligned by index. Plain objects (not
   // useRef) so passing them as `ref` and reading them isn't a ref-access-during-render.
@@ -344,9 +355,11 @@ function Pile({ count, accent }: { count: number; accent: string }) {
 export default function FloatingBackground({
   count = 200,
   accent,
+  light = false,
 }: {
   count?: number;
   accent: string;
+  light?: boolean;
 }) {
   return (
     <Canvas
@@ -365,7 +378,7 @@ export default function FloatingBackground({
       <pointLight position={[-4, 3, -3]} intensity={0.5} color={accent || "#3b82f6"} />
       <Suspense fallback={null}>
         <Physics gravity={[0, -12, 0]} timeStep={1 / 60} interpolate numSolverIterations={12} numInternalPgsIterations={1}>
-          <Pile count={count} accent={accent} />
+          <Pile count={count} accent={accent} light={light} />
         </Physics>
       </Suspense>
     </Canvas>
