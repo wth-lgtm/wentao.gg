@@ -3,7 +3,7 @@
 /* Dark theme (default) */
 :root, .dark {
   --background: #0a0a0b;
-  --foreground: #fafafa;
+  --foreground: #e8e8e2; /* warm off-white — softer than pure #fafafa, reads less "default" */
   --muted: #8b8b94; /* ~5.9:1 on --background — passes WCAG AA for text */
   --accent: #3b82f6;
   --accent-hover: #2563eb;

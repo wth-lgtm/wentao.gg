@@ -127,7 +127,7 @@ function ExperienceCard({
           >
             <div className="flex items-center gap-4 mb-3">
               {experience.logo && (
-                <div className="flex-shrink-0 w-12 h-12 bg-white">
+                <div className="flex-shrink-0 w-12 h-12 bg-white rounded-[18px] overflow-hidden">
                   <Image
                     src={experience.logo}
                     alt={`${experience.company} logo`}
@@ -242,8 +242,11 @@ export default function Experience() {
           transition={{ duration: 0.6 }}
           className="mb-12"
         >
-          <h2 className="text-3xl md:text-4xl font-bold mb-4 tracking-tight heading-legible">Experience</h2>
-          <div className="w-16 h-1 bg-accent" />
+          <div className="flex items-center gap-3 mb-3">
+            <span className="font-mono text-xs tracking-[0.25em] text-muted">01</span>
+            <span className="h-px w-12 bg-border" />
+          </div>
+          <h2 className="text-3xl md:text-4xl font-bold tracking-tight heading-legible">Experience</h2>
         </motion.div>
 
         <div ref={containerRef} className="space-y-8 md:space-y-10">

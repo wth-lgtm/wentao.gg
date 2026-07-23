@@ -32,10 +32,13 @@ export default function Connect() {
           transition={{ duration: 0.6 }}
           className="text-center mb-12"
         >
-          <h2 className="text-3xl md:text-4xl font-bold mb-4 tracking-tight heading-legible">
+          <div className="flex items-center justify-center gap-3 mb-3">
+            <span className="font-mono text-xs tracking-[0.25em] text-muted">04</span>
+            <span className="h-px w-12 bg-border" />
+          </div>
+          <h2 className="text-3xl md:text-4xl font-bold mb-6 tracking-tight heading-legible">
             Let&apos;s Connect
           </h2>
-          <div className="w-16 h-1 bg-accent mx-auto mb-6" />
           <p className="text-muted text-lg max-w-2xl mx-auto text-legible">
             I&apos;m always open to discussing new opportunities, interesting projects,
             or just having a chat about technology. Feel free to reach out!
