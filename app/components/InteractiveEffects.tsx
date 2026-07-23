@@ -46,7 +46,7 @@ export default function InteractiveEffects() {
             // fluid is driven purely by the real cursor (TRIGGER: "hover") — no synthetic
             // ambient strokes.
             IMMEDIATE: true,
-            SPLAT_COUNT: 4,
+            SPLAT_COUNT: 2,
             TRIGGER: "hover",
             SIM_RESOLUTION: simRes,
             DYE_RESOLUTION: dyeRes,
@@ -59,7 +59,7 @@ export default function InteractiveEffects() {
             PRESSURE: 0.8,
             PRESSURE_ITERATIONS: isMobile ? 20 : 24,
             CURL: 15,
-            SPLAT_RADIUS: 0.1,
+            SPLAT_RADIUS: 0.065,
             SPLAT_FORCE: 7500,
             SHADING: !isMobile,
             COLORFUL: true,
