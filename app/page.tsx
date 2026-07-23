@@ -29,10 +29,11 @@ const Connect = dynamic(() => import("./components/Connect"), {
 export default function Home() {
   return (
     <>
+      <a href="#main" className="skip-link">Skip to content</a>
       <ScrollProgress />
       <InteractiveEffects />
       <Navigation />
-      <main className="pb-20">
+      <main id="main" tabIndex={-1} className="pb-20">
         <Hero />
         <Experience />
         <Education />

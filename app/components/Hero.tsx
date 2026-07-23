@@ -5,6 +5,7 @@ export default function Hero() {
   return (
     <section
       id="about"
+      aria-label="Introduction"
       className="min-h-screen flex flex-col justify-center px-6 pt-20"
     >
       <div className="max-w-5xl mx-auto w-full">
