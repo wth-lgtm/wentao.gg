@@ -81,15 +81,17 @@ const containerVariants = {
   },
 };
 
+// Opacity-only: a resting translateY(0) on this wrapper would make it a backdrop root
+// and blank out the glass blur of every card inside.
 const itemVariants = {
-  hidden: { opacity: 0, y: 40 },
-  visible: { opacity: 1, y: 0 },
+  hidden: { opacity: 0 },
+  visible: { opacity: 1 },
 };
 
 function ProjectCard({ project }: { project: Project }) {
   if (project.comingSoon) {
     return (
-      <div className="group block bg-card/60 backdrop-blur-lg rounded-xl overflow-hidden border border-border border-dashed transition-all duration-300 h-full cursor-default pointer-events-auto opacity-70">
+      <div className="group block glass border-dashed transition-all duration-300 h-full cursor-default pointer-events-auto opacity-70">
         <div className="relative h-36 sm:h-48 bg-background overflow-hidden">
           <div className="absolute inset-0 bg-gradient-to-br from-muted/15 to-muted/5 flex items-center justify-center">
             <project.icon className="w-10 h-10 sm:w-12 sm:h-12 text-muted/50" />
@@ -124,7 +126,7 @@ function ProjectCard({ project }: { project: Project }) {
   return (
     <Link
       href={project.href}
-      className="group block bg-card/60 backdrop-blur-lg rounded-xl overflow-hidden border border-border hover:border-muted/40 card-lift h-full pointer-events-auto"
+      className="group block glass card-lift h-full pointer-events-auto hover:border-muted/40"
     >
       <div className="relative h-36 sm:h-48 bg-background overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-br from-accent/20 to-accent/5 flex items-center justify-center">
@@ -223,8 +225,8 @@ function CategorySection({ category, isExpanded, onToggle }: {
               {category.projects.map((project) => (
                 <motion.div
                   key={project.title}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
                   transition={{ duration: 0.3 }}
                 >
                   <ProjectCard project={project} />
@@ -265,7 +267,7 @@ export default function Projects() {
           transition={{ duration: 0.6 }}
           className="mb-12"
         >
-          <h2 className="text-3xl md:text-4xl font-bold mb-4 tracking-tight">Projects</h2>
+          <h2 className="text-3xl md:text-4xl font-bold mb-4 tracking-tight heading-legible">Projects</h2>
           <div className="w-16 h-1 bg-accent" />
         </motion.div>
 

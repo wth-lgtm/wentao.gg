@@ -95,11 +95,7 @@ function EducationCard({
   const scale = useTransform(scrollYProgress, [0, 0.5, 1], [0.95, 1, 1]);
 
   return (
-    <motion.div
-      ref={cardRef}
-      style={{ opacity, x, scale }}
-      className="relative"
-    >
+    <div className="relative">
       <div className="flex items-start gap-6">
         {/* Timeline dot and line */}
         <div className="hidden md:flex flex-col items-center">
@@ -115,8 +111,12 @@ function EducationCard({
           )}
         </div>
 
-        {/* Card content */}
-        <div className="flex-1 bg-card/60 backdrop-blur-lg hover:bg-card-hover rounded-xl p-6 md:p-8 border border-border hover:border-muted/60 card-lift group pointer-events-auto">
+        {/* Card content — scroll entrance on the card ITSELF (no ancestor backdrop root). */}
+        <motion.div
+          ref={cardRef}
+          style={{ opacity, x, scale }}
+          className="flex-1 glass card-lift group pointer-events-auto hover:border-muted/60 p-6 md:p-8"
+        >
           <div className="flex items-center gap-4 mb-4">
             {school.logo && (
               <div className="flex-shrink-0 w-12 h-12 bg-white">
@@ -201,9 +201,9 @@ function EducationCard({
               )}
             </div>
           )}
-        </div>
+        </motion.div>
       </div>
-    </motion.div>
+    </div>
   );
 }
 
@@ -218,7 +218,7 @@ export default function Education() {
           transition={{ duration: 0.6 }}
           className="mb-12"
         >
-          <h2 className="text-3xl md:text-4xl font-bold mb-4 tracking-tight">Education</h2>
+          <h2 className="text-3xl md:text-4xl font-bold mb-4 tracking-tight heading-legible">Education</h2>
           <div className="w-16 h-1 bg-accent" />
         </motion.div>
 
