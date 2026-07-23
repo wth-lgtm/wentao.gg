@@ -1,456 +1,184 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { Menu, X, ChevronDown, Dumbbell, Video, TrendingUp, Folder, FileSpreadsheet } from "lucide-react";
+import { useState, useEffect } from "react";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
+import { X } from "lucide-react";
 import Link from "next/link";
 import ThemeToggle from "./ThemeToggle";
 
-const navItems = [
-  { name: "About", href: "#about" },
-  { name: "Experience", href: "#experience" },
-  { name: "Education", href: "#education" },
-  { name: "Projects", href: "#projects", hasDropdown: true },
-  { name: "Contact", href: "#connect", isButton: true },
+// One index, numbered — the overlay is the whole navigation (mobile + desktop).
+const sections = [
+  { n: "01", name: "About", href: "#about" },
+  { n: "02", name: "Experience", href: "#experience" },
+  { n: "03", name: "Education", href: "#education" },
+  { n: "04", name: "Projects", href: "#projects" },
+  { n: "05", name: "Connect", href: "#connect" },
 ];
 
-interface ProjectItem {
-  name: string;
-  href: string;
-  description: string;
-  icon: React.ElementType;
-  comingSoon?: boolean;
-}
-
-interface ProjectCategory {
-  name: string;
-  icon: React.ElementType;
-  projects: ProjectItem[];
-}
-
-const projectCategories: ProjectCategory[] = [
-  {
-    name: "₿",
-    icon: TrendingUp,
-    projects: [
-      {
-        name: "🐋 Tracker",
-        href: "/projects/hl-whale-tracker",
-        description: "Hyperliquid trader leaderboard",
-        icon: TrendingUp,
-      },
-    ],
-  },
-  {
-    name: "🏋️",
-    icon: Dumbbell,
-    projects: [
-      {
-        name: "PowerOPPS",
-        href: "/projects/poweropps",
-        description: "Powerlifting index calculator",
-        icon: Dumbbell,
-      },
-      {
-        name: "ProgDash",
-        href: "/projects/progdash",
-        description: "Google Sheets program viewer",
-        icon: FileSpreadsheet,
-      },
-      {
-        name: "What's my RPE?",
-        href: "#projects",
-        description: "Velocity-based RPE predictor",
-        icon: Video,
-        comingSoon: true,
-      },
-    ],
-  },
+// Projects fold inline under 04 — no separate dropdown.
+const projects: { name: string; href: string; comingSoon?: boolean }[] = [
+  { name: "🐋 Tracker", href: "/projects/hl-whale-tracker" },
+  { name: "PowerOPPS", href: "/projects/poweropps" },
+  { name: "ProgDash", href: "/projects/progdash" },
+  { name: "What's my RPE?", href: "#projects", comingSoon: true },
 ];
+
+const EASE = [0.16, 1, 0.3, 1] as const;
 
 export default function Navigation() {
-  const [isScrolled, setIsScrolled] = useState(false);
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [isProjectsOpen, setIsProjectsOpen] = useState(false);
-  const [mobileProjectsOpen, setMobileProjectsOpen] = useState(false);
-  const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
-  const [mobileExpandedCategory, setMobileExpandedCategory] = useState<string | null>(null);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [open, setOpen] = useState(false);
+  const [clock, setClock] = useState("");
+  const reduce = useReducedMotion() ?? false;
 
+  // Owner's local time (SF) as ambient metadata — refreshed each half-minute.
   useEffect(() => {
-    const handleScroll = () => {
-      setIsScrolled(window.scrollY > 50);
-    };
-    window.addEventListener("scroll", handleScroll);
-    return () => window.removeEventListener("scroll", handleScroll);
+    const tick = () =>
+      setClock(
+        new Date().toLocaleTimeString("en-US", {
+          timeZone: "America/Los_Angeles",
+          hour: "numeric",
+          minute: "2-digit",
+        })
+      );
+    tick();
+    const id = setInterval(tick, 30000);
+    return () => clearInterval(id);
   }, []);
 
-  // Close dropdown when clicking outside
+  // Body scroll-lock + Escape to close while the overlay is open.
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsProjectsOpen(false);
-        setExpandedCategory(null);
-      }
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("keydown", onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
     };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  const handleMouseEnter = () => {
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    setIsProjectsOpen(true);
-  };
-
-  const handleMouseLeave = () => {
-    timeoutRef.current = setTimeout(() => {
-      setIsProjectsOpen(false);
-      setExpandedCategory(null);
-    }, 150);
-  };
-
-  const toggleCategory = (categoryName: string) => {
-    setExpandedCategory(expandedCategory === categoryName ? null : categoryName);
-  };
+  }, [open]);
 
   return (
     <>
-      <motion.nav
-        initial={{ y: -100 }}
-        animate={{ y: 0 }}
-        transition={{ duration: 0.5, ease: "easeOut" }}
-        className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
-          isScrolled
-            ? "bg-background/80 backdrop-blur-lg border-b border-border"
-            : "bg-transparent"
-        }`}
-      >
-        <div className="max-w-5xl mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <motion.a
-              href="#"
-              className="text-xl font-semibold tracking-tight"
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-            >
-              W.
-            </motion.a>
-
-            {/* Desktop Navigation */}
-            <div className="hidden md:flex items-center gap-6">
-              {navItems.map((item, index) => (
-                item.hasDropdown ? (
-                  <div
-                    key={item.name}
-                    ref={dropdownRef}
-                    className="relative"
-                    onMouseEnter={handleMouseEnter}
-                    onMouseLeave={handleMouseLeave}
-                  >
-                    <motion.button
-                      className="flex items-center gap-1 text-sm text-muted hover:text-foreground transition-colors"
-                      initial={{ opacity: 0, y: -20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: index * 0.1 }}
-                      onClick={() => setIsProjectsOpen(!isProjectsOpen)}
-                    >
-                      {item.name}
-                      <ChevronDown
-                        size={14}
-                        className={`transition-transform duration-200 ${isProjectsOpen ? "rotate-180" : ""}`}
-                      />
-                    </motion.button>
-
-                    <AnimatePresence>
-                      {isProjectsOpen && (
-                        <motion.div
-                          initial={{ opacity: 0, y: 8, scale: 0.96 }}
-                          animate={{ opacity: 1, y: 0, scale: 1 }}
-                          exit={{ opacity: 0, y: 8, scale: 0.96 }}
-                          transition={{ duration: 0.15 }}
-                          className="absolute top-full left-1/2 -translate-x-1/2 mt-2 w-72 bg-card border border-border rounded-xl shadow-lg overflow-hidden"
-                        >
-                          <div className="p-2">
-                            <a
-                              href={item.href}
-                              className="block px-3 py-2 text-xs text-muted hover:text-foreground transition-colors"
-                              onClick={() => setIsProjectsOpen(false)}
-                            >
-                              View All Projects
-                            </a>
-                            <div className="h-px bg-border my-1" />
-
-                            {/* Categories with inline expansion */}
-                            {projectCategories.map((category) => (
-                              <div key={category.name}>
-                                <button
-                                  onClick={() => toggleCategory(category.name)}
-                                  className="w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg hover:bg-background transition-colors group"
-                                >
-                                  <div className="flex items-center gap-3">
-                                    <div className="p-1.5 bg-accent/10 rounded-md group-hover:bg-accent/20 transition-colors">
-                                      <Folder size={14} className="text-accent" />
-                                    </div>
-                                    <span className="text-sm font-medium text-foreground">{category.name}</span>
-                                  </div>
-                                  <ChevronDown
-                                    size={14}
-                                    className={`text-muted transition-transform duration-200 ${
-                                      expandedCategory === category.name ? "rotate-180" : ""
-                                    }`}
-                                  />
-                                </button>
-
-                                {/* Expanded projects */}
-                                <AnimatePresence>
-                                  {expandedCategory === category.name && (
-                                    <motion.div
-                                      initial={{ opacity: 0, height: 0 }}
-                                      animate={{ opacity: 1, height: "auto" }}
-                                      exit={{ opacity: 0, height: 0 }}
-                                      transition={{ duration: 0.2 }}
-                                      className="overflow-hidden"
-                                    >
-                                      <div className="pl-4 pb-1">
-                                        {category.projects.map((project) => (
-                                          project.comingSoon ? (
-                                            <div
-                                              key={project.name}
-                                              className="flex items-center gap-3 px-3 py-2.5 rounded-lg opacity-50 cursor-default"
-                                            >
-                                              <div className="p-1.5 bg-muted/10 rounded-md">
-                                                <project.icon size={14} className="text-muted" />
-                                              </div>
-                                              <div>
-                                                <div className="text-sm font-medium text-muted">{project.name}</div>
-                                                <div className="text-xs text-muted">{project.description}</div>
-                                              </div>
-                                            </div>
-                                          ) : (
-                                            <Link
-                                              key={project.name}
-                                              href={project.href}
-                                              className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-background transition-colors group"
-                                              onClick={() => {
-                                                setIsProjectsOpen(false);
-                                                setExpandedCategory(null);
-                                              }}
-                                            >
-                                              <div className="p-1.5 bg-accent/10 rounded-md group-hover:bg-accent/20 transition-colors">
-                                                <project.icon size={14} className="text-accent" />
-                                              </div>
-                                              <div>
-                                                <div className="text-sm font-medium text-foreground">{project.name}</div>
-                                                <div className="text-xs text-muted">{project.description}</div>
-                                              </div>
-                                            </Link>
-                                          )
-                                        ))}
-                                      </div>
-                                    </motion.div>
-                                  )}
-                                </AnimatePresence>
-                              </div>
-                            ))}
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-                ) : item.isButton ? (
-                  <motion.a
-                    key={item.name}
-                    href={item.href}
-                    className="text-sm font-medium px-4 py-2 bg-accent hover:bg-accent-hover text-white rounded-lg transition-colors"
-                    initial={{ opacity: 0, y: -20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: index * 0.1 }}
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                  >
-                    {item.name}
-                  </motion.a>
-                ) : (
-                  <motion.a
-                    key={item.name}
-                    href={item.href}
-                    className="text-sm text-muted hover:text-foreground transition-colors"
-                    initial={{ opacity: 0, y: -20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: index * 0.1 }}
-                    whileHover={{ y: -2 }}
-                  >
-                    {item.name}
-                  </motion.a>
-                )
-              ))}
-              <ThemeToggle />
-            </div>
-
-            {/* Mobile: Theme Toggle + Menu Button */}
-            <div className="md:hidden flex items-center gap-2">
-              <ThemeToggle />
-              <button
-                className="p-2 text-muted hover:text-foreground transition-colors"
-                onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-              >
-                {isMobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
-              </button>
-            </div>
-          </div>
-        </div>
-      </motion.nav>
-
-      {/* Mobile Menu */}
-      <AnimatePresence>
-        {isMobileMenuOpen && (
-          <motion.div
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            className="fixed inset-0 z-40 bg-background/95 backdrop-blur-lg md:hidden overflow-y-auto"
+      {/* Persistent split-corner marks — no bar, no plate. Wrapper is click-through so the
+          fluid still gets cursor events between the two marks; the marks themselves are not. */}
+      <div className="fixed top-0 left-0 right-0 z-50 pointer-events-none">
+        <div className="max-w-6xl mx-auto px-6 py-5 flex items-center justify-between">
+          <a
+            href="#"
+            aria-label="Back to top"
+            className="pointer-events-auto text-xl font-semibold tracking-tight text-foreground text-legible"
           >
-            <div className="flex flex-col items-center justify-center min-h-full py-20 gap-6">
-              {navItems.map((item, index) => (
-                item.hasDropdown ? (
-                  <div key={item.name} className="flex flex-col items-center w-full max-w-sm px-6">
-                    <motion.button
-                      className="flex items-center gap-2 text-2xl font-medium text-muted hover:text-foreground transition-colors"
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: index * 0.1 }}
-                      onClick={() => setMobileProjectsOpen(!mobileProjectsOpen)}
+            W.
+          </a>
+
+          <button
+            onClick={() => setOpen(true)}
+            aria-label="Open menu"
+            aria-expanded={open}
+            className="pointer-events-auto group flex items-center gap-2.5 text-legible"
+          >
+            <span className="font-mono text-xs tracking-[0.25em] text-muted group-hover:text-foreground transition-colors">
+              INDEX
+            </span>
+            {/* staggered rule mark → aligns on hover */}
+            <span className="flex flex-col items-end gap-[4px] w-5">
+              <span className="h-px w-5 bg-muted group-hover:bg-foreground transition-all duration-300" />
+              <span className="h-px w-3 bg-muted group-hover:w-5 group-hover:bg-foreground transition-all duration-300" />
+            </span>
+          </button>
+        </div>
+      </div>
+
+      {/* Full-viewport overlay = the entire menu. Frosted over the live fluid + rain. */}
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Site menu"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: reduce ? 0 : 0.35, ease: EASE }}
+            className="fixed inset-0 z-[60] bg-background/75 backdrop-blur-2xl"
+          >
+            <div className="relative z-10 flex min-h-full flex-col max-w-6xl mx-auto px-6 py-5">
+              {/* top row mirrors the persistent marks */}
+              <div className="flex items-center justify-between">
+                <a
+                  href="#"
+                  onClick={() => setOpen(false)}
+                  className="text-xl font-semibold tracking-tight text-foreground"
+                >
+                  W.
+                </a>
+                <button
+                  onClick={() => setOpen(false)}
+                  aria-label="Close menu"
+                  className="group flex items-center gap-2.5"
+                >
+                  <span className="font-mono text-xs tracking-[0.25em] text-muted group-hover:text-foreground transition-colors">
+                    CLOSE
+                  </span>
+                  <X size={18} className="text-muted group-hover:text-foreground transition-colors" />
+                </button>
+              </div>
+
+              {/* numbered index */}
+              <nav className="flex flex-1 flex-col justify-center gap-1.5 md:gap-3 py-16">
+                {sections.map((s, i) => (
+                  <motion.div
+                    key={s.name}
+                    initial={reduce ? false : { opacity: 0, y: 24 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: reduce ? 0 : 0.06 + i * 0.05, duration: 0.5, ease: EASE }}
+                  >
+                    <a
+                      href={s.href}
+                      onClick={() => setOpen(false)}
+                      className="group flex items-baseline gap-4 md:gap-6 w-fit"
                     >
-                      {item.name}
-                      <ChevronDown
-                        size={20}
-                        className={`transition-transform duration-200 ${mobileProjectsOpen ? "rotate-180" : ""}`}
-                      />
-                    </motion.button>
+                      <span className="font-mono text-xs md:text-sm text-muted tabular-nums pt-1">{s.n}</span>
+                      <span className="text-4xl md:text-6xl font-bold tracking-tight text-foreground/70 group-hover:text-foreground transition-colors duration-300">
+                        {s.name}
+                      </span>
+                    </a>
 
-                    <AnimatePresence>
-                      {mobileProjectsOpen && (
-                        <motion.div
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: "auto" }}
-                          exit={{ opacity: 0, height: 0 }}
-                          transition={{ duration: 0.2 }}
-                          className="mt-4 flex flex-col items-center gap-4 w-full"
-                        >
-                          <a
-                            href={item.href}
-                            className="text-sm text-muted hover:text-foreground transition-colors"
-                            onClick={() => {
-                              setMobileProjectsOpen(false);
-                              setIsMobileMenuOpen(false);
-                            }}
-                          >
-                            View All Projects
-                          </a>
+                    {s.name === "Projects" && (
+                      <div className="pl-11 md:pl-16 mt-2 flex flex-wrap items-center gap-x-5 gap-y-1.5">
+                        {projects.map((p) =>
+                          p.comingSoon ? (
+                            <span key={p.name} className="text-sm text-muted/50">
+                              {p.name} <span className="text-[10px] uppercase tracking-wider">soon</span>
+                            </span>
+                          ) : (
+                            <Link
+                              key={p.name}
+                              href={p.href}
+                              onClick={() => setOpen(false)}
+                              className="text-sm text-muted hover:text-foreground transition-colors"
+                            >
+                              {p.name}
+                            </Link>
+                          )
+                        )}
+                      </div>
+                    )}
+                  </motion.div>
+                ))}
+              </nav>
 
-                          {/* Mobile Categories */}
-                          {projectCategories.map((category) => (
-                            <div key={category.name} className="w-full">
-                              <button
-                                className="w-full flex items-center justify-between px-4 py-3 bg-card rounded-xl border border-border"
-                                onClick={() => setMobileExpandedCategory(
-                                  mobileExpandedCategory === category.name ? null : category.name
-                                )}
-                              >
-                                <div className="flex items-center gap-3">
-                                  <div className="p-2 bg-accent/10 rounded-lg">
-                                    <Folder size={18} className="text-accent" />
-                                  </div>
-                                  <span className="font-medium text-foreground">{category.name}</span>
-                                </div>
-                                <ChevronDown
-                                  size={18}
-                                  className={`text-muted transition-transform duration-200 ${
-                                    mobileExpandedCategory === category.name ? "rotate-180" : ""
-                                  }`}
-                                />
-                              </button>
-
-                              <AnimatePresence>
-                                {mobileExpandedCategory === category.name && (
-                                  <motion.div
-                                    initial={{ opacity: 0, height: 0 }}
-                                    animate={{ opacity: 1, height: "auto" }}
-                                    exit={{ opacity: 0, height: 0 }}
-                                    transition={{ duration: 0.2 }}
-                                    className="mt-2 space-y-2 pl-4"
-                                  >
-                                    {category.projects.map((project) => (
-                                      project.comingSoon ? (
-                                        <div
-                                          key={project.name}
-                                          className="flex items-center gap-3 px-4 py-3 bg-card/50 rounded-xl border border-border opacity-50"
-                                        >
-                                          <div className="p-2 bg-muted/10 rounded-lg">
-                                            <project.icon size={18} className="text-muted" />
-                                          </div>
-                                          <div>
-                                            <div className="font-medium text-muted">{project.name}</div>
-                                            <div className="text-xs text-muted">{project.description}</div>
-                                          </div>
-                                        </div>
-                                      ) : (
-                                        <Link
-                                          key={project.name}
-                                          href={project.href}
-                                          className="flex items-center gap-3 px-4 py-3 bg-card rounded-xl border border-border"
-                                          onClick={() => {
-                                            setMobileProjectsOpen(false);
-                                            setMobileExpandedCategory(null);
-                                            setIsMobileMenuOpen(false);
-                                          }}
-                                        >
-                                          <div className="p-2 bg-accent/10 rounded-lg">
-                                            <project.icon size={18} className="text-accent" />
-                                          </div>
-                                          <div>
-                                            <div className="font-medium text-foreground">{project.name}</div>
-                                            <div className="text-xs text-muted">{project.description}</div>
-                                          </div>
-                                        </Link>
-                                      )
-                                    ))}
-                                  </motion.div>
-                                )}
-                              </AnimatePresence>
-                            </div>
-                          ))}
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-                ) : item.isButton ? (
-                  <motion.a
-                    key={item.name}
-                    href={item.href}
-                    className="text-xl font-medium px-6 py-3 bg-accent hover:bg-accent-hover text-white rounded-xl transition-colors"
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: index * 0.1 }}
-                    onClick={() => setIsMobileMenuOpen(false)}
-                  >
-                    {item.name}
-                  </motion.a>
-                ) : (
-                  <motion.a
-                    key={item.name}
-                    href={item.href}
-                    className="text-2xl font-medium text-muted hover:text-foreground transition-colors"
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: index * 0.1 }}
-                    onClick={() => setIsMobileMenuOpen(false)}
-                  >
-                    {item.name}
-                  </motion.a>
-                )
-              ))}
+              {/* footer metadata */}
+              <div className="flex items-center justify-between font-mono text-xs text-muted">
+                <a href="mailto:me@wentao.gg" className="hover:text-foreground transition-colors">
+                  me@wentao.gg
+                </a>
+                <div className="flex items-center gap-4">
+                  <ThemeToggle />
+                  <span className="tabular-nums">SF {clock}</span>
+                </div>
+              </div>
             </div>
           </motion.div>
         )}

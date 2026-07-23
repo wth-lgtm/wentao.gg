@@ -36,7 +36,7 @@ export default function Home() {
       <MatrixRain />
       <InteractiveEffects />
       <Navigation />
-      <main id="main" tabIndex={-1} className="pb-20 overflow-x-clip">
+      <main id="main" tabIndex={-1} className="relative pb-20 overflow-x-clip">
         <Hero />
         <Experience />
         <Education />
