@@ -131,7 +131,7 @@ function EducationCard({
             )}
             <h3 className="text-xl md:text-2xl font-semibold text-foreground group-hover:text-accent transition-colors">
               {school.url ? (
-                <a href={school.url} target="_blank" rel="noopener noreferrer" className="transition-all duration-300 hover:text-accent hover:drop-shadow-[0_0_8px_rgba(59,130,246,0.6)]">
+                <a href={school.url} target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-accent">
                   {school.name}
                 </a>
               ) : (
@@ -149,7 +149,7 @@ function EducationCard({
                 <p className="font-medium mb-2">
                   <span className="text-accent">{degree.degreeType}</span>
                   <span className="text-foreground"> in {degree.fieldLink ? (
-                    <a href={degree.fieldLink} target="_blank" rel="noopener noreferrer" className="transition-all duration-300 hover:text-accent hover:drop-shadow-[0_0_8px_rgba(59,130,246,0.6)]">
+                    <a href={degree.fieldLink} target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-accent">
                       {degree.field}
                     </a>
                   ) : (
@@ -162,7 +162,7 @@ function EducationCard({
                     {degree.period}
                   </span>
                   {degree.locationLink ? (
-                    <a href={degree.locationLink} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 transition-all duration-300 hover:text-accent hover:drop-shadow-[0_0_8px_rgba(59,130,246,0.6)]">
+                    <a href={degree.locationLink} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 transition-colors hover:text-accent">
                       <MapPin size={14} className="text-muted" />
                       {degree.location}
                     </a>

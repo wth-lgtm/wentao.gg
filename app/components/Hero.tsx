@@ -1,5 +1,6 @@
 import { ArrowDown } from "lucide-react";
 import HeroAnimations from "./HeroClient";
+import MagneticButton from "./MagneticButton";
 
 export default function Hero() {
   return (
@@ -22,17 +23,17 @@ export default function Hero() {
             </div>
           </HeroAnimations>
 
-          {/* CTA Button — CSS animation, no JS needed */}
+          {/* Primary CTA — subtle magnetic hover (reduced-motion safe) */}
           <div
             className="flex gap-4 pt-4 animate-fade-in-up"
             style={{ animationDelay: "0.8s", opacity: 0, animationFillMode: "forwards" }}
           >
-            <a
+            <MagneticButton
               href="#connect"
-              className="px-6 py-3 bg-accent hover:bg-accent-hover text-white font-medium rounded-lg transition-colors pointer-events-auto"
+              className="px-6 py-3 bg-accent hover:bg-accent-hover text-white font-medium rounded-lg transition-colors pointer-events-auto inline-block"
             >
               Get in touch
-            </a>
+            </MagneticButton>
           </div>
         </div>
 
