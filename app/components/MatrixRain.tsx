@@ -2,11 +2,13 @@
 
 import { useEffect, useRef } from "react";
 
-// Original "digital rain", confined to the hero and tuned to the site (accent blue,
+// Original "digital rain", spanning the full page and tuned to the site (accent blue,
 // crisp — not retro/pixelated). Each column is a CONTINUOUS trail: a bright leading
 // glyph with a solid, gradually-dimming tail of characters that mutate in place —
-// the film's look, redrawn on the site's palette. Transparent overlay so the fluid
-// shows through; masked to fade out toward the hero's bottom. Reduced-motion aware.
+// the film's look, redrawn on the site's palette. Sits at the very back (z-0) as a
+// fixed layer so the fluid (z-10) and the liquid-glass cards (z-20) both read over it.
+// Kept ambient (low opacity), throttled to ~30fps, and paused when the tab is hidden.
+// Reduced-motion aware.
 
 // Half-width katakana (narrow, movie-authentic) + digits + a few latin/symbols.
 const KATAKANA = Array.from({ length: 0xff9d - 0xff66 + 1 }, (_, i) => String.fromCharCode(0xff66 + i)).join("");
@@ -40,12 +42,13 @@ export default function MatrixRain() {
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const cs = getComputedStyle(document.documentElement);
     const [ar, ag, ab] = parseColor(cs.getPropertyValue("--accent") || "#3b82f6");
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.5); // capped: full-page fill cost scales with device pixels
 
-    const FONT = 16; // CSS px — crisp
+    const FONT = 18; // CSS px — crisp, a touch larger
     const F = FONT * dpr; // backing px
-    const MIN_SPEED = 5; // rows/sec
-    const MAX_SPEED = 13;
+    const MIN_SPEED = 3.5; // rows/sec — gentle drift
+    const MAX_SPEED = 9;
+    const FRAME_MS = 1000 / 30; // throttle to ~30fps — reads identically, halves the work
 
     let cols = 0;
     let rows = 0;
@@ -53,7 +56,7 @@ export default function MatrixRain() {
     let speed: Float32Array = new Float32Array(0);
     let trail: Int16Array = new Int16Array(0); // per-column trail length
     let glyphs: string[][] = []; // [col][row] — stable, mutated occasionally
-    let last = 0;
+    let lastDraw = 0;
     let raf = 0;
 
     const fresh = (i: number, startAbove: boolean) => {
@@ -95,7 +98,7 @@ export default function MatrixRain() {
         const ch = col[r];
         if (d === 0) {
           ctx.shadowColor = `rgb(${ar},${ag},${ab})`;
-          ctx.shadowBlur = 7;
+          ctx.shadowBlur = 2; // tiny glow only — a full per-glyph gaussian is the top 2D cost at full-page scale
           ctx.fillStyle = "rgba(216,232,255,0.95)"; // bright leading glyph
         } else {
           ctx.shadowBlur = 0;
@@ -107,8 +110,11 @@ export default function MatrixRain() {
     };
 
     const step = (now: number) => {
-      const dt = Math.min((now - last) / 1000 || 0.016, 1 / 20);
-      last = now;
+      raf = requestAnimationFrame(step);
+      const elapsed = now - lastDraw;
+      if (elapsed < FRAME_MS) return; // ~30fps gate
+      const dt = Math.min(elapsed / 1000 || 0.016, 1 / 20);
+      lastDraw = now;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       // occasional in-place glyph mutation (flicker), distributed across columns
@@ -124,7 +130,6 @@ export default function MatrixRain() {
         y[i] += speed[i] * dt;
         if (Math.floor(y[i]) - trail[i] > rows) fresh(i, false); // fully off the bottom → recycle
       }
-      raf = requestAnimationFrame(step);
     };
 
     if (reduce) {
@@ -141,13 +146,26 @@ export default function MatrixRain() {
         }
       }
     } else {
-      last = performance.now();
+      lastDraw = performance.now();
       raf = requestAnimationFrame(step);
     }
+
+    // Pause the loop while the tab is hidden — a full-page fixed rain would otherwise
+    // keep animating (and forcing every glass card's backdrop to re-blur) unseen.
+    const onVisibility = () => {
+      if (reduce) return;
+      cancelAnimationFrame(raf);
+      if (!document.hidden) {
+        lastDraw = performance.now();
+        raf = requestAnimationFrame(step);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
 
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, []);
 
@@ -155,13 +173,9 @@ export default function MatrixRain() {
     <div
       ref={wrapRef}
       aria-hidden
-      className="absolute inset-0 z-[11] overflow-hidden pointer-events-none"
-      style={{
-        maskImage: "linear-gradient(to bottom, black 55%, transparent 92%)",
-        WebkitMaskImage: "linear-gradient(to bottom, black 55%, transparent 92%)",
-      }}
+      className="fixed inset-0 z-0 overflow-hidden pointer-events-none"
     >
-      <canvas ref={canvasRef} className="block h-full w-full" style={{ opacity: 0.6 }} />
+      <canvas ref={canvasRef} className="block h-full w-full" style={{ opacity: 0.28 }} />
     </div>
   );
 }

@@ -97,11 +97,7 @@ function ExperienceCard({
   const scale = useTransform(scrollYProgress, [0, 0.5, 1], [0.95, 1, 1]);
 
   return (
-    <motion.div
-      ref={cardRef}
-      style={{ opacity, x, scale }}
-      className="relative"
-    >
+    <div className="relative">
       <div className="flex items-start gap-6">
         {/* Timeline dot and line */}
         <div className="hidden md:flex flex-col items-center">
@@ -117,8 +113,13 @@ function ExperienceCard({
           )}
         </div>
 
-        {/* Card content */}
-        <div className="flex-1 bg-card/60 backdrop-blur-lg hover:bg-card-hover rounded-xl border border-border hover:border-muted/60 card-lift group pointer-events-auto overflow-hidden">
+        {/* Card content — the scroll-driven entrance lives on the card ITSELF so no
+            ancestor becomes a backdrop root that would blank out the glass blur. */}
+        <motion.div
+          ref={cardRef}
+          style={{ opacity, x, scale }}
+          className="flex-1 glass card-lift group pointer-events-auto hover:border-muted/60"
+        >
           {/* Clickable header */}
           <button
             onClick={onToggle}
@@ -207,9 +208,9 @@ function ExperienceCard({
               </motion.div>
             )}
           </AnimatePresence>
-        </div>
+        </motion.div>
       </div>
-    </motion.div>
+    </div>
   );
 }
 
@@ -241,7 +242,7 @@ export default function Experience() {
           transition={{ duration: 0.6 }}
           className="mb-12"
         >
-          <h2 className="text-3xl md:text-4xl font-bold mb-4 tracking-tight">Experience</h2>
+          <h2 className="text-3xl md:text-4xl font-bold mb-4 tracking-tight heading-legible">Experience</h2>
           <div className="w-16 h-1 bg-accent" />
         </motion.div>
 

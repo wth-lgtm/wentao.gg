@@ -10,6 +10,11 @@
   --card: #18181b;
   --card-hover: #212124; /* distinct rung: bg < card < card-hover < border */
   --border: #2e2e33;
+
+  /* Flat matte glass (dark). Low-alpha translucent tint so the matrix rain + fluid
+     read THROUGH each card, only blurred — no gloss, sheen, or float shadow. */
+  --glass-tint: color-mix(in oklab, var(--card) 24%, transparent);
+  --glass-edge: rgba(255, 255, 255, 0.08); /* subtle hairline rim */
 }
 
 /* Light theme */
@@ -22,6 +27,10 @@
   --card: #f4f4f5;
   --card-hover: #ececee; /* distinct rung: bg > card > card-hover > border */
   --border: #dcdce0;
+
+  /* Flat matte glass (light) — glass over white needs a little more fill. */
+  --glass-tint: color-mix(in oklab, var(--card) 40%, transparent);
+  --glass-edge: rgba(0, 0, 0, 0.07);
 }
 
 /* Motion system — one easing + duration vocabulary so effects feel composed */
@@ -52,6 +61,13 @@
 
 html {
   scroll-behavior: smooth;
+}
+
+/* Only ever scroll vertically — no left/right swipe on phones even if a scroll-driven
+   transform or wide element briefly extends past the viewport edge. */
+html, body {
+  overflow-x: hidden;
+  max-width: 100%;
 }
 
 body {
@@ -186,10 +202,11 @@ main:focus {
   outline: none;
 }
 
-/* Keep hero copy legible over the animated fluid + matrix rain without dimming the art.
+/* Keep copy legible over the animated fluid + matrix rain without dimming the art.
    Stacked theme-aware halos "push back" the busy background right around the glyphs so
-   the text pops — no card needed. */
-.hero-legible {
+   the text pops — no card needed. Used for any text that sits directly on the page
+   background (hero lines, section headings, standalone paragraphs). */
+.text-legible {
   text-shadow:
     0 0 3px var(--background),
     0 0 7px var(--background),
@@ -197,6 +214,65 @@ main:focus {
     0 0 24px var(--background),
     0 1px 2px var(--background);
 }
+
+/* Section headings sit on the raw background over the rain — give them a slightly
+   softer halo than the hero (larger type needs less spread to stay crisp). */
+.heading-legible {
+  text-shadow:
+    0 0 4px var(--background),
+    0 0 10px var(--background),
+    0 0 20px var(--background);
+}
+
+/* ===== FLAT MATTE GLASS CARDS =====
+   Frosted panels, one shared material so every card (Experience, Education, Projects,
+   GitHub heatmap, Connect) reads identically. The fixed rain (z-0) + fluid (z-10)
+   canvases paint behind the z-20 content, so a translucent card's backdrop-filter
+   blurs them — automatically, and only within the card's own box. Matte: flat tint,
+   hairline border, NO sheen / specular highlight / float shadow. In @layer components
+   so per-card Tailwind utilities (hover:border-*, radius overrides) still win. */
+@layer components {
+  .glass {
+    position: relative;
+    isolation: isolate; /* scopes descendants; does NOT block this card's own backdrop-filter */
+    overflow: hidden;
+    border-radius: 18px;
+    border: 1px solid var(--glass-edge);
+    background: var(--glass-tint); /* flat, even translucent fill — no gradient sheen */
+  }
+
+  /* saturate keeps the blurred rain from going grey; kept modest for a matte (not
+     glossy) read. Only where supported (raw CSS must emit both prefixes). */
+  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .glass {
+      -webkit-backdrop-filter: blur(16px) saturate(150%);
+              backdrop-filter: blur(16px) saturate(150%);
+    }
+  }
+
+  /* No backdrop-filter (old Safari/Firefox, in-app webviews) → go near-opaque so
+     text over the moving rain stays legible. */
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .dark  .glass { background: color-mix(in oklab, var(--card) 92%, black); }
+    .light .glass { background: color-mix(in oklab, var(--card) 94%, white); }
+  }
+
+  /* Mobile: backdrop-filter over two live canvases is the worst-case GPU path — drop
+     the blur and go near-opaque (pairs with the rain being cheap on small screens). */
+  @media (max-width: 768px) {
+    .glass {
+      -webkit-backdrop-filter: none;
+              backdrop-filter: none;
+    }
+    .dark  .glass { background: color-mix(in oklab, var(--card) 90%, transparent); }
+    .light .glass { background: color-mix(in oklab, var(--card) 92%, transparent); }
+  }
+}
+
+/* Matte hover: brighten the hairline border + a whisper of shadow for grounding —
+   deliberately no glossy/deep drop shadow, so cards stay flat. */
+.dark .glass.card-lift:hover  { border-color: rgba(255, 255, 255, 0.16); box-shadow: 0 6px 18px -12px rgba(0, 0, 0, 0.4); }
+.light .glass.card-lift:hover { border-color: rgba(0, 0, 0, 0.14); box-shadow: 0 6px 18px -12px rgba(0, 0, 0, 0.14); }
 
 /* Name shimmer — one authored glint that sweeps across once, then rests off-glyph.
    The accent band parks off the text at both ends (bg-pos 0% and 100% both show only

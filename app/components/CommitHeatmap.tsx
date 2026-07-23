@@ -178,11 +178,11 @@ export default function SiteStats() {
     <section aria-label="GitHub activity" className="py-20 md:py-24 px-6 relative z-20 pointer-events-none">
       <div className="max-w-5xl mx-auto">
         <motion.div
-          initial={{ opacity: 0, y: 30 }}
-          whileInView={{ opacity: 1, y: 0 }}
+          initial={{ opacity: 0 }}
+          whileInView={{ opacity: 1 }}
           viewport={{ once: true }}
           transition={{ duration: 0.5 }}
-          className="relative bg-card/60 backdrop-blur-lg rounded-2xl border border-border p-6 sm:p-8 pointer-events-auto"
+          className="glass p-6 sm:p-8 pointer-events-auto"
         >
           {/* Interactive floating-object background — confined to the empty lower-right
               region so it never sits behind the stats, languages, or bar chart. */}
@@ -278,7 +278,7 @@ export default function SiteStats() {
                                   aria-hidden
                                   title={dayTitle(day)}
                                   className="absolute cursor-pointer"
-                                  style={{ left: weekIndex * STEP, top: dayIndex * STEP, width: CELL, height: CELL, transformStyle: "preserve-3d" }}
+                                  style={{ left: weekIndex * STEP, top: dayIndex * STEP, width: CELL, height: CELL, transformStyle: "preserve-3d", opacity: 0.82 }}
                                   initial={{ z: -26 }}
                                   whileInView={{ z: 0 }}
                                   viewport={{ once: true }}
