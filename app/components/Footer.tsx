@@ -1,7 +1,6 @@
 "use client";
 
 import { Github, Linkedin, Mail } from "lucide-react";
-import VisitorCount from "./VisitorCount";
 
 function formatLastUpdated(isoString: string | undefined): string {
   if (!isoString) return "";
@@ -23,7 +22,6 @@ export default function Footer() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3 text-muted text-sm">
             <span>&copy; {currentYear} Wentao</span>
-            <VisitorCount />
             {lastUpdated && (
               <>
                 <span className="hidden sm:inline">·</span>

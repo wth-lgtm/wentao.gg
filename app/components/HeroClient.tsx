@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, type ReactNode } from "react";
 import { useReducedMotion } from "framer-motion";
+import VisitorPrompt from "./VisitorPrompt";
 
 // ============================================================================
 // Constants
@@ -349,8 +350,10 @@ export default function HeroAnimations({ children }: { children: ReactNode }) {
 
   return (
     <>
-      {/* Visitor + greeting — demoted to a quiet mono "terminal" eyebrow above the name */}
+      {/* Visitor prompt + greeting — a quiet mono "terminal" eyebrow above the name.
+          The visitor prompt is the one line meant to pop (accent number). */}
       <div className="space-y-1 font-mono text-xs tracking-wide">
+        <VisitorPrompt />
         <div className="min-h-5">
           {mounted && (
             <ScrambleText

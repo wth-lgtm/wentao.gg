@@ -7,11 +7,11 @@ export default function Hero() {
     <section
       id="about"
       aria-label="Introduction"
-      className="relative min-h-screen flex flex-col justify-center px-6 pt-20 z-20 pointer-events-none"
+      className="relative min-h-screen flex flex-col justify-center px-6 pt-24 pb-28 md:pt-20 md:pb-20 z-20 pointer-events-none"
     >
       <div className="max-w-5xl mx-auto w-full">
         <div
-          className="space-y-6 relative z-20 pointer-events-none animate-fade-in-up"
+          className="space-y-5 md:space-y-6 relative z-20 pointer-events-none animate-fade-in-up"
           style={{ animationDelay: "0.1s", opacity: 0, animationFillMode: "forwards" }}
         >
           <HeroAnimations>
@@ -25,7 +25,7 @@ export default function Hero() {
 
           {/* Primary CTA — subtle magnetic hover (reduced-motion safe) */}
           <div
-            className="flex gap-4 pt-4 animate-fade-in-up"
+            className="flex gap-4 pt-2 md:pt-4 animate-fade-in-up"
             style={{ animationDelay: "0.8s", opacity: 0, animationFillMode: "forwards" }}
           >
             <MagneticButton
@@ -37,9 +37,9 @@ export default function Hero() {
           </div>
         </div>
 
-        {/* Scroll indicator */}
+        {/* Scroll indicator — desktop only (on phones it collides with the CTA) */}
         <div
-          className="absolute bottom-24 left-1/2 -translate-x-1/2 z-20 pointer-events-auto animate-fade-in-up"
+          className="hidden md:block absolute bottom-24 left-1/2 -translate-x-1/2 z-20 pointer-events-auto animate-fade-in-up"
           style={{ animationDelay: "2s", opacity: 0, animationFillMode: "forwards" }}
         >
           <a
