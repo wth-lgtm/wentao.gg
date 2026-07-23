@@ -186,9 +186,16 @@ main:focus {
   outline: none;
 }
 
-/* Keep hero copy legible over the animated fluid without dimming the art */
+/* Keep hero copy legible over the animated fluid + matrix rain without dimming the art.
+   Stacked theme-aware halos "push back" the busy background right around the glyphs so
+   the text pops — no card needed. */
 .hero-legible {
-  text-shadow: 0 1px 2px var(--background), 0 0 10px var(--background);
+  text-shadow:
+    0 0 3px var(--background),
+    0 0 7px var(--background),
+    0 0 14px var(--background),
+    0 0 24px var(--background),
+    0 1px 2px var(--background);
 }
 
 /* Name shimmer — one authored glint that sweeps across once, then rests off-glyph.
