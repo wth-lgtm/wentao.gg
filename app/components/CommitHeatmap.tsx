@@ -19,12 +19,6 @@ interface RepoStats {
   languages: { name: string; percentage: number }[];
 }
 
-const SAMPLE_LANGUAGES = [
-  { name: "TypeScript", percentage: 74 },
-  { name: "CSS", percentage: 15 },
-  { name: "JavaScript", percentage: 11 },
-];
-
 function getIntensity(count: number): string {
   if (count === 0) return "bg-border/50";
   if (count <= 2) return "bg-accent/40";
@@ -39,18 +33,6 @@ function levelFor(count: number): number {
   if (count <= 5) return 2;
   if (count <= 10) return 3;
   return 4;
-}
-
-// Deterministic sample pattern when live GitHub data is unavailable (rate-limited).
-function sampleCount(i: number): number {
-  const r = Math.abs(Math.sin(i * 12.9898) * 43758.5453) % 1;
-  const weekday = i % 7;
-  const damp = weekday === 0 || weekday === 6 ? 0.45 : 1;
-  const v = r * damp;
-  if (v < 0.4) return 0;
-  if (v < 0.62) return 1 + Math.floor(v * 3);
-  if (v < 0.85) return 3 + Math.floor(v * 6);
-  return 8 + Math.floor(v * 9);
 }
 
 function formatNumber(num: number): string {
@@ -116,28 +98,24 @@ export default function SiteStats() {
   useEffect(() => {
     async function fetchData() {
       try {
-        const [commitsRes, langRes] = await Promise.all([
-          fetch("https://api.github.com/repos/wth-lgtm/wentao.gg/commits?per_page=100", { next: { revalidate: 300 } }),
-          fetch("https://api.github.com/repos/wth-lgtm/wentao.gg/languages", { next: { revalidate: 300 } }),
-        ]);
-        if (!commitsRes.ok) {
+        // Server-cached route → the browser never hits GitHub's anonymous rate limit,
+        // and `commits` is the true total (Link-header count, uncapped past 100).
+        const res = await fetch("/api/github-stats");
+        const data = await res.json();
+        if (!res.ok || data?.error) {
           setError(true);
           return;
         }
-        const commits = await commitsRes.json();
-        const languages = langRes.ok ? await langRes.json() : {};
         const countMap = new Map<string, number>();
-        commits.forEach((commit: { commit: { author: { date: string } } }) => {
-          const date = commit.commit.author.date.split("T")[0];
-          countMap.set(date, (countMap.get(date) || 0) + 1);
-        });
+        for (const [date, n] of Object.entries((data.days as Record<string, number>) || {})) {
+          countMap.set(date, n);
+        }
         setCommitData(countMap);
-        const totalBytes = Object.values(languages as Record<string, number>).reduce((a, b) => a + b, 0);
-        const langArray = Object.entries(languages as Record<string, number>)
-          .map(([name, bytes]) => ({ name, percentage: Math.round((bytes / totalBytes) * 100) }))
-          .sort((a, b) => b.percentage - a.percentage)
-          .slice(0, 3);
-        setStats({ commits: commits.length, linesOfCode: Math.round(totalBytes / 40), languages: langArray });
+        setStats({
+          commits: data.commits ?? 0,
+          linesOfCode: data.linesOfCode ?? 0,
+          languages: data.languages ?? [],
+        });
       } catch (err) {
         console.error("Error fetching data:", err);
         setError(true);
@@ -148,7 +126,7 @@ export default function SiteStats() {
     fetchData();
   }, []);
 
-  const sample = !loading && error;
+  const unavailable = !loading && error;
   const use3D = mounted && !isMobile && finePointer && !reduceMotion;
 
   const weeksToShow = isMobile ? 8 : 12;
@@ -159,7 +137,7 @@ export default function SiteStats() {
     const date = new Date(today);
     date.setDate(date.getDate() - i);
     const dateStr = date.toISOString().split("T")[0];
-    days.push({ date: dateStr, count: sample ? sampleCount(i) : commitData.get(dateStr) || 0 });
+    days.push({ date: dateStr, count: commitData.get(dateStr) || 0 });
   }
   const weeks: CommitDay[][] = [];
   for (let i = 0; i < days.length; i += 7) weeks.push(days.slice(i, i + 7));
@@ -170,19 +148,16 @@ export default function SiteStats() {
     else break;
   }
   const bestDay = days.reduce((m, d) => Math.max(m, d.count), 0);
-  const periodCommits = days.reduce((a, d) => a + d.count, 0);
 
   const view = {
-    commits: sample ? periodCommits : stats.commits,
-    commitsSuffix: sample ? "" : stats.commits >= 100 ? "+" : "",
-    lines: sample ? 9400 : stats.linesOfCode,
-    languages: sample ? SAMPLE_LANGUAGES : stats.languages,
+    commits: unavailable ? 0 : stats.commits,
+    languages: unavailable ? [] : stats.languages,
   };
   const statTiles = [
-    { icon: GitCommit, value: `${view.commits}${view.commitsSuffix}`, label: "Commits" },
-    { icon: Code, value: `~${formatNumber(view.lines)}`, label: "Lines of code" },
-    { icon: Flame, value: `${streak}`, label: "Day streak" },
-    { icon: Zap, value: `${bestDay}`, label: "Best day" },
+    { icon: GitCommit, value: unavailable ? "—" : `${stats.commits}`, label: "Commits" },
+    { icon: Code, value: unavailable ? "—" : `~${formatNumber(stats.linesOfCode)}`, label: "Lines of code" },
+    { icon: Flame, value: unavailable ? "—" : `${streak}`, label: "Day streak" },
+    { icon: Zap, value: unavailable ? "—" : `${bestDay}`, label: "Best day" },
   ];
 
   const boardW = weeksToShow * STEP - GAP;
@@ -197,7 +172,7 @@ export default function SiteStats() {
     py.set(0);
   };
   const dayTitle = (day: CommitDay) =>
-    sample ? "Sample data — live GitHub stats unavailable" : `${day.date}: ${day.count} commit${day.count !== 1 ? "s" : ""}`;
+    `${day.date}: ${day.count} commit${day.count !== 1 ? "s" : ""}`;
 
   return (
     <section className="py-16 px-6 relative z-20 pointer-events-none">
@@ -229,11 +204,6 @@ export default function SiteStats() {
               <div className="flex items-center gap-2">
                 <Github size={18} className="text-muted" />
                 <span className="text-sm font-medium">wentao.gg</span>
-                {sample && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded border border-border bg-background/50 text-muted">
-                    sample
-                  </span>
-                )}
               </div>
               <a
                 href="https://github.com/wth-lgtm/wentao.gg"
@@ -284,9 +254,7 @@ export default function SiteStats() {
 
                 {/* Activity — 3D bar chart (or flat fallback) */}
                 <div className="space-y-3">
-                  <div className="text-xs text-muted">
-                    Activity{sample ? " · sample" : ""}
-                  </div>
+                  <div className="text-xs text-muted">Activity</div>
 
                   {use3D ? (
                     <div className="flex justify-center sm:justify-start" style={{ perspective: 900 }}>
