@@ -72,21 +72,25 @@ export default function Navigation() {
             W.
           </a>
 
-          <button
-            onClick={() => setOpen(true)}
-            aria-label="Open menu"
-            aria-expanded={open}
-            className="pointer-events-auto group flex items-center gap-2.5 text-legible"
-          >
-            <span className="font-mono text-xs tracking-[0.25em] text-muted group-hover:text-foreground transition-colors">
-              INDEX
-            </span>
-            {/* staggered rule mark → aligns on hover */}
-            <span className="flex flex-col items-end gap-[4px] w-5">
-              <span className="h-px w-5 bg-muted group-hover:bg-foreground transition-all duration-300" />
-              <span className="h-px w-3 bg-muted group-hover:w-5 group-hover:bg-foreground transition-all duration-300" />
-            </span>
-          </button>
+          {/* Theme toggle stays a persistent top-right control, separate from the menu. */}
+          <div className="pointer-events-auto flex items-center gap-3 md:gap-4 text-legible">
+            <ThemeToggle />
+            <button
+              onClick={() => setOpen(true)}
+              aria-label="Open menu"
+              aria-expanded={open}
+              className="group flex items-center gap-2.5"
+            >
+              <span className="font-mono text-xs tracking-[0.25em] text-muted group-hover:text-foreground transition-colors">
+                INDEX
+              </span>
+              {/* staggered rule mark → aligns on hover */}
+              <span className="flex flex-col items-end gap-[4px] w-5">
+                <span className="h-px w-5 bg-muted group-hover:bg-foreground transition-all duration-300" />
+                <span className="h-px w-3 bg-muted group-hover:w-5 group-hover:bg-foreground transition-all duration-300" />
+              </span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -174,10 +178,7 @@ export default function Navigation() {
                 <a href="mailto:me@wentao.gg" className="hover:text-foreground transition-colors">
                   me@wentao.gg
                 </a>
-                <div className="flex items-center gap-4">
-                  <ThemeToggle />
-                  <span className="tabular-nums">SF {clock}</span>
-                </div>
+                <span className="tabular-nums">SF {clock}</span>
               </div>
             </div>
           </motion.div>
