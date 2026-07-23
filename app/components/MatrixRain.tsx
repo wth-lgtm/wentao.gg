@@ -3,13 +3,15 @@
 import { useEffect, useRef } from "react";
 
 // Original "digital rain" — low-res / CRT feel, in the site's accent blue, confined to
-// the hero. Transparent overlay (glyphs fade via destination-out) so the fluid shows
+// the hero. Transparent overlay (trails fade via destination-out) so the fluid shows
 // through; pixelated upscale + scanlines + phosphor glow give the old-screen look.
+// Per-column variable speed + in-place glyph mutation for organic variation.
 // Decorative + reduced-motion aware.
 
-// Generic glyph set (half-width katakana + digits + a few latin/symbols) — no movie assets.
-const GLYPHS =
-  "アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモ0123456789:.=*+<>";
+// Half-width katakana (the narrow, movie-authentic glyphs) + digits + a few latin/symbols.
+const KATAKANA = Array.from({ length: 0xff9d - 0xff66 + 1 }, (_, i) => String.fromCharCode(0xff66 + i)).join("");
+const GLYPHS = KATAKANA + "0123456789" + "ABCDEFGHKLMNПRSTZ" + ":.=*+<>|-";
+const randGlyph = () => GLYPHS[(Math.random() * GLYPHS.length) | 0];
 
 function parseColor(v: string): [number, number, number] {
   const s = v.trim();
@@ -38,12 +40,28 @@ export default function MatrixRain() {
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const cs = getComputedStyle(document.documentElement);
     const [ar, ag, ab] = parseColor(cs.getPropertyValue("--accent") || "#3b82f6");
+    const HEAD = "rgba(206,224,255,0.95)"; // bright phosphor head
+    const TRAIL = `rgba(${ar},${ag},${ab},0.78)`;
 
-    const SCALE = 0.5; // render at half-res → pixelated upscale = chunky, low-res glyphs
-    const FONT = 14; // glyph size on the low-res backing
+    const SCALE = 0.5; // half-res backing → pixelated upscale = chunky, low-res glyphs
+    const FONT = 14; // glyph size on the backing
+    const MIN_SPEED = 2.5; // rows/sec — slow
+    const MAX_SPEED = 9; // rows/sec — a bit quicker; per-column randomised for variation
+
     let cols = 0;
-    let drops: number[] = [];
+    let rows = 0;
+    let y: Float32Array = new Float32Array(0); // head row (float) per column
+    let speed: Float32Array = new Float32Array(0); // rows/sec per column
+    let head: string[] = []; // current head glyph per column (stable until it steps a cell)
+    let last = 0;
     let raf = 0;
+
+    const draw = (col: number, row: number, ch: string, color: string, glow: number) => {
+      ctx.shadowColor = `rgb(${ar},${ag},${ab})`;
+      ctx.shadowBlur = glow;
+      ctx.fillStyle = color;
+      ctx.fillText(ch, col * FONT, row * FONT);
+    };
 
     const resize = () => {
       const w = wrap.clientWidth;
@@ -52,7 +70,15 @@ export default function MatrixRain() {
       canvas.width = Math.max(1, Math.floor(w * SCALE));
       canvas.height = Math.max(1, Math.floor(h * SCALE));
       cols = Math.max(1, Math.floor(canvas.width / FONT));
-      drops = Array.from({ length: cols }, () => Math.floor((Math.random() * -canvas.height) / FONT));
+      rows = Math.ceil(canvas.height / FONT);
+      y = new Float32Array(cols);
+      speed = new Float32Array(cols);
+      head = new Array(cols);
+      for (let i = 0; i < cols; i++) {
+        y[i] = -Math.random() * rows; // staggered starts
+        speed[i] = MIN_SPEED + Math.random() * (MAX_SPEED - MIN_SPEED);
+        head[i] = randGlyph();
+      }
       ctx.font = `${FONT}px "JetBrains Mono", ui-monospace, monospace`;
       ctx.textBaseline = "top";
     };
@@ -60,48 +86,50 @@ export default function MatrixRain() {
     const ro = new ResizeObserver(resize);
     ro.observe(wrap);
 
-    const step = () => {
-      const w = canvas.width;
-      const h = canvas.height;
-      // fade existing pixels toward transparent (keeps the overlay see-through)
+    const step = (now: number) => {
+      const dt = Math.min((now - last) / 1000 || 0.016, 1 / 20);
+      last = now;
+
       ctx.globalCompositeOperation = "destination-out";
-      ctx.fillStyle = "rgba(0,0,0,0.085)";
-      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = "rgba(0,0,0,0.05)"; // gentle fade → longer, softer trails
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.globalCompositeOperation = "source-over";
 
       for (let i = 0; i < cols; i++) {
-        const ch = GLYPHS[(Math.random() * GLYPHS.length) | 0];
-        const x = i * FONT;
-        const y = drops[i] * FONT;
-        const head = Math.random() > 0.88;
-        ctx.shadowColor = `rgb(${ar},${ag},${ab})`;
-        ctx.shadowBlur = head ? 9 : 3;
-        ctx.fillStyle = head
-          ? "rgba(206,224,255,0.95)" // bright phosphor head
-          : `rgba(${ar},${ag},${ab},0.8)`;
-        ctx.fillText(ch, x, y);
-        if (y > h && Math.random() > 0.975) drops[i] = 0;
-        else drops[i] += 1;
+        const prev = Math.floor(y[i]);
+        y[i] += speed[i] * dt;
+        const row = Math.floor(y[i]);
+        if (row !== prev) head[i] = randGlyph(); // new glyph as the head steps down
+        if (row >= 0) draw(i, row, head[i], HEAD, 8); // bright head, drawn each frame
+
+        // reset past the bottom with a fresh speed + start
+        if (row > rows + 3 && Math.random() > 0.985) {
+          y[i] = -Math.random() * 12;
+          speed[i] = MIN_SPEED + Math.random() * (MAX_SPEED - MIN_SPEED);
+        }
+
+        // in-trail mutation: occasionally re-light a glyph behind the head (flicker)
+        if (Math.random() < 0.04) {
+          const fr = row - 1 - ((Math.random() * 16) | 0);
+          if (fr >= 0) draw(i, fr, randGlyph(), TRAIL, 3);
+        }
       }
       raf = requestAnimationFrame(step);
     };
 
     if (reduce) {
-      // static, sparse frame — no animation
-      ctx.shadowBlur = 2;
+      // sparse static frame — no animation
       ctx.shadowColor = `rgb(${ar},${ag},${ab})`;
+      ctx.shadowBlur = 2;
       for (let i = 0; i < cols; i++) {
         const n = 2 + ((Math.random() * 4) | 0);
         for (let k = 0; k < n; k++) {
           ctx.fillStyle = `rgba(${ar},${ag},${ab},${0.12 + Math.random() * 0.25})`;
-          ctx.fillText(
-            GLYPHS[(Math.random() * GLYPHS.length) | 0],
-            i * FONT,
-            ((Math.random() * canvas.height) / FONT | 0) * FONT,
-          );
+          ctx.fillText(randGlyph(), i * FONT, ((Math.random() * rows) | 0) * FONT);
         }
       }
     } else {
+      last = performance.now();
       raf = requestAnimationFrame(step);
     }
 
@@ -117,7 +145,6 @@ export default function MatrixRain() {
       aria-hidden
       className="absolute inset-0 z-[11] overflow-hidden pointer-events-none"
       style={{
-        // fade the rain out toward the hero's bottom so it hands off to the fluid
         maskImage: "linear-gradient(to bottom, black 55%, transparent 92%)",
         WebkitMaskImage: "linear-gradient(to bottom, black 55%, transparent 92%)",
       }}
@@ -127,7 +154,6 @@ export default function MatrixRain() {
         className="block h-full w-full"
         style={{ imageRendering: "pixelated", opacity: 0.7 }}
       />
-      {/* CRT scanlines */}
       <div
         className="absolute inset-0"
         style={{
