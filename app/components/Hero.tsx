@@ -1,6 +1,5 @@
 import { ArrowDown } from "lucide-react";
 import HeroAnimations from "./HeroClient";
-import MatrixRain from "./MatrixRain";
 import MagneticButton from "./MagneticButton";
 
 export default function Hero() {
@@ -8,9 +7,8 @@ export default function Hero() {
     <section
       id="about"
       aria-label="Introduction"
-      className="relative min-h-screen flex flex-col justify-center px-6 pt-20"
+      className="relative min-h-screen flex flex-col justify-center px-6 pt-20 z-20 pointer-events-none"
     >
-      <MatrixRain />
       <div className="max-w-5xl mx-auto w-full">
         <div
           className="space-y-6 relative z-20 pointer-events-none animate-fade-in-up"

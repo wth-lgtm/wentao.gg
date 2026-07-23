@@ -351,23 +351,23 @@ export default function HeroAnimations({ children }: { children: ReactNode }) {
     <>
       {/* Visitor + Greeting lines — empty before mount, scramble after */}
       <div className="space-y-1">
-        <div className="h-5">
+        <div className="min-h-5">
           {mounted && (
             <ScrambleText
               text={visitorLine}
-              className="text-muted text-xs font-medium tracking-wide hero-legible"
+              className="block text-muted text-xs font-medium tracking-wide text-legible break-words"
               scrambleSpeed={15}
               revealSpeed={12}
             />
           )}
         </div>
-        <div className="h-6 flex items-center gap-2">
+        <div className="min-h-6 flex items-start gap-2">
           {mounted && (
             <>
-              <span className="text-accent/50 text-sm">└</span>
+              <span className="text-accent/50 text-sm shrink-0">└</span>
               <ScrambleText
                 text={greetingTarget}
-                className="text-accent text-sm font-medium tracking-wide hero-legible"
+                className="min-w-0 text-accent text-sm font-medium tracking-wide text-legible break-words"
                 scrambleSpeed={20}
                 revealSpeed={15}
               />
@@ -383,7 +383,7 @@ export default function HeroAnimations({ children }: { children: ReactNode }) {
         {/* Position — typed after mount */}
         <div className="min-h-[2rem] md:min-h-[2.5rem]">
           {mounted && (
-            <span className="block text-xl md:text-3xl font-medium tracking-[-0.01em] text-muted hero-legible">
+            <span className="block text-xl md:text-3xl font-medium tracking-[-0.01em] text-muted text-legible">
               {positionText}
             </span>
           )}
@@ -392,7 +392,7 @@ export default function HeroAnimations({ children }: { children: ReactNode }) {
         {/* Description with cursor — typed after mount */}
         <div className="min-h-[1.75rem] md:min-h-[2rem]">
           {mounted && (
-            <span className="text-base md:text-lg text-muted/80 leading-[1.7] hero-legible" style={{ display: "inline" }}>
+            <span className="text-base md:text-lg text-muted/80 leading-[1.7] text-legible" style={{ display: "inline" }}>
               {descriptionText}
               <span
                 className={`bg-accent ${isDescriptionComplete && showCursor ? "opacity-100" : "opacity-0"}`}

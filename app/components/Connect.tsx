@@ -32,19 +32,19 @@ export default function Connect() {
           transition={{ duration: 0.6 }}
           className="text-center mb-12"
         >
-          <h2 className="text-3xl md:text-4xl font-bold mb-4 tracking-tight">
+          <h2 className="text-3xl md:text-4xl font-bold mb-4 tracking-tight heading-legible">
             Let&apos;s Connect
           </h2>
           <div className="w-16 h-1 bg-accent mx-auto mb-6" />
-          <p className="text-muted text-lg max-w-2xl mx-auto">
+          <p className="text-muted text-lg max-w-2xl mx-auto text-legible">
             I&apos;m always open to discussing new opportunities, interesting projects,
             or just having a chat about technology. Feel free to reach out!
           </p>
         </motion.div>
 
         <motion.div
-          initial={{ opacity: 0, y: 40 }}
-          whileInView={{ opacity: 1, y: 0 }}
+          initial={{ opacity: 0 }}
+          whileInView={{ opacity: 1 }}
           viewport={{ once: true }}
           transition={{ duration: 0.6, delay: 0.2 }}
           className="flex justify-center gap-5"
@@ -65,7 +65,7 @@ export default function Connect() {
                 transition: { type: "spring", stiffness: 300, damping: 20 }
               }}
               whileTap={{ scale: 0.96, transition: { type: "spring", stiffness: 400, damping: 22 } }}
-              className="group bg-card/60 backdrop-blur-lg hover:bg-card-hover/70 rounded-xl p-5 border border-border hover:border-muted/40 transition-colors duration-150 pointer-events-auto animate-breathe"
+              className="group glass p-5 hover:border-muted/40 pointer-events-auto"
               aria-label={link.name}
             >
               <div className="flex items-center justify-center w-12 h-12 bg-background rounded-xl group-hover:bg-accent/10 transition-colors">
