@@ -33,3 +33,8 @@ $$;
 -- Lock execution down to the service role (defense in depth).
 revoke all on function public.increment_visitors() from public, anon, authenticated;
 grant execute on function public.increment_visitors() to service_role;
+
+-- The route reads the running total with a direct select (returning visitors). The service
+-- role bypasses RLS but still needs a table-level grant, so grant it explicitly. anon /
+-- authenticated get nothing, so the browser still can't touch the table.
+grant select on table public.site_stats to service_role;
