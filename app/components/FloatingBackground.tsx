@@ -372,11 +372,13 @@ export default function FloatingBackground({
       }}
       style={{ width: "100%", height: "100%" }}
     >
-      <ambientLight intensity={0.55} />
-      <directionalLight position={[5, 7, 6]} intensity={2.1} />
-      <directionalLight position={[-6, -2, 4]} intensity={0.5} />
-      <pointLight position={[0, 0, 6]} intensity={0.7} />
-      <pointLight position={[-4, 3, -3]} intensity={0.5} color={accent || "#3b82f6"} />
+      {/* Light mode: much softer, flatter lighting so the near-white matte pieces read
+          as flat clay instead of blowing out into glossy hotspots. Dark stays punchy. */}
+      <ambientLight intensity={light ? 0.78 : 0.55} />
+      <directionalLight position={[5, 7, 6]} intensity={light ? 0.95 : 2.1} />
+      <directionalLight position={[-6, -2, 4]} intensity={light ? 0.3 : 0.5} />
+      <pointLight position={[0, 0, 6]} intensity={light ? 0.18 : 0.7} />
+      <pointLight position={[-4, 3, -3]} intensity={light ? 0.15 : 0.5} color={accent || "#3b82f6"} />
       <Suspense fallback={null}>
         <Physics gravity={[0, -12, 0]} timeStep={1 / 60} interpolate numSolverIterations={12} numInternalPgsIterations={1}>
           <Pile count={count} accent={accent} light={light} />
