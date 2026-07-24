@@ -1,5 +1,7 @@
 import { ArrowDown } from "lucide-react";
 import HeroAnimations from "./HeroClient";
+import NameCaustic from "./NameCaustic";
+import { HERO_NAME, HERO_NAME_METRICS } from "./heroName";
 
 export default function Hero() {
   return (
@@ -15,10 +17,13 @@ export default function Hero() {
         >
           <HeroAnimations>
             {/* LCP element: static heading in server HTML, visible instantly */}
-            <div className="min-h-[3rem] md:min-h-[7rem]">
-              <span className="block font-bold tracking-[-0.045em] leading-[0.92] text-foreground text-shimmer text-[clamp(2.5rem,9vw,7rem)]">
-                I&apos;m Wentao
+            <div className="relative min-h-[3rem] md:min-h-[7rem]">
+              <span className={`${HERO_NAME_METRICS} text-foreground text-shimmer`}>
+                {HERO_NAME}
               </span>
+              {/* Light from the same pointer that paints the fluid, stacked on top.
+                  Decorative and additive — the heading above is the real one. */}
+              <NameCaustic />
             </div>
           </HeroAnimations>
         </div>
