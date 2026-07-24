@@ -5,6 +5,7 @@ import { useReducedMotion } from "framer-motion";
 import LocatorMap from "./LocatorMap";
 import ScrambleText from "./ScrambleText";
 import { getVisitorData, type VisitorData } from "./visitorData";
+import { HOME, formatDistance, greatCircleKm } from "../lib/telemetry";
 
 // A browser-side geo lookup used as a FALLBACK when Vercel's edge geo headers come back
 // thin (common for VPNs / mobile carriers / IPv6 — you get an IP but no city). The visitor
@@ -15,6 +16,7 @@ interface ApiGeo {
   city: string;
   isp: string; // carrier / ASN (e.g. "Zayo Bandwidth")
   org: string; // end-customer org (e.g. "Mercor.io Corporation")
+  cc: string; // ISO country code — picks miles vs kilometres for the DIST row
   lat: number | null;
   lon: number | null;
 }
@@ -103,7 +105,7 @@ function toApiGeo(r: RawGeo): ApiGeo {
   const location = parts.length ? `${parts.join(", ")}${flag ? ` ${flag}` : ""}` : "";
   const fix =
     Number.isFinite(r.lat) && Number.isFinite(r.lon) && !(r.lat === 0 && r.lon === 0);
-  return { ip: r.ip, location, city, isp: r.isp, org: r.org, lat: fix ? r.lat : null, lon: fix ? r.lon : null };
+  return { ip: r.ip, location, city, isp: r.isp, org: r.org, cc: r.cc, lat: fix ? r.lat : null, lon: fix ? r.lon : null };
 }
 
 async function fetchGeo(signal: AbortSignal): Promise<ApiGeo | null> {
@@ -173,6 +175,10 @@ export default function VisitorIntel() {
   const cookieIp = data?.ip ?? "";
   const ip = !isPrivateIp(cookieIp) ? cookieIp : api?.ip || cookieIp || "";
   const hasFix = lat !== null && lon !== null;
+  const cc = api?.cc ?? "";
+  const distance = hasFix
+    ? formatDistance(greatCircleKm(HOME, { lat: lat as number, lon: lon as number }), cc)
+    : null;
   // A city-LEVEL result (not just a country) counts as "detected"; a bare country reads as
   // "classified".
   const hasCity = !!city;
@@ -255,6 +261,21 @@ export default function VisitorIntel() {
         <div className="flex items-baseline gap-3">
           <dt className="w-9 shrink-0 text-muted/60">NEAR</dt>
           <dd className="min-w-0 break-words text-foreground/85">{cityDisplay}</dd>
+        </div>
+        {/* How far Wentao is from you — derived from the fix already in hand, so no extra
+            network and nothing new collected. Phrased from his side ("… AWAY") so it reads
+            as him telling you where he stands rather than the site pointing at you.
+            Always rendered: an em dash holds the row's height from first paint, so a late
+            geo answer lands IN it instead of shoving the card around. It also stays an
+            em dash once the probe is finished and empty — a gauge that reads "resolving"
+            forever is a broken gauge. */}
+        <div className="flex items-baseline gap-3">
+          <dt className="w-9 shrink-0 text-muted/60">DIST</dt>
+          <dd className="min-w-0 text-foreground/85">
+            {distance ?? (
+              <span className={stillLooking ? "text-muted/50" : "text-muted/40"}>—</span>
+            )}
+          </dd>
         </div>
       </dl>
 
