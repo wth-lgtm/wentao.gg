@@ -41,14 +41,34 @@ function formatNumber(num: number): string {
   return num.toString();
 }
 
-// 3D bar levels: extrusion height (px) + token-driven top/side face colors.
+// 3D bar levels: extrusion height (px) + token-driven face colours.
+//
+// There is ONE key light on this site and it sits up and to the RIGHT (the same
+// direction as the hero's caustic rim and the floating scene's key light). So the
+// three visible faces of a bar can never share a value: the TOP catches most of it,
+// the RIGHT face sits a stop under, and the FRONT face is in shadow. Painting both
+// side faces the same colour — as this did — is a literal lighting lie, and it
+// flattens every extrusion into a silhouette.
+//
+// Both side values are derived from the top so the ramp can't drift, and each mix
+// sums to 100% so no unintended alpha-multiplication creeps in.
+const FACE_LIT = 0.78; // right face keeps this much of the top face's value
+const FACE_SHADE = 0.46; // front face keeps this much
+const face = (top: string, keep: number) =>
+  `color-mix(in srgb, ${top} ${Math.round(keep * 100)}%, #000)`;
+
 const LEVELS = [
-  { h: 3, top: "color-mix(in srgb, var(--accent) 18%, var(--card))", side: "color-mix(in srgb, var(--accent) 18%, #000 60%)" },
-  { h: 13, top: "color-mix(in srgb, var(--accent) 45%, var(--card))", side: "color-mix(in srgb, var(--accent) 45%, #000 55%)" },
-  { h: 24, top: "color-mix(in srgb, var(--accent) 64%, var(--card))", side: "color-mix(in srgb, var(--accent) 64%, #000 50%)" },
-  { h: 36, top: "color-mix(in srgb, var(--accent) 82%, var(--card))", side: "color-mix(in srgb, var(--accent) 82%, #000 48%)" },
-  { h: 50, top: "var(--accent)", side: "color-mix(in srgb, var(--accent), #000 45%)" },
-];
+  { h: 3, top: "color-mix(in srgb, var(--accent) 18%, var(--card))" },
+  { h: 13, top: "color-mix(in srgb, var(--accent) 45%, var(--card))" },
+  { h: 24, top: "color-mix(in srgb, var(--accent) 64%, var(--card))" },
+  { h: 36, top: "color-mix(in srgb, var(--accent) 82%, var(--card))" },
+  { h: 50, top: "var(--accent)" },
+].map(({ h, top }) => ({
+  h,
+  top,
+  lit: face(top, FACE_LIT),
+  shade: face(top, FACE_SHADE),
+}));
 
 const CELL = 15;
 const GAP = 5;
@@ -295,8 +315,10 @@ export default function SiteStats() {
                                   whileHover={{ z: 18, scale: 1.08 }}
                                 >
                                   <div className="absolute inset-0 rounded-[2px]" style={{ background: lvl.top, transform: `translateZ(${lvl.h}px)` }} />
-                                  <div className="absolute left-0 bottom-0" style={{ width: CELL, height: lvl.h, background: lvl.side, transformOrigin: "bottom", transform: "rotateX(-90deg)" }} />
-                                  <div className="absolute top-0 right-0" style={{ width: lvl.h, height: CELL, background: lvl.side, transformOrigin: "right", transform: "rotateY(90deg)" }} />
+                                  {/* front face — turned away from the key light */}
+                                  <div className="absolute left-0 bottom-0" style={{ width: CELL, height: lvl.h, background: lvl.shade, transformOrigin: "bottom", transform: "rotateX(-90deg)" }} />
+                                  {/* right face — turned toward it */}
+                                  <div className="absolute top-0 right-0" style={{ width: lvl.h, height: CELL, background: lvl.lit, transformOrigin: "right", transform: "rotateY(90deg)" }} />
                                 </motion.div>
                               );
                             })

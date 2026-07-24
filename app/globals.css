@@ -27,6 +27,8 @@
   --flap-fg: #e8e8e2;
   --flap-seam: rgba(0, 0, 0, 0.55);
   --flap-edge: rgba(255, 255, 255, 0.06);
+  /* specular band the leaf catches as it drops — dark plastic has headroom for white */
+  --flap-specular: rgba(255, 255, 255, 0.22);
 }
 
 /* Light theme */
@@ -57,6 +59,9 @@
   --flap-fg: #18181b;
   --flap-seam: rgba(0, 0, 0, 0.16);
   --flap-edge: rgba(0, 0, 0, 0.08);
+  /* A white band on #e7e7ea has no headroom, so on light flaps the moving highlight
+     has to be rendered as its shadow instead. */
+  --flap-specular: rgba(0, 0, 0, 0.12);
 }
 
 /* Motion system — one easing + duration vocabulary so effects feel composed */
@@ -649,6 +654,65 @@ input:focus {
 }
 .sf-leaf.sf-bottom::after {
   animation: sfShadeBottom var(--sf-flap) linear var(--sf-flap) forwards;
+}
+
+/* ── The landing rake ───────────────────────────────────────────────────────────
+   Each leaf catches the key light as it drops, so the riffle glitters instead of
+   just ticking. This needs ZERO new JavaScript: the leaves are already remounted
+   on every flap step (keyed by `step` in SplitFlap.tsx), so the animation replays
+   itself per hop — no timers, no state, no observers.
+   The travel is VERTICAL because the hinge is horizontal (transform-origin 50% 0%
+   with rotateX); sfShadeTop/Bottom already shade along 180deg for the same reason.
+   Delayed by one leaf phase so it rides sfDrop rather than the fold. */
+.sf-leaf.sf-bottom::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1; /* on the surface, above the glyph */
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    transparent 28%,
+    var(--flap-specular) 50%,
+    transparent 72%
+  );
+  opacity: 0;
+  animation: sfRake var(--sf-flap) linear var(--sf-flap) both;
+}
+
+/* The flap that SETTLES a letter holds the light half again as long, so the instant
+   a cell arrives is the instant it glints. `data-settle` is set on exactly the step
+   where that cell reaches its target. */
+.sf-leaf.sf-bottom[data-settle]::before {
+  animation-duration: calc(var(--sf-flap) * 1.5);
+}
+
+/* The emoji flap sits this one out — a bright band across a colour emoji reads as a
+   smudge on the glyph, not as light on the plastic. */
+.sf-cell.sf-em .sf-leaf.sf-bottom::before {
+  content: none;
+}
+
+@keyframes sfRake {
+  from {
+    opacity: 0;
+    transform: translateY(-62%);
+  }
+  45% {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(62%);
+  }
+}
+
+/* No fine pointer or a small viewport: the board is tiny and 13 extra animated
+   pseudo-elements buy nothing there. */
+@media (hover: none), (max-width: 768px) {
+  .sf-leaf.sf-bottom::before {
+    animation: none;
+  }
 }
 
 /* Reduced-motion / SSR-safe static cell (rendered by the component when reduce is on). */
