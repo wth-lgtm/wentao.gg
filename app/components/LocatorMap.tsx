@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 import { Plus, Minus, Crosshair } from "lucide-react";
 import { WORLD_DOTS, WORLD_MAP, projectLonLat } from "./worldDots";
+import { HOME, greatCirclePoints } from "../lib/telemetry";
 
 // A dot-matrix world map (Natural Earth land) that auto-zooms from the whole globe in to
 // the visitor's approximate coordinates and drops an accent "radar" pin — then stays
@@ -160,6 +161,52 @@ export default function LocatorMap({
   const pinX = view.k * px + view.tx;
   const pinY = view.k * py + view.ty;
 
+  // ── The tether ───────────────────────────────────────────────────────────────
+  // A true great circle from home to the visitor, slerped on the unit sphere. NOT a
+  // curve bowed in projection space: the real San Francisco → London route arcs north
+  // to ~65°N, and a perpendicular quadratic would bow it the wrong way entirely.
+  //
+  // Projected once per location (the trig is the expensive part), then only the affine
+  // view transform is applied per render — so panning and zooming cost 96 multiply-adds,
+  // no trigonometry. Deliberately NOT projected with projectLonLat, whose 0..1 clamp
+  // would smear a polar route flat along the top edge instead of letting it leave the
+  // cropped map honestly.
+  const legPoints = useMemo(() => {
+    if (!active) return [];
+    return greatCirclePoints(HOME, { lat: lat as number, lon: lon as number }, 96).map((p) => ({
+      x: ((p.lon - WORLD_MAP.lonMin) / (WORLD_MAP.lonMax - WORLD_MAP.lonMin)) * VBW,
+      y: ((WORLD_MAP.latTop - p.lat) / (WORLD_MAP.latTop - WORLD_MAP.latBottom)) * VBH,
+    }));
+  }, [active, lat, lon]);
+
+  // Split wherever the route crosses the antimeridian, so a Tokyo visitor gets two runs
+  // leaving and entering the frame edge-first rather than one line dragged backwards
+  // across the whole map. The test uses UNSCALED map x — a scaled delta would trip the
+  // threshold at high zoom and shatter the line into fragments.
+  const legs = useMemo(() => {
+    const out: string[] = [];
+    let run = "";
+    let prevX = 0;
+    for (let i = 0; i < legPoints.length; i++) {
+      const p = legPoints[i];
+      if (i > 0 && Math.abs(p.x - prevX) > VBW / 2) {
+        if (run.includes("L")) out.push(run);
+        run = "";
+      }
+      const sx = (view.k * p.x + view.tx).toFixed(2);
+      const sy = (view.k * p.y + view.ty).toFixed(2);
+      run += `${run ? "L" : "M"}${sx} ${sy}`;
+      prevX = p.x;
+    }
+    if (run.includes("L")) out.push(run);
+    return out;
+  }, [legPoints, view]);
+
+  // Home end of the tether, under the same transform.
+  const home = useMemo(() => projectLonLat(HOME.lon, HOME.lat), []);
+  const homeX = view.k * home.x * VBW + view.tx;
+  const homeY = view.k * home.y * VBH + view.ty;
+
   const btn =
     "grid h-6 w-6 place-items-center rounded-md border border-border/60 bg-background/60 text-muted backdrop-blur-sm transition-colors hover:text-foreground hover:border-foreground/30";
 
@@ -187,6 +234,31 @@ export default function LocatorMap({
 
         {active && (
           <>
+            {/* Tether first, so the pin and its ping land on top of it. Drawn EARLY —
+                while the view is still wide and both ends are visible — so it has
+                arrived by the time the pin drops at its far end. */}
+            {legs.map((d, i) => (
+              <motion.path
+                key={i}
+                d={d}
+                fill="none"
+                stroke="var(--accent)"
+                strokeWidth={0.5}
+                strokeLinecap="round"
+                initial={reduce ? false : { pathLength: 0, opacity: 0 }}
+                animate={{ pathLength: 1, opacity: 0.62 }}
+                transition={reduce ? { duration: 0 } : { delay: 0.4, duration: 0.6, ease: "easeOut" }}
+              />
+            ))}
+            {/* Home end — a small diamond, so the two ends of the line read as different
+                things: a fixed survey mark at one end, a live pin at the other. */}
+            <motion.path
+              d={`M${homeX} ${homeY - 1.15}L${homeX + 1.15} ${homeY}L${homeX} ${homeY + 1.15}L${homeX - 1.15} ${homeY}Z`}
+              fill="var(--accent)"
+              initial={reduce ? false : { opacity: 0 }}
+              animate={{ opacity: 0.72 }}
+              transition={reduce ? { duration: 0 } : { delay: 0.4, duration: 0.3 }}
+            />
             {!reduce && (
               <motion.circle
                 cx={pinX}
