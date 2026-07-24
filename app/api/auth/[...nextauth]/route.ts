@@ -1,9 +1,5 @@
-import NextAuth, { type NextAuthOptions, type Session } from "next-auth";
+import NextAuth, { type NextAuthOptions } from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
-
-export interface SessionWithToken extends Session {
-  accessToken?: string;
-}
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -12,8 +8,13 @@ export const authOptions: NextAuthOptions = {
       clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
       authorization: {
         params: {
+          // drive.metadata.readonly — NOT drive.readonly. The only Drive call in the app
+          // is files.list(fields: "files(id, name, modifiedTime)") to populate the picker;
+          // nothing ever downloads a Drive file. drive.readonly would grant read access to
+          // every file in the user's Drive, and it is a Google "restricted" scope.
+          // Sheet CONTENTS come from spreadsheets.readonly via the Sheets API, below.
           scope:
-            "openid email profile https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/spreadsheets.readonly",
+            "openid email profile https://www.googleapis.com/auth/drive.metadata.readonly https://www.googleapis.com/auth/spreadsheets.readonly",
           access_type: "offline",
           prompt: "consent",
         },
@@ -27,10 +28,10 @@ export const authOptions: NextAuthOptions = {
       }
       return token;
     },
-    async session({ session, token }) {
-      (session as SessionWithToken).accessToken = token.accessToken as string;
-      return session;
-    },
+    // NOTE: there is deliberately no `session` callback. Copying token.accessToken onto
+    // the session object would publish a live Google bearer at GET /api/auth/session,
+    // where any same-origin script could read it. The API routes that need the token
+    // decrypt it server-side with getToken() instead.
   },
 };
 

@@ -1,15 +1,17 @@
-import { getServerSession } from "next-auth";
+import { getToken } from "next-auth/jwt";
 import { google } from "googleapis";
-import { NextResponse } from "next/server";
-import { authOptions, type SessionWithToken } from "../../auth/[...nextauth]/route";
+import { NextResponse, type NextRequest } from "next/server";
 
+// Each caller acts with their OWN token, decrypted from the next-auth JWT server-side —
+// so a signed-in visitor can only reach spreadsheets their own Google account can reach.
 export async function GET(
-  request: Request,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = (await getServerSession(authOptions)) as SessionWithToken | null;
+  const token = await getToken({ req: request });
+  const accessToken = typeof token?.accessToken === "string" ? token.accessToken : null;
 
-  if (!session?.accessToken) {
+  if (!accessToken) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
@@ -18,7 +20,7 @@ export async function GET(
   const sheetParam = url.searchParams.get("sheet");
 
   const auth = new google.auth.OAuth2();
-  auth.setCredentials({ access_token: session.accessToken });
+  auth.setCredentials({ access_token: accessToken });
 
   const sheets = google.sheets({ version: "v4", auth });
 

@@ -47,7 +47,17 @@ export async function GET(req: Request) {
     // With no IP, ip-api geolocates the caller (the dev server on localhost → your machine).
     const url = `http://ip-api.com/json/${ip ? encodeURIComponent(ip) : ""}?fields=${fields}`;
 
-    const r = await fetch(url, { cache: "no-store" });
+    // ip-api's free tier allows 45 req/min PER CALLING IP, and on Vercel that is a shared
+    // egress address — so an unthrottled 1:1 fan-out lets one loop get the whole site
+    // banned, after which this returns {} and the client starts shipping visitor IPs to
+    // three public providers instead. The Data Cache key is the full URL, which already
+    // contains the visitor's own IP, so each IP caches independently and no visitor's
+    // location is ever served to a different visitor — repeat hits just stop going
+    // upstream. The timeout keeps a hung provider from pinning the function.
+    const r = await fetch(url, {
+      next: { revalidate: 600 },
+      signal: AbortSignal.timeout(5000),
+    });
     if (!r.ok) return NextResponse.json({});
     const d = await r.json();
     if (!d || d.status !== "success") return NextResponse.json({});
