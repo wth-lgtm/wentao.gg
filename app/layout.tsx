@@ -23,18 +23,29 @@ const jetbrainsMono = JetBrains_Mono({
   preload: false,
 });
 
+const DESCRIPTION =
+  "Wentao He — Engineering Lead on Mercor's Applied AI team, in San Francisco. Data infrastructure at scale, and a few things built for the fun of it.";
+
 export const metadata: Metadata = {
+  // Required for crawlers: without it Next emits a RELATIVE og:image URL, which every
+  // scraper rejects, so the preview silently stays blank.
+  metadataBase: new URL("https://wentao.gg"),
   title: "wentao.GG",
-  description: "Building cool stuff with code",
+  description: DESCRIPTION,
+  alternates: { canonical: "/" },
   openGraph: {
     title: "wentao.GG",
-    description: "Building cool stuff with code",
+    description: DESCRIPTION,
     type: "website",
+    url: "/",
+    siteName: "wentao.GG",
+    locale: "en_US",
   },
   twitter: {
-    card: "summary",
+    // "summary" renders a small square thumbnail; the 1200x630 card needs this.
+    card: "summary_large_image",
     title: "wentao.GG",
-    description: "Building cool stuff with code",
+    description: DESCRIPTION,
   },
 };
 
