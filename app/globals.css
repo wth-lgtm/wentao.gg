@@ -16,6 +16,12 @@
   --glass-tint: color-mix(in oklab, var(--card) 24%, transparent);
   --glass-edge: rgba(255, 255, 255, 0.08); /* subtle hairline rim */
 
+  /* Caustic (dark). On a near-black field light reads as LUMINANCE, so the filament
+     runs to a near-white core with only a trace of accent in it. */
+  --caustic-hi: color-mix(in srgb, var(--accent) 20%, #ffffff);
+  --caustic-lo: color-mix(in srgb, var(--accent) 80%, #ffffff);
+  --caustic-rim: color-mix(in srgb, #ffffff 24%, transparent);
+
   /* Split-flap board (dark) — opaque plastic flaps so the animated bg doesn't bleed. */
   --flap-bg: #202024;
   --flap-fg: #e8e8e2;
@@ -37,6 +43,14 @@
   /* Flat matte glass (light) — glass over white needs a little more fill. */
   --glass-tint: color-mix(in oklab, var(--card) 40%, transparent);
   --glass-edge: rgba(0, 0, 0, 0.07);
+
+  /* Caustic (light). You cannot brighten near-black glyphs on white — washing them
+     toward #fff would just erase them. So here light reads as a CHROMATIC shift:
+     the filament saturates toward accent instead. --accent (#2563eb) on #ffffff is
+     5.17:1, so the lit glyphs still clear WCAG AA on their own. */
+  --caustic-hi: var(--accent);
+  --caustic-lo: color-mix(in srgb, var(--accent) 70%, var(--foreground));
+  --caustic-rim: color-mix(in srgb, var(--accent) 18%, transparent);
 
   /* Split-flap board (light). */
   --flap-bg: #e7e7ea;
@@ -331,6 +345,79 @@ main:focus {
     background: none;
     -webkit-text-fill-color: currentColor;
     animation: none;
+  }
+}
+
+/* ── The name is a lens ─────────────────────────────────────────────────────────
+   A second copy of the wordmark stacked exactly on the first, painted ONLY where
+   light falls. The filament tracks the pointer that is already painting the fluid,
+   arriving a beat late (the spring lives in NameCaustic.tsx) — light through moving
+   water, not a spotlight glued to the cursor.
+   Additive by construction: wherever these gradients are transparent, the base
+   --foreground wordmark shows through untouched, so legibility never rests here.
+   --lx/--ly are written to the node by NameCaustic.tsx. Everything else is a
+   tunable: widen --caustic-r for a broader pool, push --caustic-core out for a
+   fatter core, pull --caustic-edge in for a harder-edged filament. */
+@property --lx {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: 30%;
+}
+@property --ly {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: 38%;
+}
+
+.text-caustic {
+  --lx: 30%;
+  --ly: 38%;
+  --caustic-r: clamp(90px, 13vw, 300px); /* filament reach */
+  --caustic-core: 9%; /* opaque core ends here — a filament, not a soft blob */
+  --caustic-edge: 26%; /* fully transparent by here */
+
+  background-image:
+    /* the travelling filament */
+    radial-gradient(
+      circle var(--caustic-r) at var(--lx) var(--ly),
+      var(--caustic-hi) 0%,
+      var(--caustic-lo) var(--caustic-core),
+      transparent var(--caustic-edge)
+    ),
+    /* the one fixed key light, static at upper-right. A light source that moved with
+       the cursor would read as a torch; a room has a lamp, and it stays put. */
+    conic-gradient(
+      from 195deg at 100% 0%,
+      transparent 0deg,
+      var(--caustic-rim) 24deg,
+      transparent 58deg
+    );
+  background-repeat: no-repeat;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--dur-base) var(--ease-ambient);
+}
+
+/* Without a fine pointer there is nothing to track, and a visitor who asked for
+   less motion should not be handed a cursor-chasing highlight. Both get the light
+   parked at a fixed offset instead — a still exposure rather than no exposure.
+   Pure CSS, so it is correct on the very first paint with no flash. */
+@media (prefers-reduced-motion: reduce), (pointer: coarse) {
+  .text-caustic {
+    opacity: 0.9;
+  }
+}
+
+/* Same reasoning as .text-shimmer: forced palettes drop the gradient but keep the
+   transparent fill, which would leave a ghost copy of the name. Hide it outright —
+   the base heading underneath is the one that matters. */
+@media (forced-colors: active) {
+  .text-caustic {
+    display: none;
   }
 }
 
