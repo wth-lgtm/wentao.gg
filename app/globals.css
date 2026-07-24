@@ -443,7 +443,7 @@ input:focus {
   --sf-cell-h: clamp(1.6rem, 7.2vw, 2.9rem);
   --sf-gap: clamp(2px, 0.5vw, 4px);
   --sf-emoji: clamp(1.35rem, 5.4vw, 2rem);
-  --sf-flap: 60ms; /* one leaf phase; a full flap = fold (60) + drop (60) = 120ms (matches FLAP_MS) */
+  --sf-flap: 50ms; /* one leaf phase; a full flap = fold (50) + drop (50) = 100ms (matches FLAP_MS) */
 }
 
 .sf-board {
@@ -462,6 +462,11 @@ input:focus {
   color: var(--flap-fg);
   border-radius: 4px;
   box-shadow: inset 0 0 0 1px var(--flap-edge), 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+/* the leading emoji flap — larger glyph, a touch more room after it */
+.sf-cell.sf-em {
+  font-size: calc(var(--sf-cell-h) * 0.66);
+  margin-right: calc(var(--sf-gap) * 1.5);
 }
 
 .sf-half,
