@@ -1,5 +1,16 @@
--- Unique-visitor counter for wentao.gg.
+-- Page-visit counter for wentao.gg.
 -- Run ONCE in the Supabase SQL editor (Dashboard → SQL Editor → New query → paste → Run).
+--
+-- NAMING: the row key is 'unique_visitors' and the function is increment_visitors() for
+-- historical reasons — this started life as a unique-visitor counter. It now counts PAGE
+-- VISITS (a returning visitor increments it again). The names are deliberately left alone
+-- so the live total carries over with no migration. To rename later, run:
+--
+--   update public.site_stats set key = 'page_views' where key = 'unique_visitors';
+--   -- then update the key literals in increment_visitors() and app/api/visit/route.ts
+--
+-- Rate limiting lives at the edge, not here: see the header comment in
+-- app/api/visit/route.ts for the three layers and why the durable cap is a WAF rule.
 --
 -- RLS is enabled with NO policies, so the public anon/publishable key has zero access to
 -- this table. Only the server-side service_role key (used by app/api/visit/route.ts) can
