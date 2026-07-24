@@ -275,16 +275,25 @@ export default function HeroAnimations({ children }: { children: ReactNode }) {
       </div>
 
       {/* ================= RIGHT — visitor intel rail ================= */}
+      {/* The CARD centers on the name; the CTA hangs just below it on desktop
+          (absolute, so it doesn't drag the card's centering up) and stacks
+          normally on mobile. */}
       <div className="md:col-span-5 pointer-events-auto">
-        <div className="mx-auto w-full max-w-sm space-y-4 md:mx-0 md:max-w-none">
+        <div className="relative mx-auto w-full max-w-sm md:mx-0 md:max-w-none">
           <VisitorIntel />
+          <div className="mt-4 md:absolute md:inset-x-0 md:top-full md:mt-4">
           <MagneticButton
             href="#connect"
-            className="inline-flex items-center gap-2 rounded-lg bg-accent px-6 py-3 font-medium text-white transition-colors hover:bg-accent-hover"
+            className="group inline-flex items-center gap-3 rounded-full border border-border/70 bg-card/30 py-2 pl-5 pr-2 backdrop-blur-md transition-colors hover:border-foreground/30 hover:bg-card/50"
           >
-            Get in touch
-            <ArrowUpRight size={16} />
+            <span className="text-sm font-medium tracking-tight text-foreground">
+              Get in touch
+            </span>
+            <span className="grid h-9 w-9 place-items-center rounded-full bg-accent text-white transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:rotate-45">
+              <ArrowUpRight size={16} />
+            </span>
           </MagneticButton>
+          </div>
         </div>
       </div>
     </div>
