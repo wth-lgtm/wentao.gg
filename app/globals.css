@@ -15,6 +15,12 @@
      read THROUGH each card, only blurred — no gloss, sheen, or float shadow. */
   --glass-tint: color-mix(in oklab, var(--card) 24%, transparent);
   --glass-edge: rgba(255, 255, 255, 0.08); /* subtle hairline rim */
+
+  /* Split-flap board (dark) — opaque plastic flaps so the animated bg doesn't bleed. */
+  --flap-bg: #202024;
+  --flap-fg: #e8e8e2;
+  --flap-seam: rgba(0, 0, 0, 0.55);
+  --flap-edge: rgba(255, 255, 255, 0.06);
 }
 
 /* Light theme */
@@ -31,6 +37,12 @@
   /* Flat matte glass (light) — glass over white needs a little more fill. */
   --glass-tint: color-mix(in oklab, var(--card) 40%, transparent);
   --glass-edge: rgba(0, 0, 0, 0.07);
+
+  /* Split-flap board (light). */
+  --flap-bg: #e7e7ea;
+  --flap-fg: #18181b;
+  --flap-seam: rgba(0, 0, 0, 0.16);
+  --flap-edge: rgba(0, 0, 0, 0.08);
 }
 
 /* Motion system — one easing + duration vocabulary so effects feel composed */
@@ -419,4 +431,134 @@ input:focus {
   input, select, textarea {
     font-size: 16px !important;
   }
+}
+
+/* ===== SPLIT-FLAP BOARD =====
+   Lifelike Solari flap: two static halves (incoming top / outgoing bottom) with two hinged
+   leaves flipping over them. The top leaf folds down (revealing the incoming top half); the
+   bottom leaf drops in over the outgoing bottom half. Only transforms/opacity animate, on
+   the compositor, so 12 cells riffle at 60fps over the live background. Component: SplitFlap.tsx. */
+.split-flap {
+  --sf-cell-w: clamp(1.05rem, 5vw, 2.15rem);
+  --sf-cell-h: clamp(1.6rem, 7.2vw, 2.9rem);
+  --sf-gap: clamp(2px, 0.5vw, 4px);
+  --sf-emoji: clamp(1.35rem, 5.4vw, 2rem);
+  --sf-flap: 35ms; /* one leaf phase; a full flap = fold (35) + drop (35) = 70ms */
+}
+
+.sf-board {
+  display: flex;
+  gap: var(--sf-gap);
+}
+
+.sf-cell {
+  position: relative;
+  width: var(--sf-cell-w);
+  height: var(--sf-cell-h);
+  perspective: 320px;
+  font-family: var(--font-mono, "JetBrains Mono", monospace);
+  font-weight: 700;
+  font-size: calc(var(--sf-cell-h) * 0.6);
+  color: var(--flap-fg);
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1px var(--flap-edge), 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+
+.sf-half,
+.sf-leaf {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 50%;
+  overflow: hidden;
+  background: var(--flap-bg);
+}
+
+.sf-glyph {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: var(--sf-cell-h);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sf-half.sf-top,
+.sf-leaf.sf-top {
+  top: 0;
+  border-radius: 4px 4px 0 0;
+  border-bottom: 1px solid var(--flap-seam);
+}
+.sf-half.sf-bottom,
+.sf-leaf.sf-bottom {
+  bottom: 0;
+  border-radius: 0 0 4px 4px;
+  border-top: 1px solid var(--flap-seam);
+}
+.sf-top .sf-glyph {
+  top: 0;
+}
+.sf-bottom .sf-glyph {
+  top: 0;
+  transform: translateY(-50%); /* line the glyph up across the seam */
+}
+
+.sf-leaf {
+  backface-visibility: hidden;
+  transform: translateZ(0);
+  will-change: transform;
+}
+.sf-leaf.sf-top {
+  transform-origin: 50% 100%;
+  transform: rotateX(0deg); /* rest: covers the static top */
+}
+.sf-leaf.sf-bottom {
+  transform-origin: 50% 0%;
+  transform: rotateX(90deg); /* rest: folded up out of view */
+}
+
+/* shading overlay that sells the fold */
+.sf-leaf::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(0, 0, 0, 0) 42%, rgba(0, 0, 0, 0.5));
+}
+
+.sf-cell.flipping .sf-leaf.sf-top {
+  animation: sfFold var(--sf-flap) cubic-bezier(0.36, 0, 0.66, -0.06) forwards;
+}
+.sf-cell.flipping .sf-leaf.sf-top::after {
+  animation: sfShadeTop var(--sf-flap) linear forwards;
+}
+.sf-cell.flipping .sf-leaf.sf-bottom {
+  animation: sfDrop var(--sf-flap) cubic-bezier(0.2, 1.4, 0.4, 1) var(--sf-flap) forwards;
+}
+.sf-cell.flipping .sf-leaf.sf-bottom::after {
+  animation: sfShadeBottom var(--sf-flap) linear var(--sf-flap) forwards;
+}
+
+@keyframes sfFold {
+  from { transform: rotateX(0deg); }
+  to { transform: rotateX(-90deg); }
+}
+@keyframes sfDrop {
+  from { transform: rotateX(90deg); }
+  70% { transform: rotateX(-6deg); } /* clack against the stop */
+  to { transform: rotateX(0deg); }
+}
+@keyframes sfShadeTop {
+  from { opacity: 0; }
+  to { opacity: 0.9; }
+}
+@keyframes sfShadeBottom {
+  from { opacity: 0.9; }
+  to { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sf-cell.flipping .sf-leaf { animation: none !important; }
 }
