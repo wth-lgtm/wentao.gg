@@ -23,16 +23,16 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Wentao | Engineer + Developer",
+  title: "wentao.GG",
   description: "Building cool stuff with code",
   openGraph: {
-    title: "Wentao | Engineer + Developer",
+    title: "wentao.GG",
     description: "Building cool stuff with code",
     type: "website",
   },
   twitter: {
     card: "summary",
-    title: "Wentao | Engineer + Developer",
+    title: "wentao.GG",
     description: "Building cool stuff with code",
   },
 };
