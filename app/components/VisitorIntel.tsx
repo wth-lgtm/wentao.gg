@@ -12,6 +12,7 @@ import { getVisitorData, type VisitorData } from "./visitorData";
 interface ApiGeo {
   ip: string;
   location: string;
+  city: string;
   lat: number | null;
   lon: number | null;
 }
@@ -43,6 +44,7 @@ async function fetchGeo(signal: AbortSignal): Promise<ApiGeo | null> {
     return {
       ip: typeof d.ip === "string" ? d.ip : "",
       location,
+      city: typeof d.city === "string" ? d.city : "",
       lat: lat !== null && !(lat === 0 && lon === 0) ? lat : null,
       lon: lon !== null && !(lat === 0 && lon === 0) ? lon : null,
     };
@@ -59,11 +61,12 @@ export default function VisitorIntel() {
   const [count, setCount] = useState<number | null>(null);
   const [located, setLocated] = useState(false);
 
-  // Read the visitor cookie; if it lacks a city or coordinates, resolve them client-side.
+  // Read the visitor cookie; if it lacks a real city or coordinates, resolve them
+  // client-side (a bare country doesn't count — we want city-level or a fallback try).
   useEffect(() => {
     const d = getVisitorData();
     setData(d);
-    if (d.location && d.lat !== null && d.lon !== null) return;
+    if (d.city && d.lat !== null && d.lon !== null) return;
     setProbing(true);
     const ctrl = new AbortController();
     fetchGeo(ctrl.signal)
@@ -97,7 +100,10 @@ export default function VisitorIntel() {
   const parts = (s: string) => s.split(",").filter((p) => p.trim()).length;
   const location = parts(apiLoc) > parts(cookieLoc) ? apiLoc : cookieLoc || apiLoc;
   const hasFix = lat !== null && lon !== null;
-  const hasCity = !!location;
+  // A city-LEVEL result (not just a country) is what counts as "detected". A bare country
+  // reads as "classified" — the visitor's precise location is hidden.
+  const city = (data?.city || api?.city || "").trim();
+  const hasCity = !!city;
   const stillLooking = data === null || probing;
 
   // Flip the header once the zoom has settled.
@@ -123,17 +129,13 @@ export default function VisitorIntel() {
     ? location
     : stillLooking
       ? "triangulating…"
-      : hasFix
-        ? "right here — but the name's under wraps \u{1F92B}"
-        : "classified \u{1F575}\u{FE0F}";
+      : "classified \u{1F575}\u{FE0F}";
 
   const caption = hasCity
     ? "no logs, just vibes \u{1F91D}"
     : stillLooking
       ? "reading the tea leaves…"
-      : hasFix
-        ? "your city's playing hard to get — nice privacy \u{1F576}\u{FE0F}"
-        : "couldn't triangulate you — you're a ghost \u{1F6F0}\u{FE0F}";
+      : "your city's playing hard to get — nice privacy \u{1F576}\u{FE0F}";
 
   return (
     <div className="glass rounded-2xl p-4 sm:p-5 font-mono">

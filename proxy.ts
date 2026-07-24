@@ -120,6 +120,7 @@ export function proxy(request: NextRequest) {
   const greetingData = JSON.stringify({
     timePeriod,
     location: locationString,
+    city, // raw city (may be "") — lets the client tell "real city" from "country only"
     ip,
     lat,
     lon,

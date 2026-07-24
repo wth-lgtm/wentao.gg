@@ -5,6 +5,7 @@
 export interface VisitorData {
   timePeriod: string;
   location: string; // "City, Region, Country 🇺🇸" (may be "")
+  city: string; // raw city only (may be "" when geo resolved only to a country)
   ip: string; // visitor's own IP (may be "")
   lat: number | null; // approximate latitude (may be null off-grid / on localhost)
   lon: number | null; // approximate longitude
@@ -13,6 +14,7 @@ export interface VisitorData {
 const EMPTY: VisitorData = {
   timePeriod: "morning",
   location: "",
+  city: "",
   ip: "",
   lat: null,
   lon: null,
@@ -41,6 +43,7 @@ export function getVisitorData(): VisitorData {
     return {
       timePeriod: parsed.timePeriod || "morning",
       location: parsed.location || "",
+      city: typeof parsed.city === "string" ? parsed.city : "",
       ip: typeof parsed.ip === "string" ? parsed.ip : "",
       lat: hasFix ? lat : null,
       lon: hasFix ? lon : null,
