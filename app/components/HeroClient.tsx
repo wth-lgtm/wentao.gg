@@ -2,13 +2,15 @@
 
 import { useState, useEffect, useRef, type ReactNode } from "react";
 import { useReducedMotion } from "framer-motion";
-import VisitorPrompt from "./VisitorPrompt";
+import { ArrowUpRight } from "lucide-react";
+import ScrambleText from "./ScrambleText";
+import VisitorIntel from "./VisitorIntel";
+import MagneticButton from "./MagneticButton";
+import { getVisitorData } from "./visitorData";
 
 // ============================================================================
 // Constants
 // ============================================================================
-
-const SCRAMBLE_CHARS = "!@#$%^&*()_+-=[]{}|;:,.<>?/~`ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 
 const greetingsByPeriod: Record<string, string[]> = {
   early_morning: [
@@ -61,21 +63,6 @@ const defaultGreetings = [
   "I'm glad you stopped by 👋",
 ];
 
-const visitorLines = {
-  withLocation: [
-    "I spotted you all the way from {location} 👀",
-    "Looks like you're tuning in from {location} 📡",
-    "You're beaming in from {location}, I see 🛸",
-    "I see you peeking in from {location} 🔭",
-  ],
-  withoutLocation: [
-    "I spotted you from somewhere on the interwebs 👀",
-    "Looks like you're tuning in from somewhere cool 📡",
-    "You're beaming in from parts unknown, I see 🛸",
-    "I see you peeking in from the digital void 🔭",
-  ],
-};
-
 interface Persona {
   position: string;
   description: string;
@@ -93,81 +80,7 @@ const personas: Persona[] = [
 ];
 
 // ============================================================================
-// ScrambleText Component
-// ============================================================================
-
-function ScrambleText({
-  text,
-  className,
-  scrambleSpeed = 30,
-  revealSpeed = 50,
-}: {
-  text: string;
-  className?: string;
-  scrambleSpeed?: number;
-  revealSpeed?: number;
-}) {
-  const [displayText, setDisplayText] = useState("");
-  const [isScrambling, setIsScrambling] = useState(false);
-  const prevTextRef = useRef(text);
-  const frameRef = useRef<number>(0);
-  const revealedRef = useRef(0);
-  const reduceMotion = useReducedMotion();
-
-  useEffect(() => {
-    // Reduced motion: skip the scramble, show the final text immediately.
-    if (reduceMotion) {
-      setDisplayText(text);
-      setIsScrambling(false);
-      return;
-    }
-    if (text !== prevTextRef.current || displayText === "") {
-      prevTextRef.current = text;
-      revealedRef.current = 0;
-      setIsScrambling(true);
-    }
-  }, [text, displayText, reduceMotion]);
-
-  useEffect(() => {
-    if (!isScrambling || !text) return;
-
-    const scrambleInterval = setInterval(() => {
-      frameRef.current++;
-
-      if (frameRef.current % Math.ceil(revealSpeed / scrambleSpeed) === 0) {
-        revealedRef.current++;
-      }
-
-      let result = "";
-      for (let i = 0; i < text.length; i++) {
-        if (i < revealedRef.current) {
-          result += text[i];
-        } else if (text[i] === " ") {
-          result += " ";
-        } else if (/[\u{1F300}-\u{1F9FF}]/u.test(text[i])) {
-          result += text[i];
-        } else {
-          result += SCRAMBLE_CHARS[Math.floor(Math.random() * SCRAMBLE_CHARS.length)];
-        }
-      }
-
-      setDisplayText(result);
-
-      if (revealedRef.current >= text.length) {
-        setIsScrambling(false);
-        setDisplayText(text);
-        frameRef.current = 0;
-      }
-    }, scrambleSpeed);
-
-    return () => clearInterval(scrambleInterval);
-  }, [isScrambling, text, scrambleSpeed, revealSpeed]);
-
-  return <span className={className}>{displayText}</span>;
-}
-
-// ============================================================================
-// useRotatingContent Hook
+// useRotatingContent Hook — drives the typewriter persona + rotating greeting
 // ============================================================================
 
 type RotationPhase = "typing" | "deleting";
@@ -279,58 +192,20 @@ function useRotatingContent({
 }
 
 // ============================================================================
-// Helpers
-// ============================================================================
-
-interface GreetingData {
-  timePeriod: string;
-  location: string;
-}
-
-function getGreetingData(): GreetingData {
-  if (typeof document === "undefined") {
-    return { timePeriod: "morning", location: "" };
-  }
-
-  const match = document.cookie.match(/visitor-greeting-data=([^;]+)/);
-  if (match) {
-    try {
-      let data = decodeURIComponent(match[1]);
-      if (data.includes("%")) {
-        data = decodeURIComponent(data);
-      }
-      return JSON.parse(data);
-    } catch {
-      return { timePeriod: "morning", location: "" };
-    }
-  }
-  return { timePeriod: "morning", location: "" };
-}
-
-function getVisitorLine(location: string): string {
-  const lines = location ? visitorLines.withLocation : visitorLines.withoutLocation;
-  const line = lines[Math.floor(Math.random() * lines.length)];
-  return location ? line.replace("{location}", location) : line;
-}
-
-// ============================================================================
-// HeroAnimations Component
+// HeroAnimations — the two-column hero: identity (left) + visitor intel (right)
 // ============================================================================
 
 export default function HeroAnimations({ children }: { children: ReactNode }) {
   const [mounted, setMounted] = useState(false);
-  const [greetingData, setGreetingData] = useState<GreetingData>({ timePeriod: "morning", location: "" });
-  const [visitorLine, setVisitorLine] = useState("");
+  const [timePeriod, setTimePeriod] = useState("morning");
   const reduceMotion = useReducedMotion() ?? false;
 
   useEffect(() => {
     setMounted(true);
-    const data = getGreetingData();
-    setGreetingData(data);
-    setVisitorLine(getVisitorLine(data.location));
+    setTimePeriod(getVisitorData().timePeriod);
   }, []);
 
-  const greetings = greetingsByPeriod[greetingData.timePeriod] || defaultGreetings;
+  const greetings = greetingsByPeriod[timePeriod] || defaultGreetings;
 
   const {
     greetingTarget,
@@ -349,41 +224,28 @@ export default function HeroAnimations({ children }: { children: ReactNode }) {
   });
 
   return (
-    <>
-      {/* Visitor prompt + greeting — a quiet mono "terminal" eyebrow above the name.
-          The visitor prompt is the one line meant to pop (accent number). */}
-      <div className="space-y-1 font-mono text-xs tracking-wide">
-        <VisitorPrompt />
-        <div className="min-h-5">
+    <div className="grid grid-cols-1 md:grid-cols-12 md:items-center gap-x-10 gap-y-10">
+      {/* ================= LEFT — identity ================= */}
+      <div className="md:col-span-7 space-y-4 md:space-y-5 pointer-events-none">
+        {/* Greeting kicker (E3) — one quiet mono line above the name */}
+        <div className="min-h-5 font-mono text-xs tracking-wide">
           {mounted && (
-            <ScrambleText
-              text={visitorLine}
-              className="block text-muted/70 text-legible break-words"
-              scrambleSpeed={15}
-              revealSpeed={12}
-            />
-          )}
-        </div>
-        <div className="min-h-5 flex items-start gap-2">
-          {mounted && (
-            <>
-              <span className="text-muted/40 shrink-0">└</span>
+            <span className="flex items-start gap-2 text-muted/80">
+              <span aria-hidden className="text-accent shrink-0">▸</span>
               <ScrambleText
                 text={greetingTarget}
-                className="min-w-0 text-foreground/70 text-legible break-words"
+                className="min-w-0 text-legible break-words"
                 scrambleSpeed={20}
                 revealSpeed={15}
               />
-            </>
+            </span>
           )}
         </div>
-      </div>
 
-      <div className="space-y-3">
-        {/* Static heading passed from server component — always in HTML (the dominant statement) */}
+        {/* Name — the dominant statement (static server HTML, LCP element) */}
         {children}
 
-        {/* Persona — the sub-headline (typed after mount), clearly subordinate to the name */}
+        {/* Persona position (E4) — typed sub-headline */}
         <div className="min-h-[1.75rem] md:min-h-[2.25rem]">
           {mounted && (
             <span className="block text-lg md:text-2xl font-medium tracking-[-0.01em] text-foreground/85 text-legible">
@@ -392,7 +254,7 @@ export default function HeroAnimations({ children }: { children: ReactNode }) {
           )}
         </div>
 
-        {/* Description with cursor — tertiary, quiet */}
+        {/* Persona description (E5) — quiet, with the blinking accent cursor */}
         <div className="min-h-[1.5rem] md:min-h-[1.75rem]">
           {mounted && (
             <span className="text-sm md:text-base text-muted leading-relaxed text-legible" style={{ display: "inline" }}>
@@ -411,6 +273,29 @@ export default function HeroAnimations({ children }: { children: ReactNode }) {
           )}
         </div>
       </div>
-    </>
+
+      {/* ================= RIGHT — visitor intel rail ================= */}
+      {/* The CARD centers on the name; the CTA hangs just below it on desktop
+          (absolute, so it doesn't drag the card's centering up) and stacks
+          normally on mobile. */}
+      <div className="md:col-span-5 pointer-events-auto">
+        <div className="relative mx-auto w-full max-w-sm md:mx-0 md:max-w-none">
+          <VisitorIntel />
+          <div className="mt-4 md:absolute md:inset-x-0 md:top-full md:mt-4">
+          <MagneticButton
+            href="#connect"
+            className="group inline-flex items-center gap-3 rounded-full border border-border/70 bg-card/30 py-2 pl-5 pr-2 backdrop-blur-md transition-colors hover:border-foreground/30 hover:bg-card/50"
+          >
+            <span className="text-sm font-medium tracking-tight text-foreground">
+              Get in touch
+            </span>
+            <span className="grid h-9 w-9 place-items-center rounded-full bg-accent text-white transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:rotate-45">
+              <ArrowUpRight size={16} />
+            </span>
+          </MagneticButton>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
