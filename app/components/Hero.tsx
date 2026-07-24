@@ -6,7 +6,7 @@ export default function Hero() {
     <section
       id="about"
       aria-label="Introduction"
-      className="relative min-h-svh flex flex-col justify-center px-6 pt-24 pb-20 md:py-20 z-20 pointer-events-none"
+      className="relative min-h-svh flex flex-col justify-start md:justify-center px-6 pt-32 pb-16 md:py-20 z-20 pointer-events-none"
     >
       <div className="max-w-6xl mx-auto w-full">
         <div
@@ -15,7 +15,7 @@ export default function Hero() {
         >
           <HeroAnimations>
             {/* LCP element: static heading in server HTML, visible instantly */}
-            <div className="min-h-[3.5rem] md:min-h-[7rem]">
+            <div className="min-h-[3rem] md:min-h-[7rem]">
               <span className="block font-bold tracking-[-0.045em] leading-[0.92] text-foreground text-shimmer text-[clamp(2.5rem,9vw,7rem)]">
                 I&apos;m Wentao
               </span>

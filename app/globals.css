@@ -293,7 +293,7 @@ main:focus {
   0% {
     background-position: 0% center;
   }
-  18% {
+  9% {
     background-position: 100% center;
   }
   100% {
@@ -315,8 +315,8 @@ main:focus {
   background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
-  animation: shimmer 6s var(--ease-ambient) infinite;
-  animation-delay: 2s;
+  animation: shimmer 5s var(--ease-ambient) infinite;
+  animation-delay: 1.5s;
 }
 
 /* Breathing glow animation */

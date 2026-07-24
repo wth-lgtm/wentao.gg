@@ -31,7 +31,12 @@ const ROLES = [
   { emoji: "📷", word: "PHOTOGRAPHER" },
   { emoji: "🏋️", word: "POWERLIFTER" },
 ];
-const EMOJIS = ROLES.map((r) => r.emoji);
+// The emoji flap riffles through a big pool for variety (like the 26-letter charset), then
+// is forced onto the correct role emoji on the final step.
+const EMOJI_POOL = [
+  "💻", "⚙️", "📷", "🏋️", "🚀", "🌟", "🎯", "🔧", "🧠", "☕", "🎧", "📈", "🌙",
+  "⚡", "🔥", "📸", "💪", "🏔️", "🎨", "🔬", "📊", "🧩", "🎮", "🌐", "💡", "🎸",
+];
 
 const HOLD_MS = 4000; // dwell on a finished word before flipping to the next
 const FLAP_MS = 100; // one physical flap — legible but a touch quicker to settle
@@ -134,7 +139,7 @@ export default function SplitFlap() {
         const nextEmoji =
           step >= maxSteps
             ? targetEmoji // land on the correct emoji exactly as the last letter lands
-            : EMOJIS[(EMOJIS.indexOf(e.display) + 1) % EMOJIS.length];
+            : EMOJI_POOL[step % EMOJI_POOL.length]; // riffle through the varied pool
         return nextEmoji === e.display
           ? e
           : { display: nextEmoji, prev: e.display, step: e.step + 1 };

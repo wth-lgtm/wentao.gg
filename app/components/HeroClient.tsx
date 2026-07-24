@@ -17,9 +17,9 @@ export default function HeroAnimations({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-12 md:items-center gap-x-10 gap-y-8 md:gap-y-10">
+    <div className="grid grid-cols-1 md:grid-cols-12 md:items-center gap-x-10 gap-y-6 md:gap-y-10">
       {/* ================= LEFT — identity ================= */}
-      <div className="md:col-span-7 space-y-5 md:space-y-6 pointer-events-none">
+      <div className="md:col-span-7 space-y-4 md:space-y-6 pointer-events-none">
         {/* Name — the dominant statement (static server HTML, LCP element) */}
         {children}
 
