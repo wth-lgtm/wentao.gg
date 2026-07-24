@@ -164,13 +164,13 @@ export default function LocatorMap({
     "grid h-6 w-6 place-items-center rounded-md border border-border/60 bg-background/60 text-muted backdrop-blur-sm transition-colors hover:text-foreground hover:border-foreground/30";
 
   return (
-    <div className="relative">
+    <div className="relative h-full">
       <svg
         ref={svgRef}
         viewBox={`0 0 ${VBW} ${VBH}`}
-        className="block w-full h-auto cursor-grab touch-pan-y active:cursor-grabbing"
+        className="block w-full h-full cursor-grab touch-pan-y active:cursor-grabbing"
         aria-hidden="true"
-        preserveAspectRatio="xMidYMid meet"
+        preserveAspectRatio="xMidYMid slice"
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}

@@ -188,8 +188,9 @@ export default function VisitorIntel() {
         </span>
       </div>
 
-      {/* Dotted world map → zoom to pin (drag / scroll / ⌖ to explore) */}
-      <div className="mb-4 overflow-hidden rounded-xl bg-background/40 ring-1 ring-border/60">
+      {/* Dotted world map → zoom to pin (drag / scroll / ⌖ to explore). Height scales with
+          the viewport so the card stays compact on short screens. */}
+      <div className="mb-4 h-[clamp(104px,15vh,148px)] overflow-hidden rounded-xl bg-background/40 ring-1 ring-border/60">
         <LocatorMap lat={lat} lon={lon} />
       </div>
 
