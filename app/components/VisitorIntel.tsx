@@ -206,7 +206,7 @@ export default function VisitorIntel() {
           </dd>
         </div>
         <div className="flex items-baseline gap-3">
-          <dt className="w-9 shrink-0 text-muted/60">CITY</dt>
+          <dt className="w-9 shrink-0 text-muted/60">NEAR</dt>
           <dd className="min-w-0 break-words text-foreground/85">{cityDisplay}</dd>
         </div>
       </dl>
