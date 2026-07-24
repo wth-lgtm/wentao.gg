@@ -13,6 +13,8 @@ interface ApiGeo {
   ip: string;
   location: string;
   city: string;
+  isp: string; // carrier / ASN (e.g. "Zayo Bandwidth")
+  org: string; // end-customer org (e.g. "Mercor.io Corporation")
   lat: number | null;
   lon: number | null;
 }
@@ -24,10 +26,7 @@ function flagFromCode(cc: unknown): string {
   );
 }
 
-function num(v: unknown): number | null {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
+const str = (v: unknown): string => (typeof v === "string" ? v : "");
 
 // Loopback / private-range IPs (e.g. ::1 on localhost) — don't display these; prefer the
 // public IP the geo provider sees.
@@ -46,40 +45,77 @@ function isPrivateIp(ip: string): boolean {
   );
 }
 
-function normalizeGeo(d: Record<string, unknown>): ApiGeo {
-  const city = typeof d.city === "string" ? d.city.trim() : "";
-  const parts = [city, d.region, d.country].filter(
-    (p): p is string => typeof p === "string" && !!p.trim()
-  );
-  const flag = flagFromCode(d.country_code);
-  const location = parts.length ? `${parts.join(", ")}${flag ? ` ${flag}` : ""}` : "";
-  const lat = num(d.latitude);
-  const lon = num(d.longitude);
-  const fix = lat !== null && lon !== null && !(lat === 0 && lon === 0);
-  return {
-    ip: typeof d.ip === "string" ? d.ip : "",
-    location,
-    city,
-    lat: fix ? lat : null,
-    lon: fix ? lon : null,
-  };
+interface RawGeo {
+  ip: string;
+  city: string;
+  region: string;
+  cc: string; // ISO country code
+  isp: string; // carrier / ASN
+  org: string; // end-customer org
+  lat: number;
+  lon: number;
 }
 
-// Ordered geo providers (HTTPS + CORS + no key). ipwho.is resolves city best; geojs backs
-// it up. Return the first city-level hit; otherwise the first result that at least has
-// coordinates (so the map can still frame the country).
-const GEO_PROVIDERS = ["https://ipwho.is/", "https://get.geojs.io/v1/ip/geo.json"];
+// Ordered geo providers, best-first. Accuracy varies a LOT on data-center IPs: our /api/geo
+// (ip-api.com, server-side) matches whatismyipaddress → San Francisco + "Mercor.io
+// Corporation"; ipinfo lands in the right metro (→ San Jose); ipwho.is (MaxMind) can be far
+// off (→ Atlanta); geojs is country-only. Take the first city-level hit, else the first
+// result that at least has coordinates.
+const GEO_PROVIDERS: {
+  url: string;
+  adapt: (d: Record<string, unknown>) => RawGeo | null;
+}[] = [
+  {
+    // Our own server route → ip-api.com. Returns {} (→ null here) on failure.
+    url: "/api/geo",
+    adapt: (d) =>
+      d.city || d.latitude != null
+        ? { ip: str(d.ip), city: str(d.city), region: str(d.region), cc: str(d.country_code), isp: str(d.isp), org: str(d.org), lat: Number(d.latitude), lon: Number(d.longitude) }
+        : null,
+  },
+  {
+    url: "https://ipinfo.io/json",
+    adapt: (d) => {
+      const loc = str(d.loc);
+      const [lat, lon] = loc ? loc.split(",").map(Number) : [NaN, NaN];
+      return { ip: str(d.ip), city: str(d.city), region: str(d.region), cc: str(d.country), isp: "", org: "", lat, lon };
+    },
+  },
+  {
+    url: "https://ipwho.is/",
+    adapt: (d) =>
+      d.success === false
+        ? null
+        : { ip: str(d.ip), city: str(d.city), region: str(d.region), cc: str(d.country_code), isp: "", org: "", lat: Number(d.latitude), lon: Number(d.longitude) },
+  },
+  {
+    url: "https://get.geojs.io/v1/ip/geo.json",
+    adapt: (d) => ({ ip: str(d.ip), city: str(d.city), region: str(d.region), cc: str(d.country_code), isp: "", org: "", lat: Number(d.latitude), lon: Number(d.longitude) }),
+  },
+];
+
+function toApiGeo(r: RawGeo): ApiGeo {
+  const city = r.city.trim();
+  // City + region only; the flag conveys the country, so we skip the (long) country name
+  // to keep the line short on mobile.
+  const parts = [city, r.region].filter((p) => p && p.trim());
+  const flag = flagFromCode(r.cc);
+  const location = parts.length ? `${parts.join(", ")}${flag ? ` ${flag}` : ""}` : "";
+  const fix =
+    Number.isFinite(r.lat) && Number.isFinite(r.lon) && !(r.lat === 0 && r.lon === 0);
+  return { ip: r.ip, location, city, isp: r.isp, org: r.org, lat: fix ? r.lat : null, lon: fix ? r.lon : null };
+}
 
 async function fetchGeo(signal: AbortSignal): Promise<ApiGeo | null> {
   let coordsOnly: ApiGeo | null = null;
-  for (const url of GEO_PROVIDERS) {
+  for (const p of GEO_PROVIDERS) {
     if (signal.aborted) return null;
     try {
-      const r = await fetch(url, { signal });
+      const r = await fetch(p.url, { signal });
       if (!r.ok) continue;
-      const d = await r.json();
-      if (d && d.success === false) continue; // ipwho.is failure flag
-      const g = normalizeGeo(d as Record<string, unknown>);
+      const raw = p.adapt((await r.json()) as Record<string, unknown>);
+      if (!raw) continue;
+      const g = toApiGeo(raw);
       if (g.city) return g;
       if (g.lat !== null && !coordsOnly) coordsOnly = g;
     } catch {
@@ -97,12 +133,11 @@ export default function VisitorIntel() {
   const [count, setCount] = useState<number | null>(null);
   const [located, setLocated] = useState(false);
 
-  // Read the visitor cookie; if it lacks a real city or coordinates, resolve them
-  // client-side (a bare country doesn't count — we want city-level or a fallback try).
+  // Read the visitor cookie for an instant first-paint hint, then always resolve via the
+  // geo chain — /api/geo (ip-api) is more accurate than Vercel's edge geo and is the only
+  // source of the ISP/org, so we prefer it even when the cookie already has a city.
   useEffect(() => {
-    const d = getVisitorData();
-    setData(d);
-    if (d.city && d.lat !== null && d.lon !== null) return;
+    setData(getVisitorData());
     setProbing(true);
     const ctrl = new AbortController();
     fetchGeo(ctrl.signal)
@@ -125,22 +160,21 @@ export default function VisitorIntel() {
     };
   }, []);
 
-  // Merge cookie (fast path) with the client lookup (fallback), preferring real values.
+  // Prefer the resolved lookup (ip-api-grade) over the cookie hint; the cookie is just the
+  // instant placeholder until /api/geo answers.
+  const hasApiCity = !!api?.city;
+  const location = hasApiCity ? api!.location : data?.location || api?.location || "";
+  const city = (hasApiCity ? api!.city : data?.city || "").trim();
+  const lat = api?.lat ?? data?.lat ?? null;
+  const lon = api?.lon ?? data?.lon ?? null;
+  const isp = api?.isp ?? "";
+  const org = api?.org ?? "";
   // Prefer a public IP: on localhost the cookie holds ::1, so fall back to the geo IP.
   const cookieIp = data?.ip ?? "";
   const ip = !isPrivateIp(cookieIp) ? cookieIp : api?.ip || cookieIp || "";
-  const lat = data?.lat ?? api?.lat ?? null;
-  const lon = data?.lon ?? api?.lon ?? null;
-  // Prefer whichever location is more specific (e.g. "City, Region, Country" over a bare
-  // "Country"), counting comma-parts; ties fall back to the cookie value.
-  const cookieLoc = data?.location ?? "";
-  const apiLoc = api?.location ?? "";
-  const parts = (s: string) => s.split(",").filter((p) => p.trim()).length;
-  const location = parts(apiLoc) > parts(cookieLoc) ? apiLoc : cookieLoc || apiLoc;
   const hasFix = lat !== null && lon !== null;
-  // A city-LEVEL result (not just a country) is what counts as "detected". A bare country
-  // reads as "classified" — the visitor's precise location is hidden.
-  const city = (data?.city || api?.city || "").trim();
+  // A city-LEVEL result (not just a country) counts as "detected"; a bare country reads as
+  // "classified".
   const hasCity = !!city;
   const stillLooking = data === null || probing;
 
@@ -190,12 +224,12 @@ export default function VisitorIntel() {
 
       {/* Dotted world map → zoom to pin (drag / scroll / ⌖ to explore). Height scales with
           the viewport so the card stays compact on short screens. */}
-      <div className="mb-4 h-[clamp(104px,15vh,148px)] overflow-hidden rounded-xl bg-background/40 ring-1 ring-border/60">
+      <div className="mb-3 h-[clamp(92px,13vh,140px)] overflow-hidden rounded-xl bg-background/40 ring-1 ring-border/60">
         <LocatorMap lat={lat} lon={lon} />
       </div>
 
       {/* Readout */}
-      <dl className="space-y-2 text-xs">
+      <dl className="space-y-1.5 text-xs">
         <div className="flex items-baseline gap-3">
           <dt className="w-9 shrink-0 text-muted/60">IP</dt>
           <dd className="min-w-0 break-all font-semibold text-accent">
@@ -206,6 +240,18 @@ export default function VisitorIntel() {
             )}
           </dd>
         </div>
+        {isp && (
+          <div className="flex items-baseline gap-3">
+            <dt className="w-9 shrink-0 text-muted/60">ISP</dt>
+            <dd className="min-w-0 break-words text-foreground/85">{isp}</dd>
+          </div>
+        )}
+        {org && org !== isp && (
+          <div className="flex items-baseline gap-3">
+            <dt className="w-9 shrink-0 text-muted/60">ORG</dt>
+            <dd className="min-w-0 break-words text-foreground/85">{org}</dd>
+          </div>
+        )}
         <div className="flex items-baseline gap-3">
           <dt className="w-9 shrink-0 text-muted/60">NEAR</dt>
           <dd className="min-w-0 break-words text-foreground/85">{cityDisplay}</dd>
@@ -213,7 +259,7 @@ export default function VisitorIntel() {
       </dl>
 
       {/* Divider */}
-      <div className="my-3 h-px bg-border/70" />
+      <div className="my-2.5 h-px bg-border/70" />
 
       {/* Live counter — the fun fact */}
       {count !== null && (
