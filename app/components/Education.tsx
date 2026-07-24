@@ -107,7 +107,8 @@ function EducationCard({
             className="w-3 h-3 bg-accent rounded-full z-10"
           />
           {index < education.length - 1 && (
-            <div className="w-0.5 h-full bg-border absolute top-3 left-[5px]" />
+            /* See Experience.tsx — h-full leaves a 28px break before the next dot. */
+            <div className="w-0.5 h-[calc(100%+1.75rem)] bg-border absolute top-3 left-[5px]" />
           )}
         </div>
 
