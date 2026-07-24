@@ -29,28 +29,64 @@ function num(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+// Loopback / private-range IPs (e.g. ::1 on localhost) — don't display these; prefer the
+// public IP the geo provider sees.
+function isPrivateIp(ip: string): boolean {
+  return (
+    !ip ||
+    ip === "::1" ||
+    ip === "0.0.0.0" ||
+    ip.startsWith("127.") ||
+    ip.startsWith("10.") ||
+    ip.startsWith("192.168.") ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(ip) ||
+    ip.startsWith("fe80") ||
+    ip.startsWith("fc") ||
+    ip.startsWith("fd")
+  );
+}
+
+function normalizeGeo(d: Record<string, unknown>): ApiGeo {
+  const city = typeof d.city === "string" ? d.city.trim() : "";
+  const parts = [city, d.region, d.country].filter(
+    (p): p is string => typeof p === "string" && !!p.trim()
+  );
+  const flag = flagFromCode(d.country_code);
+  const location = parts.length ? `${parts.join(", ")}${flag ? ` ${flag}` : ""}` : "";
+  const lat = num(d.latitude);
+  const lon = num(d.longitude);
+  const fix = lat !== null && lon !== null && !(lat === 0 && lon === 0);
+  return {
+    ip: typeof d.ip === "string" ? d.ip : "",
+    location,
+    city,
+    lat: fix ? lat : null,
+    lon: fix ? lon : null,
+  };
+}
+
+// Ordered geo providers (HTTPS + CORS + no key). ipwho.is resolves city best; geojs backs
+// it up. Return the first city-level hit; otherwise the first result that at least has
+// coordinates (so the map can still frame the country).
+const GEO_PROVIDERS = ["https://ipwho.is/", "https://get.geojs.io/v1/ip/geo.json"];
+
 async function fetchGeo(signal: AbortSignal): Promise<ApiGeo | null> {
-  try {
-    const r = await fetch("https://get.geojs.io/v1/ip/geo.json", { signal });
-    if (!r.ok) return null;
-    const d = await r.json();
-    const parts = [d.city, d.region, d.country].filter(
-      (p) => typeof p === "string" && p.trim()
-    );
-    const flag = flagFromCode(d.country_code);
-    const location = parts.length ? `${parts.join(", ")}${flag ? ` ${flag}` : ""}` : "";
-    const lat = num(d.latitude);
-    const lon = num(d.longitude);
-    return {
-      ip: typeof d.ip === "string" ? d.ip : "",
-      location,
-      city: typeof d.city === "string" ? d.city : "",
-      lat: lat !== null && !(lat === 0 && lon === 0) ? lat : null,
-      lon: lon !== null && !(lat === 0 && lon === 0) ? lon : null,
-    };
-  } catch {
-    return null;
+  let coordsOnly: ApiGeo | null = null;
+  for (const url of GEO_PROVIDERS) {
+    if (signal.aborted) return null;
+    try {
+      const r = await fetch(url, { signal });
+      if (!r.ok) continue;
+      const d = await r.json();
+      if (d && d.success === false) continue; // ipwho.is failure flag
+      const g = normalizeGeo(d as Record<string, unknown>);
+      if (g.city) return g;
+      if (g.lat !== null && !coordsOnly) coordsOnly = g;
+    } catch {
+      if (signal.aborted) return null;
+    }
   }
+  return coordsOnly;
 }
 
 export default function VisitorIntel() {
@@ -90,7 +126,9 @@ export default function VisitorIntel() {
   }, []);
 
   // Merge cookie (fast path) with the client lookup (fallback), preferring real values.
-  const ip = data?.ip || api?.ip || "";
+  // Prefer a public IP: on localhost the cookie holds ::1, so fall back to the geo IP.
+  const cookieIp = data?.ip ?? "";
+  const ip = !isPrivateIp(cookieIp) ? cookieIp : api?.ip || cookieIp || "";
   const lat = data?.lat ?? api?.lat ?? null;
   const lon = data?.lon ?? api?.lon ?? null;
   // Prefer whichever location is more specific (e.g. "City, Region, Country" over a bare
