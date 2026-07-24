@@ -1,79 +1,91 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 
-// A lifelike Solari / airport-departure split-flap board that cycles through a set of roles.
-// Each character cell riffles FORWARD through the charset (blank + A–Z) one physical flap at
-// a time until it lands on its target — never a direct swap, never reversing (real drums
-// can't). The board hands each column its target on a per-column stagger so the change
-// ripples left-to-right like real hardware. The flap itself is pure CSS keyframes (on the
-// compositor); framer-motion is used only for the leading-emoji crossfade + reduced motion.
-// See app/globals.css `.split-flap` for the 4-layer flap mechanics.
+// A lifelike Solari / airport split-flap board that cycles through roles. Each cell riffles
+// FORWARD through the charset (blank + A–Z) one physical flap at a time to its target — real
+// drums can't reverse, so this rifles through every intermediate letter (no direct swap).
+// Stepping is driven by a TIMER (the source of truth — it can't get stuck), staggered per
+// column so the change ripples left-to-right; the CSS keyframe flip is purely the visual and
+// replays each step via a keyed remount. framer-motion is used only for the emoji crossfade
+// + reduced motion. See `.split-flap` in app/globals.css for the 4-layer flap mechanics.
 
-const CHARSET = " ABCDEFGHIJKLMNOPQRSTUVWXYZ"; // blank (drum "home") then A–Z
-const N = CHARSET.length;
+const CHARSET = " ABCDEFGHIJKLMNOPQRSTUVWXYZ"; // blank ("home") then A–Z
+const NC = CHARSET.length;
 
 function idxOf(c: string): number {
   const i = CHARSET.indexOf(c.toUpperCase());
-  return i === -1 ? 0 : i; // unknown → blank
+  return i === -1 ? 0 : i;
 }
-// One FORWARD hop toward the target, wrapping at the end of the drum.
 function stepToward(cur: string, target: string): string {
   const c = idxOf(cur);
   const t = idxOf(target);
-  return c === t ? cur : CHARSET[(c + 1) % N];
+  return c === t ? cur : CHARSET[(c + 1) % NC];
 }
 
 const ROLES = [
-  { emoji: "⚙️", word: "ENGINEER" }, // ⚙️
-  { emoji: "💻", word: "DEVELOPER" }, // 💻
-  { emoji: "📷", word: "PHOTOGRAPHER" }, // 📷
-  { emoji: "🏋️", word: "POWERLIFTER" }, // 🏋️
+  { emoji: "⚙️", word: "ENGINEER" },
+  { emoji: "💻", word: "DEVELOPER" },
+  { emoji: "📷", word: "PHOTOGRAPHER" },
+  { emoji: "🏋️", word: "POWERLIFTER" },
 ];
 
-const WIDTH = 12; // fixed board width = "PHOTOGRAPHER"; shorter words pad with blank flaps
-const HOLD_MS = 3400; // dwell on a finished word before flipping to the next
-const STAGGER_MS = 45; // per-column ripple
+const HOLD_MS = 4000; // dwell on a finished word before flipping to the next
+const FLAP_MS = 120; // one physical flap — deliberately unhurried so the flip is legible
 
-const pad = (w: string) => w.padEnd(WIDTH, " ").slice(0, WIDTH);
+type Cell = { display: string; prev: string; step: number };
 
-// One split-flap cell. Given a target char it self-paces toward it, chaining each hop on the
-// bottom leaf's "dropIn" animationend (the animation is the clock — no timer drift).
+// One cell. A timer advances `display` one flap toward `target` every FLAP_MS. All cells
+// start together (no per-column ripple), so the whole word resolves at once. Each advance
+// bumps `step`, which re-keys the leaves so the CSS flip animation replays; the animation's
+// end state already shows `display`, so a settled cell reads correctly with no cleanup.
 function FlapCell({ target }: { target: string }) {
   const reduce = useReducedMotion() ?? false;
-  const [display, setDisplay] = useState(" "); // settled char (= the PREVIOUS char mid-flip)
-  const [flipping, setFlipping] = useState(false);
-  const next = flipping ? stepToward(display, target) : display;
+  const [c, setC] = useState<Cell>({ display: " ", prev: " ", step: 0 });
+  const targetRef = useRef(target);
+  targetRef.current = target;
 
   useEffect(() => {
     if (reduce) {
-      setDisplay(target);
-      setFlipping(false);
+      setC((s) => ({ display: target, prev: target, step: s.step }));
       return;
     }
-    if (display !== target && !flipping) setFlipping(true); // arm the next hop
-  }, [display, target, flipping, reduce]);
+    const interval = setInterval(() => {
+      setC((s) =>
+        s.display === targetRef.current
+          ? s // settled — no-op (React bails out on same reference)
+          : { display: stepToward(s.display, targetRef.current), prev: s.display, step: s.step + 1 }
+      );
+    }, FLAP_MS);
+    return () => clearInterval(interval);
+  }, [target, reduce]);
 
-  const onEnd = (e: React.AnimationEvent) => {
-    if (e.animationName !== "sfDrop") return; // bottom leaf (sfDrop) finishes last
-    setDisplay(stepToward(display, target));
-    setFlipping(false);
-  };
+  if (reduce) {
+    return (
+      <div className="sf-cell">
+        <div className="sf-flat">
+          <span className="sf-glyph">{c.display}</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className={`sf-cell${flipping ? " flipping" : ""}`}>
+    <div className="sf-cell">
+      {/* static layers: incoming (top) + outgoing (bottom) */}
       <div className="sf-half sf-top">
-        <span className="sf-glyph">{next}</span>
+        <span className="sf-glyph">{c.display}</span>
       </div>
       <div className="sf-half sf-bottom">
-        <span className="sf-glyph">{display}</span>
+        <span className="sf-glyph">{c.prev}</span>
       </div>
-      <div className="sf-leaf sf-top">
-        <span className="sf-glyph">{display}</span>
+      {/* hinged leaves — re-keyed per step so the flip replays each flap */}
+      <div key={`t${c.step}`} className="sf-leaf sf-top">
+        <span className="sf-glyph">{c.prev}</span>
       </div>
-      <div className="sf-leaf sf-bottom" onAnimationEnd={onEnd}>
-        <span className="sf-glyph">{next}</span>
+      <div key={`b${c.step}`} className="sf-leaf sf-bottom">
+        <span className="sf-glyph">{c.display}</span>
       </div>
     </div>
   );
@@ -82,57 +94,38 @@ function FlapCell({ target }: { target: string }) {
 export default function SplitFlap() {
   const reduce = useReducedMotion() ?? false;
   const [i, setI] = useState(0);
-  const [targets, setTargets] = useState<string[]>(() => pad(ROLES[0].word).split(""));
 
-  // Cycle the roles.
   useEffect(() => {
     const t = setInterval(() => setI((n) => (n + 1) % ROLES.length), HOLD_MS);
     return () => clearInterval(t);
   }, []);
 
-  // Hand each column its new target on a left-to-right stagger (the ripple lives here).
-  useEffect(() => {
-    const chars = pad(ROLES[i].word).split("");
-    if (reduce) {
-      setTargets(chars);
-      return;
-    }
-    const timers = chars.map((c, col) =>
-      setTimeout(() => {
-        setTargets((prev) => {
-          const nextT = [...prev];
-          nextT[col] = c;
-          return nextT;
-        });
-      }, col * STAGGER_MS)
-    );
-    return () => timers.forEach(clearTimeout);
-  }, [i, reduce]);
+  const role = ROLES[i];
+  const chars = role.word.split(""); // exact width — no blank padding, no empty cells
 
   return (
     <div className="split-flap flex items-center gap-3">
       <AnimatePresence mode="wait">
         <motion.span
-          key={ROLES[i].emoji}
+          key={role.emoji}
           initial={reduce ? false : { opacity: 0, y: 4 }}
           animate={{ opacity: 1, y: 0 }}
           exit={reduce ? undefined : { opacity: 0, y: -4 }}
           transition={{ duration: 0.25 }}
           className="text-[length:var(--sf-emoji)] leading-none shrink-0"
         >
-          {ROLES[i].emoji}
+          {role.emoji}
         </motion.span>
       </AnimatePresence>
 
       <div className="sf-board" aria-hidden="true">
-        {targets.map((t, col) => (
-          <FlapCell key={col} target={t} />
+        {chars.map((ch, col) => (
+          <FlapCell key={col} target={ch} />
         ))}
       </div>
 
-      {/* Announce the finished word (not every flap) to assistive tech. */}
       <span className="sr-only" aria-live="polite">
-        {ROLES[i].word}
+        {role.word}
       </span>
     </div>
   );

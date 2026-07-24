@@ -443,7 +443,7 @@ input:focus {
   --sf-cell-h: clamp(1.6rem, 7.2vw, 2.9rem);
   --sf-gap: clamp(2px, 0.5vw, 4px);
   --sf-emoji: clamp(1.35rem, 5.4vw, 2rem);
-  --sf-flap: 35ms; /* one leaf phase; a full flap = fold (35) + drop (35) = 70ms */
+  --sf-flap: 60ms; /* one leaf phase; a full flap = fold (60) + drop (60) = 120ms (matches FLAP_MS) */
 }
 
 .sf-board {
@@ -509,13 +509,18 @@ input:focus {
   transform: translateZ(0);
   will-change: transform;
 }
+/* The leaves are re-keyed (remounted) on every flap step, so the flip animation replays
+   each hop; the animation's end state already shows the new char, so a settled cell reads
+   correctly. */
 .sf-leaf.sf-top {
   transform-origin: 50% 100%;
-  transform: rotateX(0deg); /* rest: covers the static top */
+  animation: sfFold var(--sf-flap) cubic-bezier(0.36, 0, 0.66, -0.06) both;
 }
 .sf-leaf.sf-bottom {
+  /* `both` fill: holds the `from` (rotateX(90), hidden) during the fold-phase delay, then
+     holds the `to` (rotateX(0), dropped in) after — so it reads correctly at every phase. */
   transform-origin: 50% 0%;
-  transform: rotateX(90deg); /* rest: folded up out of view */
+  animation: sfDrop var(--sf-flap) cubic-bezier(0.2, 1.4, 0.4, 1) var(--sf-flap) both;
 }
 
 /* shading overlay that sells the fold */
@@ -527,18 +532,22 @@ input:focus {
   opacity: 0;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(0, 0, 0, 0) 42%, rgba(0, 0, 0, 0.5));
 }
-
-.sf-cell.flipping .sf-leaf.sf-top {
-  animation: sfFold var(--sf-flap) cubic-bezier(0.36, 0, 0.66, -0.06) forwards;
-}
-.sf-cell.flipping .sf-leaf.sf-top::after {
+.sf-leaf.sf-top::after {
   animation: sfShadeTop var(--sf-flap) linear forwards;
 }
-.sf-cell.flipping .sf-leaf.sf-bottom {
-  animation: sfDrop var(--sf-flap) cubic-bezier(0.2, 1.4, 0.4, 1) var(--sf-flap) forwards;
-}
-.sf-cell.flipping .sf-leaf.sf-bottom::after {
+.sf-leaf.sf-bottom::after {
   animation: sfShadeBottom var(--sf-flap) linear var(--sf-flap) forwards;
+}
+
+/* Reduced-motion / SSR-safe static cell (rendered by the component when reduce is on). */
+.sf-flat {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--flap-bg);
+  border-radius: 4px;
 }
 
 @keyframes sfFold {
@@ -560,5 +569,5 @@ input:focus {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sf-cell.flipping .sf-leaf { animation: none !important; }
+  .sf-leaf { animation: none !important; }
 }
