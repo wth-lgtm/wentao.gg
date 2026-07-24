@@ -41,7 +41,10 @@ const EMOJI_POOL = [
 const HOLD_MS = 4000; // dwell on a finished word before flipping to the next
 const FLAP_MS = 100; // one physical flap — legible but a touch quicker to settle
 
-type Cell = { display: string; prev: string; step: number };
+// `settle` marks the single step on which this cell reaches its target letter — the
+// CSS rake holds the light longer on that flap, so a letter arriving and a letter
+// glinting are the same event.
+type Cell = { display: string; prev: string; step: number; settle?: boolean };
 
 // Presentational flap cell (4-layer). The leaves are re-keyed by `step`, so the flip
 // replays each hop; the animation's end state shows the new glyph, so a settled cell reads
@@ -69,7 +72,11 @@ function FlapCell({ cell, emoji = false }: { cell: Cell; emoji?: boolean }) {
       <div key={`t${cell.step}`} className="sf-leaf sf-top">
         <span className="sf-glyph">{cell.prev}</span>
       </div>
-      <div key={`b${cell.step}`} className="sf-leaf sf-bottom">
+      <div
+        key={`b${cell.step}`}
+        className="sf-leaf sf-bottom"
+        data-settle={cell.settle ? "" : undefined}
+      >
         <span className="sf-glyph">{cell.display}</span>
       </div>
     </div>
@@ -132,7 +139,8 @@ export default function SplitFlap() {
         prev.map((cell, k) => {
           const t = targetWord[k];
           if (cell.display === t) return cell; // settled — no re-key, no re-flip
-          return { display: stepToward(cell.display, t), prev: cell.display, step: cell.step + 1 };
+          const next = stepToward(cell.display, t);
+          return { display: next, prev: cell.display, step: cell.step + 1, settle: next === t };
         })
       );
       setEmojiCell((e) => {
