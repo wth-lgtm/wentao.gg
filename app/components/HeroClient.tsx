@@ -224,7 +224,7 @@ export default function HeroAnimations({ children }: { children: ReactNode }) {
   });
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-12 md:items-center gap-x-10 gap-y-10">
+    <div className="grid grid-cols-1 md:grid-cols-12 md:items-center gap-x-10 gap-y-6 md:gap-y-10">
       {/* ================= LEFT — identity ================= */}
       <div className="md:col-span-7 space-y-4 md:space-y-5 pointer-events-none">
         {/* Greeting kicker (E3) — one quiet mono line above the name */}
