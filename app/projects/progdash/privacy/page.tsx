@@ -23,7 +23,7 @@ export default function ProgDashPrivacy() {
 
       <div className="max-w-2xl mx-auto px-4 py-8 sm:py-12">
         <h2 className="text-2xl sm:text-3xl font-bold mb-6">Privacy Policy</h2>
-        <p className="text-xs text-muted mb-8">Last updated: February 7, 2026</p>
+        <p className="text-xs text-muted mb-8">Last updated: July 24, 2026</p>
 
         <div className="space-y-6 text-sm text-muted leading-relaxed">
           <section>
@@ -39,12 +39,17 @@ export default function ProgDashPrivacy() {
             <h3 className="text-base font-semibold text-foreground mb-2">Data We Access</h3>
             <p>When you sign in, ProgDash requests read-only access to:</p>
             <ul className="list-disc list-inside mt-2 space-y-1">
-              <li>Your Google Drive file list (to show your spreadsheets)</li>
+              <li>
+                The <strong className="text-foreground">names only</strong> of the
+                spreadsheets in your Google Drive, so it can offer you a list to pick from
+              </li>
               <li>Your Google Sheets data (to display the contents you select)</li>
             </ul>
             <p className="mt-2">
               All access is <strong className="text-foreground">read-only</strong>. ProgDash
-              cannot modify, delete, or create any files in your Google account.
+              cannot modify, delete, or create any files in your Google account. Its Drive
+              permission is limited to file metadata, so it is not able to open or download
+              any Drive file — only the spreadsheet you explicitly choose is ever read.
             </p>
           </section>
 
