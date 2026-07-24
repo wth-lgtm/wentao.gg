@@ -3,6 +3,7 @@ import { Space_Grotesk, JetBrains_Mono } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { ThemeProvider } from "./components/ThemeProvider";
+import MotionProvider from "./components/MotionProvider";
 import "./globals.css";
 
 const spaceGrotesk = Space_Grotesk({
@@ -59,7 +60,9 @@ export default function RootLayout({
       </head>
       <body className={`${spaceGrotesk.variable} ${jetbrainsMono.variable} antialiased bg-background text-foreground`}>
         <ThemeProvider>
-          {children}
+          <MotionProvider>
+            {children}
+          </MotionProvider>
         </ThemeProvider>
         <Analytics />
         <SpeedInsights />

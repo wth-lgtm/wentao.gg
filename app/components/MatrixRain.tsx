@@ -75,6 +75,21 @@ export default function MatrixRain() {
       glyphs[i] = g;
     };
 
+    // Static, sparse frame for reduced motion — no animation, drawn once per sizing.
+    const drawStill = () => {
+      for (let i = 0; i < cols; i++) {
+        const hRow = (Math.random() * rows) | 0;
+        const L = trail[i];
+        for (let d = L; d >= 0; d--) {
+          const r = hRow - d;
+          if (r < 0 || r >= rows) continue;
+          ctx.shadowBlur = 0;
+          ctx.fillStyle = `rgba(${ar},${ag},${ab},${Math.pow(1 - d / L, 1.4) * 0.5})`;
+          ctx.fillText(glyphs[i][r], i * F, r * F);
+        }
+      }
+    };
+
     const resize = () => {
       const w = wrap.clientWidth;
       const h = wrap.clientHeight;
@@ -90,6 +105,10 @@ export default function MatrixRain() {
       for (let i = 0; i < cols; i++) fresh(i, true);
       ctx.font = `${F}px "JetBrains Mono", ui-monospace, monospace`;
       ctx.textBaseline = "top";
+      // Setting canvas.width above CLEARS the bitmap, and ResizeObserver fires a
+      // mandatory initial callback — so the still frame must be re-drawn here, or
+      // reduced-motion visitors get an empty canvas (no rain at all).
+      if (reduce) drawStill();
     };
     resize();
     const ro = new ResizeObserver(resize);
@@ -139,20 +158,7 @@ export default function MatrixRain() {
       }
     };
 
-    if (reduce) {
-      // static, sparse frame — no animation
-      for (let i = 0; i < cols; i++) {
-        const hRow = (Math.random() * rows) | 0;
-        const L = trail[i];
-        for (let d = L; d >= 0; d--) {
-          const r = hRow - d;
-          if (r < 0 || r >= rows) continue;
-          ctx.shadowBlur = 0;
-          ctx.fillStyle = `rgba(${ar},${ag},${ab},${Math.pow(1 - d / L, 1.4) * 0.5})`;
-          ctx.fillText(glyphs[i][r], i * F, r * F);
-        }
-      }
-    } else {
+    if (!reduce) {
       lastDraw = performance.now();
       raf = requestAnimationFrame(step);
     }

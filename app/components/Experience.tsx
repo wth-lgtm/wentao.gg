@@ -109,7 +109,10 @@ function ExperienceCard({
             className="w-3 h-3 bg-accent rounded-full z-10"
           />
           {index < experiences.length - 1 && (
-            <div className="w-0.5 h-full bg-border absolute top-3 left-[5px]" />
+            /* h-full resolves against the card ROW, so with top-3 (12px) the rail
+               stopped 28px short of the next dot — a visible break in every gap.
+               +1.75rem spans the remainder of the md:space-y-10 (40px) gap. */
+            <div className="w-0.5 h-[calc(100%+1.75rem)] bg-border absolute top-3 left-[5px]" />
           )}
         </div>
 

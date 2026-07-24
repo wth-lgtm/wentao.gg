@@ -163,14 +163,18 @@ button:active, .btn:active {
 /* Card hover lift — subtle rise + soft theme-tuned shadow, shared across content cards.
    Also transitions colors so cards using it can drop `transition-all` cleanly. */
 .card-lift {
-  transition: transform var(--dur-base) var(--ease-entrance),
+  transition: translate var(--dur-base) var(--ease-entrance),
               box-shadow var(--dur-base) var(--ease-entrance),
               background-color var(--dur-base) var(--ease-entrance),
               border-color var(--dur-base) var(--ease-entrance);
 }
 
+/* Uses the independent `translate` property, NOT `transform`: every card carrying
+   .card-lift is also a framer-motion element writing an inline `transform` for its
+   scroll entrance, and an inline style beats the stylesheet — so a `transform` rule
+   here never applied at all. `translate` composes with that transform instead. */
 .card-lift:hover {
-  transform: translateY(-4px);
+  translate: 0 -4px;
 }
 
 .dark .card-lift:hover {
@@ -319,6 +323,17 @@ main:focus {
   animation-delay: 1.5s;
 }
 
+/* Windows High Contrast Mode discards background images but keeps the transparent
+   text fill, which would render the largest heading on the site as nothing at all.
+   Hand the glyphs back to the forced palette. */
+@media (forced-colors: active) {
+  .text-shimmer {
+    background: none;
+    -webkit-text-fill-color: currentColor;
+    animation: none;
+  }
+}
+
 /* Breathing glow animation */
 @keyframes breathe {
   0%, 100% {
@@ -361,6 +376,11 @@ main:focus {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+    /* Delays must be zeroed too, or a collapsed animation still WAITS: the hero's
+       scroll cue carries an inline `animationDelay: 2s`, so without this a
+       reduced-motion visitor sits in front of an empty viewport for two seconds. */
+    animation-delay: 0ms !important;
+    transition-delay: 0ms !important;
   }
   /* Park the name as a static wordmark instead of glinting */
   .text-shimmer { animation: none; background-position: 0 0; }
