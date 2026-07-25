@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "PowerOPPS | Powerlifting Calculator",
+  alternates: { canonical: "/projects/poweropps" },
   description:
     "Calculate your IPF GL, DOTS, Wilks scores and find your target total",
   openGraph: {
@@ -11,7 +12,7 @@ export const metadata: Metadata = {
     type: "website",
   },
   twitter: {
-    card: "summary",
+    card: "summary_large_image",
     title: "PowerOPPS | Powerlifting Calculator",
     description:
       "Calculate your IPF GL, DOTS, Wilks scores and find your target total",

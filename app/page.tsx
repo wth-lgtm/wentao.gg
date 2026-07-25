@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import dynamic from "next/dynamic";
 import Navigation from "./components/Navigation";
 import ScrollProgress from "./components/ScrollProgress";
@@ -27,6 +28,10 @@ const SiteStats = dynamic(() => import("./components/CommitHeatmap"), {
 const Connect = dynamic(() => import("./components/Connect"), {
   loading: () => <section className="py-20 md:py-24 px-6" />,
 });
+
+// The root layout deliberately declares no canonical (it would be inherited by every
+// project route); the homepage supplies its own.
+export const metadata: Metadata = { alternates: { canonical: "/" } };
 
 export default function Home() {
   return (
