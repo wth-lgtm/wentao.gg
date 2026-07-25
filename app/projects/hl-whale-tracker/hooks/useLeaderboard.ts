@@ -73,6 +73,10 @@ export function useLeaderboard(timePeriod: TimePeriod) {
 
   return {
     traders: periods[timePeriod] ?? [],
+    // All four windows, for the analytics tab's cross-window reads. Already in state
+    // from the single request above, so exposing it costs nothing and the tab makes
+    // no request of its own.
+    periods,
     loading,
     refreshing,
     error,
