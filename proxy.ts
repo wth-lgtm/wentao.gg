@@ -121,6 +121,7 @@ export function proxy(request: NextRequest) {
     timePeriod,
     location: locationString,
     city, // raw city (may be "") — lets the client tell "real city" from "country only"
+    cc: country, // ISO country code — lets the card pick miles vs km before /api/geo answers
     ip,
     lat,
     lon,

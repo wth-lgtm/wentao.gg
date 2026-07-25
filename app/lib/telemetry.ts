@@ -13,6 +13,23 @@ const KM_PER_MI = 1.609344;
 const rad = (d: number) => (d * Math.PI) / 180;
 const deg = (r: number) => (r * 180) / Math.PI;
 
+/**
+ * A usable fix. Nothing here validated its input before, so a malformed geo response could
+ * carry NaN straight through the haversine and render "NaN MI AWAY" — and a latitude of 999
+ * was accepted without complaint.
+ */
+export function isLatLon(v: LatLon | null | undefined): v is LatLon {
+  return (
+    !!v &&
+    Number.isFinite(v.lat) &&
+    Number.isFinite(v.lon) &&
+    v.lat >= -90 &&
+    v.lat <= 90 &&
+    v.lon >= -180 &&
+    v.lon <= 180
+  );
+}
+
 /** Great-circle distance in km (haversine). */
 export function greatCircleKm(a: LatLon, b: LatLon): number {
   const p1 = rad(a.lat);
@@ -37,6 +54,9 @@ const toVec = ({ lat, lon }: LatLon): [number, number, number] => {
  * bow it the wrong way entirely.
  */
 export function greatCirclePoints(a: LatLon, b: LatLon, steps: number): LatLon[] {
+  // Refuse to build a path from garbage — an unvalidated NaN here becomes an SVG `d`
+  // attribute full of NaN, which silently renders nothing.
+  if (!isLatLon(a) || !isLatLon(b) || !Number.isFinite(steps) || steps < 1) return [];
   const A = toVec(a);
   const B = toVec(b);
   const dot = Math.min(1, Math.max(-1, A[0] * B[0] + A[1] * B[1] + A[2] * B[2]));
@@ -62,7 +82,10 @@ export function greatCirclePoints(a: LatLon, b: LatLon, steps: number): LatLon[]
  * digits are noise that visibly changes between reloads — round hard. Imperial for
  * the US and UK, metric everywhere else.
  */
-export function formatDistance(km: number, cc: string): string {
+export function formatDistance(km: number, cc: string): string | null {
+  // Returns null rather than a string for bad input, so a caller renders its em-dash
+  // terminal state instead of publishing "NaN MI AWAY".
+  if (!Number.isFinite(km) || km < 0) return null;
   const imperial = cc === "US" || cc === "GB";
   const value = imperial ? km / KM_PER_MI : km;
   const unit = imperial ? "MI" : "KM";
