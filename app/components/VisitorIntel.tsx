@@ -282,14 +282,16 @@ export default function VisitorIntel() {
       {/* Divider */}
       <div className="my-2.5 h-px bg-border/70" />
 
-      {/* Live counter — the fun fact */}
+      {/* Live counter — the fun fact. Counts VISITS, not people, so the copy says "peeks"
+          rather than "of you": a repeat visitor moves this number, and claiming otherwise
+          would be a small lie on a card whose whole appeal is that it tells you the truth. */}
       {count !== null && (
         <p className="text-xs leading-relaxed text-foreground/80">
           <span className="text-accent">{"✦"}</span>{" "}
           <span className="font-semibold tabular-nums text-accent">
             {count.toLocaleString()}
           </span>{" "}
-          of you couldn&apos;t resist a peek {"\u{1F440}"}
+          peeks and counting {"\u{1F440}"}
         </p>
       )}
 
