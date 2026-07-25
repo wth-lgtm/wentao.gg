@@ -13,6 +13,7 @@ import SoundingRail from "./components/SoundingRail";
 import TabNavigation, { type Tab } from "./components/TabNavigation";
 import PositionsPanel from "./components/PositionsPanel";
 import TradesPanel from "./components/TradesPanel";
+import AnalyticsPanel from "./components/AnalyticsPanel";
 import { useLeaderboard } from "./hooks/useLeaderboard";
 import { useTableControls } from "./hooks/useTableControls";
 import { useTrader } from "./hooks/useTrader";
@@ -26,8 +27,17 @@ export default function HLWhaleTracker() {
   const { timePeriod, setTimePeriod, sortField, sortDirection, handleSort, sortRows } =
     useTableControls();
 
-  const { traders, loading, refreshing, error, lastUpdated, rowsSeen, ttlSeconds, refresh } =
-    useLeaderboard(timePeriod);
+  const {
+    traders,
+    periods,
+    loading,
+    refreshing,
+    error,
+    lastUpdated,
+    rowsSeen,
+    ttlSeconds,
+    refresh,
+  } = useLeaderboard(timePeriod);
 
   const trader = useTrader(activeTab === "leaderboard" ? null : focused);
 
@@ -160,16 +170,7 @@ export default function HLWhaleTracker() {
           )}
 
           {activeTab === "analytics" && (
-            <section className="rounded-xl border border-border bg-card p-6">
-              <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--legend)]">
-                Analytics — next PR
-              </span>
-              <p className="mt-2 text-sm text-muted">
-                Aggregate view across the top fifty — PnL concentration, ROI spread, and
-                how many addresses hold rank across the four windows. Derived from data
-                already in memory, so it needs no new request.
-              </p>
-            </section>
+            <AnalyticsPanel periods={periods} timePeriod={timePeriod} loading={loading} />
           )}
 
           <p className="mt-4 flex items-center justify-center gap-1 flex-wrap text-center text-xs text-muted">
