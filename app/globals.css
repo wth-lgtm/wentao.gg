@@ -1152,9 +1152,64 @@ input:focus {
   background: color-mix(in srgb, var(--foreground) 4%, transparent);
 }
 
+/* ── The odometer ─────────────────────────────────────────────────────────────
+   A digit is a vertical strip of 0-9 behind a one-character window; only `translate`
+   ever changes, so fifty rows of rolling figures cost CSS transitions and no
+   per-frame JavaScript at all.
+
+   --odo-h is shared by the window and every strip row, which is what makes the
+   translate land exactly on a digit instead of between two. */
+.hl-odo {
+  --odo-h: 1.15em;
+  display: inline-flex;
+  align-items: baseline;
+  font-variant-numeric: tabular-nums;
+}
+.hl-odo-track {
+  display: inline-flex;
+  align-items: stretch;
+}
+.hl-odo-char {
+  /* Punctuation, the currency mark and the K/M suffix never roll. */
+  display: inline-block;
+  height: var(--odo-h);
+  line-height: var(--odo-h);
+}
+.hl-odo-digit {
+  display: inline-block;
+  height: var(--odo-h);
+  overflow: hidden;
+}
+.hl-odo-strip {
+  display: flex;
+  flex-direction: column;
+  translate: 0 calc(var(--d) * -1 * var(--odo-h));
+  transition: translate var(--dur-slow) var(--ease-entrance);
+}
+.hl-odo-cell {
+  height: var(--odo-h);
+  line-height: var(--odo-h);
+  text-align: right;
+}
+
+/* First paint rolls up from zero. A `from`-only keyframe interpolates to whatever the
+   resolved base translate is, so the target never has to be restated here and cannot
+   drift out of sync with --d. `backwards` holds digit zero through the stagger. */
+.hl-odo-track[data-enter="true"] .hl-odo-strip {
+  animation: hlOdoIn var(--dur-slow) var(--ease-entrance) backwards;
+}
+@keyframes hlOdoIn {
+  from {
+    translate: 0 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .hl-tab-plate { animation: none; }
   .hl-inspect { opacity: 1; transform: none; }
+  /* Movement goes, the figure stays: the digit must remain readable, so this removes
+     the roll rather than the content. */
+  .hl-odo-strip { transition: none; animation: none; }
   /* The tape must still be legible, so the reveal is removed rather than paused —
      `animation: none` on a `backwards`-filled animation would otherwise leave every
      row stuck at opacity 0. */

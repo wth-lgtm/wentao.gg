@@ -1,6 +1,7 @@
 "use client";
 
 import { ExternalLink } from "lucide-react";
+import Odometer from "./Odometer";
 import { TraderMetrics } from "../lib/types";
 import {
   formatAddress,
@@ -51,11 +52,19 @@ export default function TraderCard({ trader, rank }: TraderCardProps) {
             </a>
           </div>
         </div>
-        <span className={`text-lg font-bold tabular-nums ${toneClass(trader.pnl)}`}>
+        <span
+          className={`inline-flex items-baseline text-lg font-bold tabular-nums ${toneClass(trader.pnl)}`}
+        >
           <span aria-hidden className="mr-1 text-[0.7em] align-[0.1em]">
             {signGlyph(trader.pnl)}
           </span>
-          {formatCurrency(trader.pnl, { showSign: true, compact: true })}
+          {/* Mobile shows three cards at a time, not fifty rows, so the stagger is
+              tighter — a 26ms-per-row cascade tuned for a full board reads as lag
+              when only a few are on screen. */}
+          <Odometer
+            formatted={formatCurrency(trader.pnl, { showSign: true, compact: true })}
+            delayMs={Math.min(rank - 1, 6) * 40}
+          />
         </span>
       </div>
 
