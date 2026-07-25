@@ -87,19 +87,22 @@ export default function LeaderboardTable({
       {/* Desktop Table */}
       <div className="hidden sm:block overflow-x-auto">
         <table className="w-full">
+          <caption className="sr-only">
+            Hyperliquid top traders, ranked. Sorted by {sortField === "winRate" ? "ROI" : sortField}, {sortDirection === "desc" ? "descending" : "ascending"}.
+          </caption>
           <thead>
             <tr className="border-b border-border">
-              <th className="py-3 px-3 sm:px-4 text-left">
-                <span className="text-xs uppercase tracking-wide text-muted font-medium">
+              <th scope="col" className="py-3 px-3 sm:px-4 text-left">
+                <span className="font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--legend)]">
                   Rank
                 </span>
               </th>
-              <th className="py-3 px-2 sm:px-4 text-left">
-                <span className="text-xs uppercase tracking-wide text-muted font-medium">
+              <th scope="col" className="py-3 px-2 sm:px-4 text-left">
+                <span className="font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--legend)]">
                   Trader
                 </span>
               </th>
-              <th className="py-3 px-2 sm:px-4 text-right">
+              <th scope="col" aria-sort={sortField === "pnl" ? (sortDirection === "desc" ? "descending" : "ascending") : "none"} className="py-3 px-2 sm:px-4 text-right">
                 <SortHeader
                   label="PnL"
                   field="pnl"
@@ -108,7 +111,7 @@ export default function LeaderboardTable({
                   onSort={onSort}
                 />
               </th>
-              <th className="py-3 px-2 sm:px-4 text-right">
+              <th scope="col" aria-sort={sortField === "winRate" ? (sortDirection === "desc" ? "descending" : "ascending") : "none"} className="py-3 px-2 sm:px-4 text-right">
                 <SortHeader
                   label="ROI"
                   field="winRate"
@@ -117,7 +120,7 @@ export default function LeaderboardTable({
                   onSort={onSort}
                 />
               </th>
-              <th className="py-3 px-2 sm:px-4 text-right hidden lg:table-cell">
+              <th scope="col" aria-sort={sortField === "volume" ? (sortDirection === "desc" ? "descending" : "ascending") : "none"} className="py-3 px-2 sm:px-4 text-right hidden lg:table-cell">
                 <SortHeader
                   label="Volume"
                   field="volume"

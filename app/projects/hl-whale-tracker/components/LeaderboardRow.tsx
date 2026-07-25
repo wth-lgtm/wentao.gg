@@ -6,7 +6,8 @@ import {
   formatAddress,
   formatCurrency,
   formatPercent,
-  getPnLColorClass,
+  signGlyph,
+  toneClass,
 } from "../lib/formatters";
 
 interface LeaderboardRowProps {
@@ -63,14 +64,20 @@ export default function LeaderboardRow({ trader, rank }: LeaderboardRowProps) {
 
       {/* PnL */}
       <td className="py-3 px-2 sm:px-4 text-right">
-        <span className={`font-semibold tabular-nums ${getPnLColorClass(trader.pnl)}`}>
+        <span className={`font-semibold tabular-nums ${toneClass(trader.pnl)}`}>
+          {/* Glyph carries direction non-chromatically; formatCurrency already
+              emits an explicit +/-. Colour is then the third redundant cue, not
+              the only one. */}
+          <span aria-hidden className="mr-1 text-[0.7em] align-[0.1em]">
+            {signGlyph(trader.pnl)}
+          </span>
           {formatCurrency(trader.pnl, { showSign: true, compact: true })}
         </span>
       </td>
 
       {/* ROI */}
       <td className="py-3 px-2 sm:px-4 text-right">
-        <span className={`tabular-nums ${getPnLColorClass(trader.winRate)}`}>
+        <span className={`tabular-nums ${toneClass(trader.winRate)}`}>
           {formatPercent(trader.winRate)}
         </span>
       </td>

@@ -17,7 +17,7 @@ const sections = [
 
 // Projects fold inline under 04 — no separate dropdown.
 const projects: { name: string; href: string; comingSoon?: boolean }[] = [
-  { name: "🐋 Tracker", href: "/projects/hl-whale-tracker" },
+  { name: "Whale Tracker", href: "/projects/hl-whale-tracker" },
   { name: "PowerOPPS", href: "/projects/poweropps" },
   { name: "ProgDash", href: "/projects/progdash" },
   { name: "What's my RPE?", href: "#projects", comingSoon: true },

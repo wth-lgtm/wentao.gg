@@ -59,48 +59,30 @@ export function formatPercent(
   return `${sign}${value.toFixed(decimals)}%`;
 }
 
-// Format number with commas
-export function formatNumber(value: number, decimals = 0): string {
-  return new Intl.NumberFormat("en-US", {
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
-  }).format(value);
-}
-
-// Format Sharpe ratio
-export function formatSharpe(value: number): string {
-  if (value === 0) return "—";
-  const sign = value > 0 ? "+" : "";
-  return `${sign}${value.toFixed(2)}`;
-}
-
-// Format relative time
-export function formatRelativeTime(timestamp: number): string {
-  const now = Date.now();
-  const diff = now - timestamp;
-
-  const seconds = Math.floor(diff / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-
-  if (seconds < 60) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  if (hours < 24) return `${hours}h ago`;
-
-  return new Date(timestamp).toLocaleDateString();
-}
-
-// Get PnL color class
-export function getPnLColorClass(value: number): string {
-  if (value > 0) return "text-green-500";
-  if (value < 0) return "text-red-500";
+/**
+ * Tone for a signed quantity.
+ *
+ * Replaces getPnLColorClass, which hardcoded text-green-500 / text-red-500 —
+ * measured at 2.07:1 and 3.42:1 on the light card, i.e. both fail WCAG AA, and
+ * both carried the sign by HUE ALONE, so gain vs loss was invisible to a
+ * colour-blind reader. These tokens are theme-aware and measured (see --gain /
+ * --loss in globals.css).
+ *
+ * Worth knowing why this is understated: across the live top 50, every row is
+ * PnL-positive AND ROI-positive in all four windows. A red/green heat language
+ * would therefore paint 200 identical cells and carry exactly zero information.
+ * So tone is correctness hygiene, never the visual engine — and `signGlyph`
+ * below means the sign never depends on colour at all.
+ */
+export function toneClass(value: number): string {
+  if (value > 0) return "text-[var(--gain)]";
+  if (value < 0) return "text-[var(--loss)]";
   return "text-muted";
 }
 
-// Get Sharpe color class
-export function getSharpeColorClass(value: number): string {
-  if (value >= 2) return "text-green-500";
-  if (value >= 1) return "text-yellow-500";
-  if (value > 0) return "text-muted";
-  return "text-red-500";
+/** A non-chromatic carrier for direction, so hue is never the only cue. */
+export function signGlyph(value: number): string {
+  if (value > 0) return "▲";
+  if (value < 0) return "▼";
+  return "·";
 }

@@ -22,6 +22,23 @@
   --caustic-lo: color-mix(in srgb, var(--accent) 80%, #ffffff);
   --caustic-rim: color-mix(in srgb, #ffffff 24%, transparent);
 
+  /* ── Instrument surface (dark) ───────────────────────────────────────────────
+     An engraved hairline is two lines, not one: a groove that sits below the
+     surface and a lit lip that catches the key light. On a dark panel the eye
+     reads the LIP, so that carries the contrast here — the polarity swaps in the
+     light theme, where the groove does the work instead. */
+  --engrave-lo: color-mix(in srgb, #000000 55%, var(--card));
+  --engrave-hi: color-mix(in srgb, #ffffff 9%, transparent);
+  /* Etched legends run at 10-11px, where --muted is too light to clear AA on a
+     card. Measured token for small caps only. */
+  --legend: #a1a1aa;
+  /* Sign tokens. NOTE: every row in the live top-50 is PnL- and ROI-positive in
+     all four windows, so these are correctness hygiene — they retire
+     text-green-500 (2.07:1) and text-red-500 (3.42:1) on the light card — and
+     NOT a visual engine. Sign is always carried by an explicit +/- as well. */
+  --gain: #34d399;
+  --loss: #f87171;
+
   /* Split-flap board (dark) — opaque plastic flaps so the animated bg doesn't bleed. */
   --flap-bg: #202024;
   --flap-fg: #e8e8e2;
@@ -53,6 +70,15 @@
   --caustic-hi: var(--accent);
   --caustic-lo: color-mix(in srgb, var(--accent) 70%, var(--foreground));
   --caustic-rim: color-mix(in srgb, var(--accent) 18%, transparent);
+
+  /* ── Instrument surface (light) ──────────────────────────────────────────────
+     Polarity inverted: on a near-white panel a "lit lip" has no headroom, so the
+     GROOVE carries the line and the lip is only a whisper. */
+  --engrave-lo: color-mix(in srgb, #000000 16%, var(--card));
+  --engrave-hi: color-mix(in srgb, #ffffff 70%, transparent);
+  --legend: #52525b;
+  --gain: #047857;
+  --loss: #b91c1c;
 
   /* Split-flap board (light). */
   --flap-bg: #e7e7ea;

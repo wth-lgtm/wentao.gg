@@ -12,9 +12,15 @@ type Periods = Partial<Record<TimePeriod, TraderMetrics[]>>;
 
 export function useLeaderboard(timePeriod: TimePeriod) {
   const [periods, setPeriods] = useState<Periods>({});
+  // `loading` means "there is nothing to show yet"; `refreshing` means "a fetch is
+  // in flight over data that is already on screen". Collapsing the two would let a
+  // refresh replace fifty populated rows with a skeleton.
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
+  const [rowsSeen, setRowsSeen] = useState<number | null>(null);
+  const [ttlSeconds, setTtlSeconds] = useState<number | null>(null);
 
   // Monotonic run id: a late response from a superseded request must not overwrite a newer
   // one, which is the bug that let the slowest filter click win.
@@ -22,7 +28,7 @@ export function useLeaderboard(timePeriod: TimePeriod) {
 
   const load = useCallback(async (signal: AbortSignal, force: boolean) => {
     const run = ++runRef.current;
-    setLoading(true);
+    setRefreshing(true);
     setError(null);
 
     try {
@@ -38,11 +44,15 @@ export function useLeaderboard(timePeriod: TimePeriod) {
       }
       setPeriods(body.periods as Periods);
       setLastUpdated(typeof body.updatedAt === "number" ? body.updatedAt : Date.now());
+      setRowsSeen(typeof body.rowsSeen === "number" ? body.rowsSeen : null);
+      setTtlSeconds(typeof body.ttlSeconds === "number" ? body.ttlSeconds : null);
       setLoading(false);
+      setRefreshing(false);
     } catch (err) {
       if (signal.aborted || run !== runRef.current) return;
       setError(err instanceof Error ? err.message : "Failed to fetch data");
       setLoading(false);
+      setRefreshing(false);
     }
   }, []);
 
@@ -64,8 +74,11 @@ export function useLeaderboard(timePeriod: TimePeriod) {
   return {
     traders: periods[timePeriod] ?? [],
     loading,
+    refreshing,
     error,
     lastUpdated,
+    rowsSeen,
+    ttlSeconds,
     refresh,
   };
 }
