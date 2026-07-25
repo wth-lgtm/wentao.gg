@@ -12,6 +12,7 @@ import LeaderboardTable from "./components/LeaderboardTable";
 import SoundingRail from "./components/SoundingRail";
 import TabNavigation, { type Tab } from "./components/TabNavigation";
 import PositionsPanel from "./components/PositionsPanel";
+import TradesPanel from "./components/TradesPanel";
 import { useLeaderboard } from "./hooks/useLeaderboard";
 import { useTableControls } from "./hooks/useTableControls";
 import { useTrader } from "./hooks/useTrader";
@@ -149,15 +150,24 @@ export default function HLWhaleTracker() {
             />
           )}
 
-          {(activeTab === "trades" || activeTab === "analytics") && (
+          {activeTab === "trades" && (
+            <TradesPanel
+              address={focused}
+              data={trader.data}
+              loading={trader.loading}
+              error={trader.error}
+            />
+          )}
+
+          {activeTab === "analytics" && (
             <section className="rounded-xl border border-border bg-card p-6">
               <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--legend)]">
-                {activeTab === "trades" ? "Trades" : "Analytics"} — next PR
+                Analytics — next PR
               </span>
               <p className="mt-2 text-sm text-muted">
-                {activeTab === "trades"
-                  ? "Fill history is already flowing from the API route this PR added (up to 100 recent fills per address, with direction, size, price, realised PnL and fee). The table lands next."
-                  : "Aggregate view across the top fifty — PnL concentration, ROI spread, and how many addresses hold rank across the four windows. Derived from data already in memory, so it needs no new request."}
+                Aggregate view across the top fifty — PnL concentration, ROI spread, and
+                how many addresses hold rank across the four windows. Derived from data
+                already in memory, so it needs no new request.
               </p>
             </section>
           )}

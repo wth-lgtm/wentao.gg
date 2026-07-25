@@ -42,7 +42,13 @@ export interface SpotBalance {
 }
 
 export interface Fill {
+  /** Raw market symbol: "BTC", the spot index "@107", or "xyz:GOOGL". */
   coin: string;
+  /**
+   * Readable pair name for spot fills, resolved server-side from `spotMeta`.
+   * Absent for perps and equities, whose `coin` is already legible.
+   */
+  label?: string;
   px: number | null;
   sz: number | null;
   /** Upstream's own description, e.g. "Open Short" / "Close Long". */
