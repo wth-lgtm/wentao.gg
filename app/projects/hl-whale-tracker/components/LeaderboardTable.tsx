@@ -13,6 +13,7 @@ interface LeaderboardTableProps {
   loading: boolean;
   /** Address currently focused for the Positions / Trades tabs. */
   selectedAddress?: string | null;
+  registerRow?: (key: string, el: HTMLElement | null) => void;
   onSelect?: (address: string) => void;
 }
 
@@ -83,6 +84,7 @@ export default function LeaderboardTable({
   onSort,
   loading,
   selectedAddress = null,
+  registerRow,
   onSelect,
 }: LeaderboardTableProps) {
   const isEmpty = !loading && traders.length === 0;
@@ -91,12 +93,23 @@ export default function LeaderboardTable({
     <>
       {/* Desktop Table */}
       <div className="hidden sm:block overflow-x-auto">
-        <table className="w-full">
+        <table className="hl-board">
+          {/* Locked geometry: widths never shift between skeleton, data, sort or
+              period switch, which is what lets the re-seat compute travel as
+              arithmetic instead of measuring the DOM. */}
+          <colgroup>
+            <col className="w-[68px]" />
+            <col />
+            <col className="w-[132px]" />
+            <col className="w-[96px]" />
+            <col className="w-[112px] hidden lg:table-column" />
+            <col className="w-9" />
+          </colgroup>
           <caption className="sr-only">
             Hyperliquid top traders, ranked. Sorted by {sortField === "winRate" ? "ROI" : sortField}, {sortDirection === "desc" ? "descending" : "ascending"}.
           </caption>
           <thead>
-            <tr className="border-b border-border">
+            <tr>
               <th scope="col" className="py-3 px-3 sm:px-4 text-left">
                 <span className="font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--legend)]">
                   Rank
@@ -134,6 +147,7 @@ export default function LeaderboardTable({
                   onSort={onSort}
                 />
               </th>
+              <th scope="col" className="w-9" />
             </tr>
           </thead>
           <tbody>
@@ -141,7 +155,7 @@ export default function LeaderboardTable({
               <TableSkeleton />
             ) : isEmpty ? (
               <tr>
-                <td colSpan={5} className="py-12 text-center text-muted">
+                <td colSpan={6} className="py-12 text-center text-muted">
                   No traders found with activity in this period
                 </td>
               </tr>
@@ -153,6 +167,7 @@ export default function LeaderboardTable({
                   rank={index + 1}
                   selected={trader.address === selectedAddress}
                   onSelect={onSelect}
+                  registerRow={registerRow}
                 />
               ))
             )}

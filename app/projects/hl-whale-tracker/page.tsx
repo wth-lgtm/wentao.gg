@@ -15,6 +15,7 @@ import PositionsPanel from "./components/PositionsPanel";
 import { useLeaderboard } from "./hooks/useLeaderboard";
 import { useTableControls } from "./hooks/useTableControls";
 import { useTrader } from "./hooks/useTrader";
+import { useReSeat } from "./hooks/useReSeat";
 import { formatAddress } from "./lib/formatters";
 
 export default function HLWhaleTracker() {
@@ -39,6 +40,9 @@ export default function HLWhaleTracker() {
   // One sort site. This used to be re-implemented inline here, unmemoized, while
   // the hook's own memoized sort ran against a permanently-empty array.
   const displayTraders = sortRows(traders);
+  // The re-seat animates rows to new berths whenever the sorted ORDER changes.
+  const order = displayTraders.map((t) => t.address);
+  const registerRow = useReSeat(order.join("|"), order);
 
   return (
     <main className="min-h-screen bg-background">
@@ -86,11 +90,27 @@ export default function HLWhaleTracker() {
             ttlSeconds={ttlSeconds}
           />
 
-          <TabNavigation
-            activeTab={activeTab}
-            onChange={setActiveTab}
-            focusedLabel={focused ? formatAddress(focused, 4) : null}
-          />
+          <TabNavigation activeTab={activeTab} onChange={setActiveTab} />
+
+          {/* The focused address lives HERE, once, where it cannot fight the tab
+              layout. Not uppercased — a hex address rendered 0XA822 is just wrong. */}
+          {focused && activeTab !== "leaderboard" && (
+            <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-2">
+              <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--legend)]">
+                Inspecting
+              </span>
+              <span className="truncate font-mono text-xs text-foreground">
+                {formatAddress(focused, 8)}
+              </span>
+              <button
+                type="button"
+                onClick={() => { setFocused(null); setActiveTab("leaderboard"); }}
+                className="shrink-0 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--legend)] hover:text-foreground"
+              >
+                Clear
+              </button>
+            </div>
+          )}
 
           {activeTab === "leaderboard" && (
             <>
@@ -114,6 +134,7 @@ export default function HLWhaleTracker() {
                   loading={loading}
                   selectedAddress={focused}
                   onSelect={selectTrader}
+                  registerRow={registerRow}
                 />
               </div>
             </>
