@@ -93,11 +93,22 @@ export default function SplitFlap() {
     step: 0,
   }));
 
-  // Refs so the riffle effect can read the current state without re-running on each tick.
+  // Refs so the riffle effect can read the current state without listing it as a
+  // dependency — which would tear down and restart the flap interval on every tick.
+  //
+  // Written from effects, NOT during render. The previous `cellsRef.current = cells`
+  // in the render body is unsafe under concurrent rendering and runs twice under
+  // StrictMode. These are declared BEFORE the riffle effect on purpose: effects run
+  // in declaration order after commit, so on the render where `i` changes these have
+  // already synced by the time the riffle reads them.
   const cellsRef = useRef(cells);
-  cellsRef.current = cells;
   const emojiRef = useRef(emojiCell);
-  emojiRef.current = emojiCell;
+  useEffect(() => {
+    cellsRef.current = cells;
+  }, [cells]);
+  useEffect(() => {
+    emojiRef.current = emojiCell;
+  }, [emojiCell]);
 
   // Cycle the roles.
   useEffect(() => {
@@ -108,6 +119,12 @@ export default function SplitFlap() {
   // Run the riffle to the current role. One clock; stops after `maxSteps` so the emoji and
   // the slowest letter land together.
   useEffect(() => {
+    // A reduced-motion visitor never riffles, so this effect has nothing to drive and
+    // — importantly — writes no state. It used to setCells/setEmojiCell synchronously
+    // here, which is a cascading render on mount; the board is now DERIVED for that
+    // case below, which is where a pure function of `i` belonged all along.
+    if (reduce) return;
+
     const targetWord = ROLES[i].word.split("");
     const targetEmoji = ROLES[i].emoji;
     const len = targetWord.length;
@@ -119,13 +136,6 @@ export default function SplitFlap() {
       const display = p?.display ?? " ";
       return { display, prev: display, step: p?.step ?? 0 };
     });
-    const startEmoji = emojiRef.current;
-
-    if (reduce) {
-      setCells(targetWord.map((ch) => ({ display: ch, prev: ch, step: 0 })));
-      setEmojiCell((e) => ({ display: targetEmoji, prev: targetEmoji, step: e.step }));
-      return;
-    }
 
     const maxSteps = Math.max(1, ...start.map((c, k) => charDist(c.display, targetWord[k])));
 
@@ -158,16 +168,36 @@ export default function SplitFlap() {
     return () => clearInterval(id);
   }, [i, reduce]);
 
+  // Under reduced motion the board is a pure function of `i` — the current word, no
+  // riffle, no intermediate letters — so it is derived here rather than pushed into
+  // state by an effect. The riffling path keeps using state, because there the cells
+  // are genuinely driven by a clock and cannot be computed from a render.
+  const boardCells = reduce
+    ? ROLES[i].word.split("").map((ch) => ({ display: ch, prev: ch, step: 0 }))
+    : cells;
+  const boardEmoji = reduce
+    ? { display: ROLES[i].emoji, prev: ROLES[i].emoji, step: 0 }
+    : emojiCell;
+
   return (
     <div className="split-flap">
       <div className="sf-board" aria-hidden="true">
-        <FlapCell cell={emojiCell} emoji />
-        {cells.map((c, k) => (
+        <FlapCell cell={boardEmoji} emoji />
+        {boardCells.map((c, k) => (
           <FlapCell key={k} cell={c} />
         ))}
       </div>
-      <span className="sr-only" aria-live="polite">
-        {ROLES[i].word}
+      {/* Stated once, statically. This was an aria-live="polite" region holding the
+          CURRENT role, and `i` advances every HOLD_MS forever with no stop control —
+          so a screen reader was interrupted with a new word every four seconds for
+          as long as the page stayed open. That fails WCAG 2.2.2 (Pause, Stop, Hide).
+
+          The four roles are all true at once and the cycling is decoration, so the
+          honest equivalent is the whole set, announced once. It says strictly more
+          than the live region did: that only ever read out whichever role the board
+          happened to be showing. The board itself is already aria-hidden. */}
+      <span className="sr-only">
+        {ROLES.map((r) => r.word.charAt(0) + r.word.slice(1).toLowerCase()).join(", ")}
       </span>
     </div>
   );

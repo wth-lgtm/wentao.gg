@@ -16,15 +16,34 @@ export default function Hero() {
           style={{ animationDelay: "0.1s", opacity: 0, animationFillMode: "forwards" }}
         >
           <HeroAnimations>
-            {/* LCP element: static heading in server HTML, visible instantly */}
-            <div className="relative min-h-[3rem] md:min-h-[7rem]">
+            {/* LCP element: static heading in server HTML, visible instantly.
+                Now a real <h1>. The comments here have called this "the heading" since
+                it was written, but the markup was a <span>, so the document served
+                four h2s, thirteen h3s and no top-level heading at all.
+
+                The h1 is the CONTAINER, not the text span, and that placement is
+                load-bearing rather than stylistic. globals.css carries an unlayered
+                `h1 { letter-spacing: -0.03em }` plus a grouped `line-height: 1.2`,
+                while Tailwind's `tracking-[-0.045em]` and `leading-[0.92]` live
+                inside @layer utilities — and an UNLAYERED declaration beats a layered
+                one regardless of specificity. Tagging the span itself would therefore
+                have quietly retracked and re-led the wordmark, which matters twice
+                over: heroName.ts renders this string a second time in NameCaustic as
+                an aria-hidden light overlay, and the two copies must share exact
+                metrics or the caustic lands off the letterforms.
+
+                On the container it cannot bite. Those three properties are all
+                inherited ones, and both inner copies declare all three explicitly via
+                HERO_NAME_METRICS — an explicit declaration always beats an inherited
+                value, layers or not. The container holds no direct text of its own. */}
+            <h1 className="relative min-h-[3rem] md:min-h-[7rem]">
               <span className={`${HERO_NAME_METRICS} text-foreground text-shimmer`}>
                 {HERO_NAME}
               </span>
               {/* Light from the same pointer that paints the fluid, stacked on top.
                   Decorative and additive — the heading above is the real one. */}
               <NameCaustic />
-            </div>
+            </h1>
           </HeroAnimations>
         </div>
 
