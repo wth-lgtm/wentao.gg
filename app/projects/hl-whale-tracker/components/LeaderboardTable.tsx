@@ -11,6 +11,9 @@ interface LeaderboardTableProps {
   sortDirection: SortDirection;
   onSort: (field: SortField) => void;
   loading: boolean;
+  /** Address currently focused for the Positions / Trades tabs. */
+  selectedAddress?: string | null;
+  onSelect?: (address: string) => void;
 }
 
 // Loading skeleton for desktop
@@ -79,6 +82,8 @@ export default function LeaderboardTable({
   sortDirection,
   onSort,
   loading,
+  selectedAddress = null,
+  onSelect,
 }: LeaderboardTableProps) {
   const isEmpty = !loading && traders.length === 0;
 
@@ -146,6 +151,8 @@ export default function LeaderboardTable({
                   key={trader.address}
                   trader={trader}
                   rank={index + 1}
+                  selected={trader.address === selectedAddress}
+                  onSelect={onSelect}
                 />
               ))
             )}

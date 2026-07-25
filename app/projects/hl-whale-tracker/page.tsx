@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { motion } from "framer-motion";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
@@ -9,15 +10,31 @@ import TimeFilter from "./components/TimeFilter";
 import RefreshButton from "./components/RefreshButton";
 import LeaderboardTable from "./components/LeaderboardTable";
 import SoundingRail from "./components/SoundingRail";
+import TabNavigation, { type Tab } from "./components/TabNavigation";
+import PositionsPanel from "./components/PositionsPanel";
 import { useLeaderboard } from "./hooks/useLeaderboard";
 import { useTableControls } from "./hooks/useTableControls";
+import { useTrader } from "./hooks/useTrader";
+import { formatAddress } from "./lib/formatters";
 
 export default function HLWhaleTracker() {
+  const [activeTab, setActiveTab] = useState<Tab>("leaderboard");
+  const [focused, setFocused] = useState<string | null>(null);
+
   const { timePeriod, setTimePeriod, sortField, sortDirection, handleSort, sortRows } =
     useTableControls();
 
   const { traders, loading, refreshing, error, lastUpdated, rowsSeen, ttlSeconds, refresh } =
     useLeaderboard(timePeriod);
+
+  const trader = useTrader(activeTab === "leaderboard" ? null : focused);
+
+  // Selecting a row jumps straight to its positions — the tab is the destination,
+  // so making the click do nothing visible would be the wrong affordance.
+  const selectTrader = (address: string) => {
+    setFocused(address);
+    setActiveTab("positions");
+  };
 
   // One sort site. This used to be re-implemented inline here, unmemoized, while
   // the hook's own memoized sort ran against a permanently-empty array.
@@ -69,26 +86,60 @@ export default function HLWhaleTracker() {
             ttlSeconds={ttlSeconds}
           />
 
-          <div className="flex items-center justify-between mb-4">
-            <TimeFilter value={timePeriod} onChange={setTimePeriod} />
-            <RefreshButton onRefresh={refresh} refreshing={refreshing} />
-          </div>
+          <TabNavigation
+            activeTab={activeTab}
+            onChange={setActiveTab}
+            focusedLabel={focused ? formatAddress(focused, 4) : null}
+          />
 
-          {error && (
-            <div className="mb-4 rounded-lg border border-[var(--loss)]/30 bg-[var(--loss)]/10 p-3 font-mono text-xs uppercase tracking-[0.16em] text-[var(--loss)]">
-              {error}
-            </div>
+          {activeTab === "leaderboard" && (
+            <>
+              <div className="flex items-center justify-between mb-4">
+                <TimeFilter value={timePeriod} onChange={setTimePeriod} />
+                <RefreshButton onRefresh={refresh} refreshing={refreshing} />
+              </div>
+
+              {error && (
+                <div className="mb-4 rounded-lg border border-[var(--loss)]/30 bg-[var(--loss)]/10 p-3 font-mono text-xs uppercase tracking-[0.16em] text-[var(--loss)]">
+                  {error}
+                </div>
+              )}
+
+              <div className="bg-card rounded-xl border border-border overflow-hidden">
+                <LeaderboardTable
+                  traders={displayTraders}
+                  sortField={sortField}
+                  sortDirection={sortDirection}
+                  onSort={handleSort}
+                  loading={loading}
+                  selectedAddress={focused}
+                  onSelect={selectTrader}
+                />
+              </div>
+            </>
           )}
 
-          <div className="bg-card rounded-xl border border-border overflow-hidden">
-            <LeaderboardTable
-              traders={displayTraders}
-              sortField={sortField}
-              sortDirection={sortDirection}
-              onSort={handleSort}
-              loading={loading}
+          {activeTab === "positions" && (
+            <PositionsPanel
+              address={focused}
+              data={trader.data}
+              loading={trader.loading}
+              error={trader.error}
             />
-          </div>
+          )}
+
+          {(activeTab === "trades" || activeTab === "analytics") && (
+            <section className="rounded-xl border border-border bg-card p-6">
+              <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--legend)]">
+                {activeTab === "trades" ? "Trades" : "Analytics"} — next PR
+              </span>
+              <p className="mt-2 text-sm text-muted">
+                {activeTab === "trades"
+                  ? "Fill history is already flowing from the API route this PR added (up to 100 recent fills per address, with direction, size, price, realised PnL and fee). The table lands next."
+                  : "Aggregate view across the top fifty — PnL concentration, ROI spread, and how many addresses hold rank across the four windows. Derived from data already in memory, so it needs no new request."}
+              </p>
+            </section>
+          )}
 
           <p className="mt-4 flex items-center justify-center gap-1 flex-wrap text-center text-xs text-muted">
             <span>Data sourced from</span>

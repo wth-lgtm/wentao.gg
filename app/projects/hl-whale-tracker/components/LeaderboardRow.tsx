@@ -13,17 +13,27 @@ import {
 interface LeaderboardRowProps {
   trader: TraderMetrics;
   rank: number;
+  selected?: boolean;
+  onSelect?: (address: string) => void;
 }
 
-export default function LeaderboardRow({ trader, rank }: LeaderboardRowProps) {
+export default function LeaderboardRow({ trader, rank, selected = false, onSelect }: LeaderboardRowProps) {
   const explorerUrl = `https://app.hyperliquid.xyz/explorer/address/${trader.address}`;
 
   return (
-    <tr className="border-b border-border hover:bg-card-hover transition-colors">
+    <tr
+      className={`border-b border-border transition-colors ${
+        selected ? "bg-card-hover" : "hover:bg-card-hover"
+      }`}
+    >
       {/* Rank */}
       <td className="py-3 px-3 sm:px-4">
-        <span
-          className={`font-bold tabular-nums ${
+        <button
+          type="button"
+          onClick={() => onSelect?.(trader.address)}
+          aria-pressed={selected}
+          aria-label={`Inspect positions for ${trader.address}`}
+          className={`font-bold tabular-nums transition-colors hover:text-accent ${
             rank === 1
               ? "text-yellow-500"
               : rank === 2
@@ -34,7 +44,7 @@ export default function LeaderboardRow({ trader, rank }: LeaderboardRowProps) {
           }`}
         >
           #{rank}
-        </span>
+        </button>
       </td>
 
       {/* Address */}
