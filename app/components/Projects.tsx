@@ -28,7 +28,7 @@ const projectCategories: ProjectCategory[] = [
     icon: TrendingUp,
     projects: [
       {
-        title: "🐋 Tracker",
+        title: "Whale Tracker",
         description:
           "A Hyperliquid trader leaderboard tracking top whales by PnL, ROI, and volume. Live data from the Hyperliquid leaderboard API with sortable columns and time period filters.",
         technologies: ["Next.js", "TypeScript", "Tailwind", "Hyperliquid API"],

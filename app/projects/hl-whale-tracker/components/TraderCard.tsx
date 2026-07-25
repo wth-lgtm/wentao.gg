@@ -6,7 +6,8 @@ import {
   formatAddress,
   formatCurrency,
   formatPercent,
-  getPnLColorClass,
+  signGlyph,
+  toneClass,
 } from "../lib/formatters";
 
 interface TraderCardProps {
@@ -50,7 +51,10 @@ export default function TraderCard({ trader, rank }: TraderCardProps) {
             </a>
           </div>
         </div>
-        <span className={`text-lg font-bold tabular-nums ${getPnLColorClass(trader.pnl)}`}>
+        <span className={`text-lg font-bold tabular-nums ${toneClass(trader.pnl)}`}>
+          <span aria-hidden className="mr-1 text-[0.7em] align-[0.1em]">
+            {signGlyph(trader.pnl)}
+          </span>
           {formatCurrency(trader.pnl, { showSign: true, compact: true })}
         </span>
       </div>
@@ -61,7 +65,7 @@ export default function TraderCard({ trader, rank }: TraderCardProps) {
           <div className="text-[10px] uppercase tracking-wide text-muted mb-0.5">
             ROI
           </div>
-          <div className={`font-semibold tabular-nums ${getPnLColorClass(trader.winRate)}`}>
+          <div className={`font-semibold tabular-nums ${toneClass(trader.winRate)}`}>
             {formatPercent(trader.winRate)}
           </div>
         </div>

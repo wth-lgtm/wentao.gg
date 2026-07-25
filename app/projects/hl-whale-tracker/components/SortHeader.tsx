@@ -25,7 +25,8 @@ export default function SortHeader({
   return (
     <button
       onClick={() => onSort(field)}
-      className={`flex items-center gap-1 font-medium text-xs uppercase tracking-wide transition-colors ${
+      aria-label={`Sort by ${label}`}
+      className={`flex items-center gap-1 font-mono text-[11px] uppercase tracking-[0.16em] transition-colors ${
         isActive ? "text-accent" : "text-muted hover:text-foreground"
       } ${align === "right" ? "ml-auto" : ""}`}
     >
@@ -34,13 +35,13 @@ export default function SortHeader({
         <ChevronUp
           size={12}
           className={`${
-            isActive && direction === "asc" ? "text-accent" : "text-muted/40"
+            isActive && direction === "asc" ? "text-accent" : "text-[var(--legend)]/70"
           }`}
         />
         <ChevronDown
           size={12}
           className={`${
-            isActive && direction === "desc" ? "text-accent" : "text-muted/40"
+            isActive && direction === "desc" ? "text-accent" : "text-[var(--legend)]/70"
           }`}
         />
       </div>

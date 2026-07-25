@@ -1,41 +1,27 @@
 "use client";
 
 import { RefreshCw } from "lucide-react";
-import { formatRelativeTime } from "../lib/formatters";
 
 interface RefreshButtonProps {
   onRefresh: () => void;
-  loading: boolean;
-  lastUpdated: number | null;
+  /** In flight over data already on screen. Not "no data yet" — see useLeaderboard. */
+  refreshing: boolean;
 }
 
-export default function RefreshButton({
-  onRefresh,
-  loading,
-  lastUpdated,
-}: RefreshButtonProps) {
+// The "Updated 2m ago" text moved to the status rail, which owns snapshot age and
+// counts it in real time rather than freezing at render.
+export default function RefreshButton({ onRefresh, refreshing }: RefreshButtonProps) {
   return (
-    <div className="flex items-center gap-2 sm:gap-3">
-      {lastUpdated && (
-        <span className="text-xs text-muted hidden sm:inline">
-          Updated {formatRelativeTime(lastUpdated)}
-        </span>
-      )}
-      <button
-        onClick={onRefresh}
-        disabled={loading}
-        className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 sm:py-2 bg-background rounded-lg text-sm font-medium transition-colors ${
-          loading
-            ? "text-muted cursor-not-allowed"
-            : "text-foreground hover:text-accent"
-        }`}
-      >
-        <RefreshCw
-          size={14}
-          className={`${loading ? "animate-spin" : ""}`}
-        />
-        <span className="hidden sm:inline">{loading ? "Loading..." : "Refresh"}</span>
-      </button>
-    </div>
+    <button
+      onClick={onRefresh}
+      disabled={refreshing}
+      aria-label="Refresh leaderboard"
+      className={`flex items-center gap-1.5 rounded-lg bg-background px-2.5 sm:px-3 py-1.5 sm:py-2 font-mono text-[11px] uppercase tracking-[0.16em] transition-colors ${
+        refreshing ? "cursor-not-allowed text-muted" : "text-foreground hover:text-accent"
+      }`}
+    >
+      <RefreshCw size={13} className={refreshing ? "animate-spin" : ""} aria-hidden />
+      <span className="hidden sm:inline">{refreshing ? "Fetching" : "Refresh"}</span>
+    </button>
   );
 }

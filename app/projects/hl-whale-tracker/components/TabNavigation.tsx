@@ -1,44 +1,53 @@
 "use client";
 
-import { Trophy, Activity, TrendingUp, Wallet } from "lucide-react";
+import { Activity, TrendingUp, Trophy, Wallet } from "lucide-react";
 
-type Tab = "leaderboard" | "positions" | "trades" | "analytics";
+export type Tab = "leaderboard" | "positions" | "trades" | "analytics";
 
-interface TabNavigationProps {
-  activeTab: Tab;
-  onChange: (tab: Tab) => void;
-}
-
-const tabs: { id: Tab; label: string; icon: React.ElementType; disabled: boolean }[] = [
-  { id: "leaderboard", label: "Leaderboard", icon: Trophy, disabled: false },
-  { id: "positions", label: "Positions", icon: Wallet, disabled: true },
-  { id: "trades", label: "Trades", icon: Activity, disabled: true },
-  { id: "analytics", label: "Analytics", icon: TrendingUp, disabled: true },
+// The address label used to be appended INSIDE two of these tabs. That was wrong
+// three ways: it duplicated across Positions and Trades, the container's `uppercase`
+// mangled the hex into 0XA822...D748, and at flex-1 the extra text wrapped to a
+// second line and grew the whole bar. The focused address now lives once, in its own
+// strip below, where it can't fight the tab layout.
+const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
+  { id: "leaderboard", label: "Leaderboard", icon: Trophy },
+  { id: "positions", label: "Positions", icon: Wallet },
+  { id: "trades", label: "Trades", icon: Activity },
+  { id: "analytics", label: "Analytics", icon: TrendingUp },
 ];
 
-export default function TabNavigation({ activeTab, onChange }: TabNavigationProps) {
+export default function TabNavigation({
+  activeTab,
+  onChange,
+}: {
+  activeTab: Tab;
+  onChange: (tab: Tab) => void;
+}) {
   return (
-    <div className="flex bg-card rounded-xl p-1 mb-4 sm:mb-6">
-      {tabs.map((tab) => {
+    <div
+      role="tablist"
+      aria-label="Whale tracker views"
+      className="hl-rack mb-3 grid grid-cols-4 gap-1 rounded-xl border border-border bg-card p-1"
+    >
+      {TABS.map((tab) => {
         const Icon = tab.icon;
+        const active = activeTab === tab.id;
         return (
           <button
             key={tab.id}
-            onClick={() => !tab.disabled && onChange(tab.id)}
-            disabled={tab.disabled}
-            className={`flex-1 flex items-center justify-center gap-1.5 sm:gap-2 py-2.5 sm:py-3 rounded-lg font-medium transition-colors text-sm ${
-              activeTab === tab.id
-                ? "bg-accent text-white"
-                : tab.disabled
-                ? "text-muted/50 cursor-not-allowed"
-                : "text-muted hover:text-foreground"
+            role="tab"
+            aria-selected={active}
+            onClick={() => onChange(tab.id)}
+            className={`hl-tab relative flex min-w-0 items-center justify-center gap-1.5 overflow-hidden rounded-lg py-2.5 font-mono text-[11px] uppercase tracking-[0.16em] whitespace-nowrap transition-colors ${
+              active ? "text-white" : "text-[var(--legend)] hover:text-foreground"
             }`}
           >
-            <Icon size={16} className="sm:w-[18px] sm:h-[18px]" />
-            <span className="hidden sm:inline">{tab.label}</span>
-            {tab.disabled && (
-              <span className="hidden sm:inline text-[10px] opacity-60">(Soon)</span>
-            )}
+            {/* The lit plate travels between tabs instead of each tab flipping its
+                own background — one moving part, so the control reads as a
+                mechanism rather than four independent buttons. */}
+            {active && <span aria-hidden className="hl-tab-plate" />}
+            <Icon size={14} aria-hidden className="relative z-10 shrink-0" />
+            <span className="relative z-10 truncate">{tab.label}</span>
           </button>
         );
       })}
