@@ -3,6 +3,7 @@ import SessionWrapper from "./SessionWrapper";
 
 export const metadata: Metadata = {
   title: "ProgDash | Powerlifting Program Viewer",
+  alternates: { canonical: "/projects/progdash" },
   description:
     "Sign in with Google and load your powerlifting program from Google Sheets into a clean, readable interface.",
   openGraph: {
@@ -12,7 +13,7 @@ export const metadata: Metadata = {
     type: "website",
   },
   twitter: {
-    card: "summary",
+    card: "summary_large_image",
     title: "ProgDash | Powerlifting Program Viewer",
     description:
       "Sign in with Google and load your powerlifting program from Google Sheets into a clean, readable interface.",

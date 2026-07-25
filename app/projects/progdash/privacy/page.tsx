@@ -1,5 +1,16 @@
+import type { Metadata } from "next";
 import { ArrowLeft, FileSpreadsheet } from "lucide-react";
 import Link from "next/link";
+
+// Without this the page inherited ProgDash's layout title and shipped as
+// "ProgDash | Powerlifting Program Viewer" — the wrong title on the one page Google's
+// OAuth verification actually reads. Kept indexable on purpose for the same reason.
+export const metadata: Metadata = {
+  title: "Privacy Policy | ProgDash",
+  description:
+    "What ProgDash accesses in your Google account, what it does not store, and how to revoke access.",
+  alternates: { canonical: "/projects/progdash/privacy" },
+};
 
 export default function ProgDashPrivacy() {
   return (

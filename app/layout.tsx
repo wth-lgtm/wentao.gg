@@ -32,7 +32,10 @@ export const metadata: Metadata = {
   metadataBase: new URL("https://wentao.gg"),
   title: "wentao.GG",
   description: DESCRIPTION,
-  alternates: { canonical: "/" },
+  // NO `alternates` here on purpose. Metadata is INHERITED by every child segment, so a
+  // root canonical of "/" made all four project routes announce themselves as duplicates
+  // of the homepage — i.e. it asked Google to drop them. Each route declares its own
+  // self-referencing canonical instead (see app/page.tsx and the project layouts).
   openGraph: {
     title: "wentao.GG",
     description: DESCRIPTION,
