@@ -661,8 +661,13 @@ input:focus {
 
 .sf-leaf {
   backface-visibility: hidden;
+  /* Promotes the leaf to its own layer so the fold composites cleanly. */
   transform: translateZ(0);
-  will-change: transform;
+  /* No `will-change: transform` here. The leaves are deliberately REMOUNTED every
+     FLAP_MS (100ms) to replay the flip, so the hint asked the compositor to prepare
+     layers for up to two dozen elements that are destroyed a tenth of a second
+     later — the case MDN explicitly warns against. translateZ(0) above already
+     promotes them, so it was redundant as well as churning. */
 }
 /* The leaves are re-keyed (remounted) on every flap step, so the flip animation replays
    each hop; the animation's end state already shows the new char, so a settled cell reads
