@@ -23,6 +23,33 @@ interface ScoreResults {
 // Conversion: 1 kg = 2.204623 lbs, so 1 lbs = 0.45359237 kg
 const LBS_TO_KG = 1 / 2.204623;
 
+/**
+ * Convert a WEIGHT held in an input as a string, when the unit toggle flips.
+ *
+ * Flipping KG→LBS used to change only how the next keystroke was interpreted, so a
+ * body weight of "100" silently became 100 lbs and every score below it was then
+ * confidently wrong. A lifter flipping units means "show me the same weight in pounds",
+ * not "reinterpret my number".
+ *
+ * Only weights go through here. Scores (DOTS / IPF GL / Wilks, and the beat-by margin in
+ * points mode) are dimensionless and must be left exactly alone.
+ *
+ * Blank stays blank and non-numeric content ("-", "abc", ".") is returned untouched, so a
+ * field being typed into is never destroyed. Anything that DOES parse to a finite number
+ * converts — including partial forms like "12.", where the trailing dot is cosmetic and the
+ * value is simply 12. Leaving those alone would be worse than converting them: the field
+ * would then be sitting in the wrong unit, which is the whole bug being fixed here.
+ */
+function convertWeightField(value: string, from: Unit, to: Unit): string {
+  if (from === to || value.trim() === "") return value;
+  const n = parseFloat(value);
+  if (!Number.isFinite(n)) return value;
+  const kg = from === "kg" ? n : n * LBS_TO_KG;
+  const out = to === "kg" ? kg : kg / LBS_TO_KG;
+  // One decimal is barbell precision and avoids showing 220.46226 for a clean 100 kg.
+  return String(Math.round(out * 10) / 10);
+}
+
 // ============ SCORE CALCULATION FUNCTIONS ============
 // All coefficients sourced from PowerOPPS iOS app
 
@@ -571,7 +598,16 @@ export default function PowerOPPS() {
                     <SegmentButton
                       options={[{ value: "kg", label: "KG" }, { value: "lbs", label: "LBS" }]}
                       value={unit}
-                      onChange={(v) => setUnit(v as Unit)}
+                      onChange={(v) => {
+                        const next = v as Unit;
+                        if (next === unit) return;
+                        setBodyWeight((s) => convertWeightField(s, unit, next));
+                        setWeightLifted((s) => convertWeightField(s, unit, next));
+                        setUnit(next);
+                        // Scores are unit-invariant, so `results` stays valid; only the
+                        // stale validation message needs clearing.
+                        setError("");
+                      }}
                     />
                   </div>
                 </div>
@@ -655,7 +691,18 @@ export default function PowerOPPS() {
                     <SegmentButton
                       options={[{ value: "kg", label: "KG" }, { value: "lbs", label: "LBS" }]}
                       value={targetUnit}
-                      onChange={(v) => setTargetUnit(v as Unit)}
+                      onChange={(v) => {
+                        const next = v as Unit;
+                        if (next === targetUnit) return;
+                        setTargetBodyWeight((s) => convertWeightField(s, targetUnit, next));
+                        // targetScore is a DOTS/IPF/Wilks score — dimensionless, never converted.
+                        setTargetUnit(next);
+                        // The result IS a weight, so it is now mislabelled. Invalidate it
+                        // rather than transform it: the inputs are preserved, so one click
+                        // recomputes, and there is no chance of publishing a second wrong number.
+                        setTargetResult(null);
+                        setTargetError("");
+                      }}
                     />
                   </div>
                 </div>
@@ -756,21 +803,27 @@ export default function PowerOPPS() {
                       options={[{ value: "kg", label: "KG" }, { value: "lbs", label: "LBS" }]}
                       value={oppUnit}
                       onChange={(v) => {
-                        const newUnit = v as Unit;
-                        setOppUnit(newUnit);
-                        // Convert beat margin if in total mode
-                        if (beatMode === "total" && beatMargin) {
-                          const currentVal = parseFloat(beatMargin);
-                          if (!isNaN(currentVal)) {
-                            if (newUnit === "lbs") {
-                              // Converting KG to LBS
-                              setBeatMargin((currentVal / LBS_TO_KG).toFixed(1));
-                            } else {
-                              // Converting LBS to KG
-                              setBeatMargin((currentVal * LBS_TO_KG).toFixed(2));
-                            }
-                          }
+                        const next = v as Unit;
+                        if (next === oppUnit) return;
+                        // Every weight on this tab moves together. Previously ONLY the
+                        // margin below was converted, so the margin scaled while all six
+                        // weights beside it silently changed meaning — the worst of both.
+                        setOppBodyWeight((s) => convertWeightField(s, oppUnit, next));
+                        setOppSubtotal((s) => convertWeightField(s, oppUnit, next));
+                        setOppCurrentLift((s) => convertWeightField(s, oppUnit, next));
+                        setOppAttempt((s) => convertWeightField(s, oppUnit, next));
+                        setMyBodyWeight((s) => convertWeightField(s, oppUnit, next));
+                        setMySubtotal((s) => convertWeightField(s, oppUnit, next));
+                        // The margin is a weight in "total" mode and a SCORE in "points"
+                        // mode — only the former converts.
+                        if (beatMode === "total") {
+                          setBeatMargin((s) => convertWeightField(s, oppUnit, next));
                         }
+                        setOppUnit(next);
+                        // oppResult carries myLiftNeeded and oppTotal, both weights, so it
+                        // is now mislabelled. Invalidate rather than transform.
+                        setOppResult(null);
+                        setOppError("");
                       }}
                     />
                   </div>
