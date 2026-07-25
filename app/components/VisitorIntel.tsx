@@ -5,7 +5,7 @@ import { useReducedMotion } from "framer-motion";
 import LocatorMap from "./LocatorMap";
 import ScrambleText from "./ScrambleText";
 import { getVisitorData, type VisitorData } from "./visitorData";
-import { HOME, formatDistance, greatCircleKm } from "../lib/telemetry";
+import { HOME, formatDistance, greatCircleKm, isLatLon } from "../lib/telemetry";
 
 // A browser-side geo lookup used as a FALLBACK when Vercel's edge geo headers come back
 // thin (common for VPNs / mobile carriers / IPv6 — you get an IP but no city). The visitor
@@ -175,13 +175,20 @@ export default function VisitorIntel() {
   const cookieIp = data?.ip ?? "";
   const ip = !isPrivateIp(cookieIp) ? cookieIp : api?.ip || cookieIp || "";
   const hasFix = lat !== null && lon !== null;
-  const cc = api?.cc ?? "";
-  const distance = hasFix
-    ? formatDistance(greatCircleKm(HOME, { lat: lat as number, lon: lon as number }), cc)
-    : null;
   // A city-LEVEL result (not just a country) counts as "detected"; a bare country reads as
   // "classified".
   const hasCity = !!city;
+  // Prefer the provider's country, but fall back to the edge cookie — otherwise a US or GB
+  // visitor is shown kilometres for as long as /api/geo takes to answer.
+  const cc = api?.cc || data?.cc || "";
+  // Gated on a CITY-level fix, not merely on having coordinates. When Vercel can't resolve
+  // a city it still returns lat/lon — a COUNTRY CENTROID (for the US, rural Kansas) — and
+  // gating on `hasFix` turned that into a confident "2,160 KM AWAY" measured to the middle
+  // of a state the visitor has never been to. An approximate PIN is honest; an approximate
+  // number stated to the kilometre is not. Without a city this keeps its em dash.
+  const fix = { lat: lat as number, lon: lon as number };
+  const distance =
+    hasCity && isLatLon(fix) ? formatDistance(greatCircleKm(HOME, fix), cc) : null;
   const stillLooking = data === null || probing;
 
   // Flip the header once the zoom has settled.

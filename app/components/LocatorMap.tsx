@@ -53,6 +53,7 @@ export default function LocatorMap({
   const dragRef = useRef<{ x: number; y: number } | null>(null);
 
   const [view, setView] = useState<View>({ k: 1, tx: 0, ty: 0 });
+  const zoomedRef = useRef(false); // at least one auto-zoom has completed
 
   // Static dot field — rendered once; stable refs so pan/zoom only updates the <g> transform.
   const dots = useMemo(
@@ -69,32 +70,52 @@ export default function LocatorMap({
     return { px: x, py: y, framed: { k: ZOOM, tx: CX - ZOOM * x, ty: CY - ZOOM * y } };
   }, [active, lat, lon]);
 
-  // Auto-zoom on mount (once). Interaction cancels it.
+  // Auto-zoom to the visitor. This effect re-runs whenever `framed` changes — which it does
+  // when /api/geo lands with a better fix, not only on mount. It used to reset
+  // touchedRef to false at that moment, throwing away the fact that the user had already
+  // panned or zoomed, and replay the whole-globe arrival on top of them.
+  //
+  // Now: a view the user owns is never yanked back, and a later refinement eases from
+  // wherever the map currently is rather than restarting from the globe.
   useEffect(() => {
-    touchedRef.current = false;
     if (!active) {
+      touchedRef.current = false;
+      zoomedRef.current = false;
       setView({ k: 1, tx: 0, ty: 0 });
       return;
     }
+    if (touchedRef.current) return; // the map belongs to the visitor now
     if (reduce) {
       setView(framed);
+      zoomedRef.current = true;
       return;
     }
-    const from: View = { k: 1, tx: 0, ty: 0 };
-    const dur = 1150;
-    const delay = 150;
+    const settled = zoomedRef.current;
+    const dur = settled ? 600 : 1150;
+    const delay = settled ? 0 : 150; // no lead-in on a refinement; nothing is arriving
     let start = 0;
+    // The starting frame is captured from the first state update rather than from a ref, so
+    // `view` never has to join the dep array (it would restart the animation every frame)
+    // and no ref is read during render.
+    let from: View | null = null;
     const tick = (now: number) => {
       if (touchedRef.current) return;
       if (!start) start = now;
       const e = Math.min(1, Math.max(0, (now - start - delay) / dur));
       const s = 1 - Math.pow(1 - e, 3); // cubic-out
-      setView({
-        k: from.k + (framed.k - from.k) * s,
-        tx: from.tx + (framed.tx - from.tx) * s,
-        ty: from.ty + (framed.ty - from.ty) * s,
+      setView((prev) => {
+        // First tick decides where we're easing FROM: the globe on arrival, or wherever the
+        // map already sits when a late geo fix refines the target.
+        const base = from ?? (settled ? prev : { k: 1, tx: 0, ty: 0 });
+        from = base;
+        return {
+          k: base.k + (framed.k - base.k) * s,
+          tx: base.tx + (framed.tx - base.tx) * s,
+          ty: base.ty + (framed.ty - base.ty) * s,
+        };
       });
       if (e < 1) animRef.current = requestAnimationFrame(tick);
+      else zoomedRef.current = true;
     };
     animRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(animRef.current);
