@@ -164,7 +164,19 @@ button, a {
 }
 
 /* Code / mono text */
-code, pre, .font-mono {
+/* Code / mono text.
+   Scoped to code and pre ONLY, deliberately. This rule used to include .font-mono,
+   and because plain CSS after @import "tailwindcss" lands outside the utility layers
+   it won the cascade at equal (0,1,0) specificity — so on EVERY deliberate mono
+   label on the site:
+     - font-size: 0.9em compounded, making text-[11px] render at 9.9px, and
+     - letter-spacing: 0 silently killed the explicit tracking.
+   That zeroed tracking-[0.25em] on the section folios (01-04), tracking-[0.25em] on
+   the nav's INDEX/CLOSE, tracking-[0.22em] on HeroMeta, and every etched legend on
+   the whale tracker. The wide-tracked instrument look was never actually rendering.
+   `code`/`pre` still want the optical size reduction — inline code inside prose
+   genuinely reads better a touch smaller — so they keep it. */
+code, pre {
   font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
   font-size: 0.9em;
   letter-spacing: 0;
