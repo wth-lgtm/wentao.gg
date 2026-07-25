@@ -36,8 +36,11 @@ export function formatCurrency(
   }
 
   if (showSign) {
+    // `formatted` is built from the ABSOLUTE value, so it carries the $ and no sign — the
+    // old negative branch stripped the $ (yielding "-1.50M" against "+$1.50M") and its
+    // trailing .replace("--","-$") could never fire because there was no "--" to find.
     if (value > 0) return `+${formatted}`;
-    if (value < 0) return `-${formatted.replace("$", "")}`.replace("--", "-$");
+    if (value < 0) return `-${formatted}`;
   }
 
   return value < 0 ? `-${formatted}` : formatted;

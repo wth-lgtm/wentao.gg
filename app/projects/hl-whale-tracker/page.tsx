@@ -22,7 +22,7 @@ export default function HLWhaleTracker() {
   const { timePeriod, setTimePeriod, sortField, sortDirection, handleSort } =
     useSortAndFilter([]);
 
-  const { traders, loading, error, lastUpdated, progress, refresh } = useLeaderboard(timePeriod);
+  const { traders, loading, error, lastUpdated, refresh } = useLeaderboard(timePeriod);
 
   // Use sorted traders from the hook, but with actual data
   const displayTraders = [...traders].sort((a, b) => {
@@ -119,7 +119,7 @@ export default function HLWhaleTracker() {
           >
             {/* Controls */}
             <div className="flex items-center justify-between mb-4">
-              <TimeFilter value={timePeriod} onChange={setTimePeriod} />
+              <TimeFilter value={timePeriod} onChange={setTimePeriod} disabled={loading} />
               <RefreshButton
                 onRefresh={refresh}
                 loading={loading}
@@ -127,25 +127,8 @@ export default function HLWhaleTracker() {
               />
             </div>
 
-            {/* Progress indicator */}
-            {loading && progress.total > 0 && (
-              <div className="mb-4">
-                <div className="flex items-center justify-between text-xs text-muted mb-1">
-                  <span>Fetching trader data...</span>
-                  <span>
-                    {progress.completed} / {progress.total}
-                  </span>
-                </div>
-                <div className="h-1 bg-card rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-accent transition-all duration-300"
-                    style={{
-                      width: `${(progress.completed / progress.total) * 100}%`,
-                    }}
-                  />
-                </div>
-              </div>
-            )}
+            {/* No progress bar: there is exactly one request now, so a determinate
+                "0 / 1" bar measured nothing. The table's own skeleton covers the wait. */}
 
             {/* Error message */}
             {error && (

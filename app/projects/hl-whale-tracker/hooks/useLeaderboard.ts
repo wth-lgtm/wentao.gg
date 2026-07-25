@@ -1,55 +1,71 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
-import { TraderMetrics, TimePeriod, LeaderboardState } from "../lib/types";
-import { getTopTraders } from "../lib/hyperliquid";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { TraderMetrics, TimePeriod } from "../lib/types";
+
+// Fetches /api/hl-leaderboard ONCE and keeps all four periods in memory, so changing the
+// time filter is instant and costs no network. Previously this re-downloaded the entire
+// ~33MB upstream payload on every filter click, with no abort — so clicking through the
+// four periods stacked four concurrent downloads and whichever finished last won.
+
+type Periods = Partial<Record<TimePeriod, TraderMetrics[]>>;
 
 export function useLeaderboard(timePeriod: TimePeriod) {
-  const [state, setState] = useState<LeaderboardState>({
-    traders: [],
-    loading: false,
-    error: null,
-    lastUpdated: null,
-  });
+  const [periods, setPeriods] = useState<Periods>({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<number | null>(null);
 
-  const [progress, setProgress] = useState({ completed: 0, total: 0 });
+  // Monotonic run id: a late response from a superseded request must not overwrite a newer
+  // one, which is the bug that let the slowest filter click win.
+  const runRef = useRef(0);
 
-  const fetchData = useCallback(async () => {
-    setState((prev) => ({ ...prev, loading: true, error: null }));
-    setProgress({ completed: 0, total: 1 });
+  const load = useCallback(async (signal: AbortSignal, force: boolean) => {
+    const run = ++runRef.current;
+    setLoading(true);
+    setError(null);
 
     try {
-      const result = await getTopTraders(timePeriod, 50);
-
-      if (result.error) {
-        throw new Error(result.error);
-      }
-
-      setProgress({ completed: 1, total: 1 });
-
-      setState({
-        traders: result.data || [],
-        loading: false,
-        error: null,
-        lastUpdated: Date.now(),
+      const res = await fetch("/api/hl-leaderboard", {
+        signal,
+        cache: force ? "no-store" : "default",
       });
-    } catch (error) {
-      setState((prev) => ({
-        ...prev,
-        loading: false,
-        error: error instanceof Error ? error.message : "Failed to fetch data",
-      }));
-    }
-  }, [timePeriod]);
+      const body = await res.json().catch(() => null);
+      if (signal.aborted || run !== runRef.current) return;
 
-  // Fetch on mount and when time period changes
+      if (!res.ok || !body?.periods) {
+        throw new Error(body?.error || `Request failed (${res.status})`);
+      }
+      setPeriods(body.periods as Periods);
+      setLastUpdated(typeof body.updatedAt === "number" ? body.updatedAt : Date.now());
+      setLoading(false);
+    } catch (err) {
+      if (signal.aborted || run !== runRef.current) return;
+      setError(err instanceof Error ? err.message : "Failed to fetch data");
+      setLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    const controller = new AbortController();
+    void load(controller.signal, false);
+    return () => controller.abort();
+  }, [load]);
+
+  // Refresh keeps its own controller so an in-flight refresh is abandoned, not raced.
+  const refreshRef = useRef<AbortController | null>(null);
+  const refresh = useCallback(() => {
+    refreshRef.current?.abort();
+    const controller = new AbortController();
+    refreshRef.current = controller;
+    void load(controller.signal, true);
+  }, [load]);
 
   return {
-    ...state,
-    progress,
-    refresh: fetchData,
+    traders: periods[timePeriod] ?? [],
+    loading,
+    error,
+    lastUpdated,
+    refresh,
   };
 }

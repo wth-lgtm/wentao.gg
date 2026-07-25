@@ -20,22 +20,22 @@ function TableSkeleton() {
       {[...Array(5)].map((_, i) => (
         <tr key={i} className="border-b border-border">
           <td className="py-3 px-4">
-            <div className="h-4 w-8 bg-card animate-pulse rounded" />
+            <div className="h-4 w-8 bg-card-hover animate-pulse rounded" />
           </td>
           <td className="py-3 px-4">
             <div className="space-y-1">
-              <div className="h-4 w-20 bg-card animate-pulse rounded" />
-              <div className="h-3 w-32 bg-card animate-pulse rounded" />
+              <div className="h-4 w-20 bg-card-hover animate-pulse rounded" />
+              <div className="h-3 w-32 bg-card-hover animate-pulse rounded" />
             </div>
           </td>
           <td className="py-3 px-4 text-right">
-            <div className="h-4 w-16 bg-card animate-pulse rounded ml-auto" />
+            <div className="h-4 w-16 bg-card-hover animate-pulse rounded ml-auto" />
           </td>
           <td className="py-3 px-4 text-right">
-            <div className="h-4 w-12 bg-card animate-pulse rounded ml-auto" />
+            <div className="h-4 w-12 bg-card-hover animate-pulse rounded ml-auto" />
           </td>
           <td className="py-3 px-4 text-right hidden lg:table-cell">
-            <div className="h-4 w-16 bg-card animate-pulse rounded ml-auto" />
+            <div className="h-4 w-16 bg-card-hover animate-pulse rounded ml-auto" />
           </td>
         </tr>
       ))}
