@@ -1,6 +1,7 @@
 "use client";
 
 import { ChevronRight, ExternalLink } from "lucide-react";
+import Odometer from "./Odometer";
 import { TraderMetrics } from "../lib/types";
 import {
   formatAddress,
@@ -69,11 +70,18 @@ export default function LeaderboardRow({
       </td>
 
       <td className="px-2 sm:px-4 text-right">
-        <span className={`font-semibold tabular-nums ${toneClass(trader.pnl)}`}>
+        <span className={`inline-flex items-baseline font-semibold tabular-nums ${toneClass(trader.pnl)}`}>
           <span aria-hidden className="mr-1 text-[0.7em] align-[0.1em]">
             {signGlyph(trader.pnl)}
           </span>
-          {formatCurrency(trader.pnl, { showSign: true, compact: true })}
+          {/* Staggered by rank so the board fills top-down on first paint. Capped at
+              the twelfth row — fifty rows at 26ms each is 1.3s of arrival, which stops
+              reading as a mechanism and starts reading as a slow page. Same cap and
+              the same reason as the trades tape. */}
+          <Odometer
+            formatted={formatCurrency(trader.pnl, { showSign: true, compact: true })}
+            delayMs={Math.min(rank - 1, 12) * 26}
+          />
         </span>
       </td>
 
