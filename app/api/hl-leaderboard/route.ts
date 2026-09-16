@@ -25,9 +25,16 @@ import { SWR_S, TTL_S } from "@/app/projects/hl-whale-tracker/lib/config";
 // ~10 minutes (Last-Modified vs Age on its own response), so nearly all of that was spent
 // re-deriving a body that had not moved.
 //
-// So the REDUCED result goes in Next's Data Cache, which is global rather than regional:
-// a CDN miss is now a ~36KB Data Cache read and the 37MB pull happens at most once per
-// TTL_S. Caching the upstream FETCH instead is what cannot work — Vercel's Data Cache
+// So the REDUCED result goes in Next's Data Cache: a CDN miss becomes a ~36KB Data Cache
+// read instead of the 37MB pull, verified locally as 3.22s cold then 0.0045s. How far
+// that sharing reaches is NOT verified from here — the intent is a cache shared more
+// widely than the per-region edge, but whether two Vercel regions hit one entry can only
+// be measured after deploy (hit the route from two regions, or after an eviction, and
+// check `updatedAt` is the same stamp and the second region's function duration is tens
+// of milliseconds). Worst case it is per-instance and this is still one pull per lambda
+// per TTL_S instead of one per CDN miss.
+//
+// Caching the upstream FETCH instead cannot work: Vercel's Data Cache
 // silently drops items over ~2MB, so at 37MB the entry would never be written, which is
 // why lib/hyperliquid.ts keeps `cache: "no-store"` on the upstream call. The 36KB output
 // is three orders of magnitude inside that limit. `"use cache"` is not available here

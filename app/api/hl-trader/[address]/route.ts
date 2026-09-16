@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
 import {
+  info,
+  payloadFresh,
+  type CachedPayload,
+} from "@/app/projects/hl-whale-tracker/lib/info";
+import {
   ADDRESS_RE,
   parseMargin,
   parsePositions,
@@ -33,41 +38,29 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const INFO_URL = "https://api.hyperliquid.xyz/info";
-const TIMEOUT_MS = 10_000;
-
-// Duplicated in ./fills/route.ts rather than shared: Next's route type plugin rejects
-// any export from a route file that is not a recognised handler, so the only way to
-// share it is a third module for fourteen lines that neither route would import for
-// any other reason.
-async function info(body: Record<string, unknown>): Promise<unknown | null> {
-  try {
-    const res = await fetch(INFO_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      cache: "no-store",
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
-    return res.ok ? await res.json() : null;
-  } catch {
-    return null;
-  }
-}
-
 // What it takes to put a dollar figure on a spot balance.
 //
 // Neither payload is about this trader, so both are cached in module scope and cost
-// one upstream call per cold lambda rather than one per visitor. The windows differ
-// because the data does: the pair list is near-static (1h), the mids are a live
-// market (30s, which is the same window this route's own response is cached for, so
-// the price can never be staler than the snapshot it prices).
+// one upstream call per cold lambda rather than one per visitor. They are bounded by
+// construction — two payloads, replaced wholesale, keyed only on upstream-supplied
+// names, so nothing a visitor sends can grow them.
 //
-// They are bounded by construction — two payloads, replaced wholesale, keyed only on
-// upstream-supplied names, so nothing a visitor sends can grow them — and an EMPTY
-// answer is cached too, so a bad upstream costs one call per window instead of one
-// per request. Unpriced balances then render the em dash, which is honest; the coin
-// counts are still exactly what upstream said.
+// The GOOD windows differ because the data does: the pair list is near-static (1h), the
+// mids are a live market (30s). What that does NOT buy is a mid as fresh as the reading
+// it prices, which an earlier version of this comment claimed. A mid can be 30s old when
+// the body is generated, and the body is then served from the edge for another 30s —
+// 120s more inside stale-while-revalidate — so a value on screen can trail the market by
+// roughly a minute, and by up to two and a half in the SWR tail. That is why the panel
+// says "valued at the current spot mid … an estimate, not a settled balance" and prints
+// the roll-up with a "≈".
+//
+// A FAILED read gets a much shorter window than a good one, which lib/info's
+// payloadFresh owns and tests. Caching a null spotMeta for the full hour meant one
+// transient 429 — which Hyperliquid returns on a second sequential call from a shared
+// egress IP — cost an HOUR of dash-only USD values, and because missing pricing also
+// sets `no-store` below, an hour with no edge cache either: exactly the wrong response
+// to being rate-limited. Unpriced balances render the em dash meanwhile, which is
+// honest; the coin counts are still exactly what upstream said.
 //
 // Cost, stated because it is the one thing the split above gave back: on a COLD
 // lambda these two calls (spotMeta 0.58-0.81s, allMids 0.65s) are now the route's
@@ -78,13 +71,16 @@ async function info(body: Record<string, unknown>): Promise<unknown | null> {
 // point is that 2,331,863 UBONK is $5.90 and 556,416 HYPE is $43.25M.
 const META_TTL_MS = 60 * 60 * 1000;
 const MIDS_TTL_MS = 30 * 1000;
-let metaCache: { value: unknown; at: number } | null = null;
-let midsCache: { value: unknown; at: number } | null = null;
+
+let metaCache: CachedPayload | null = null;
+let midsCache: CachedPayload | null = null;
 
 async function spotPricing(): Promise<{ spotMeta: unknown; allMids: unknown }> {
   const now = Date.now();
-  const metaFresh = metaCache !== null && now - metaCache.at < META_TTL_MS;
-  const midsFresh = midsCache !== null && now - midsCache.at < MIDS_TTL_MS;
+  // payloadFresh is what applies the short window to a null — see lib/info and
+  // tests/info.test.ts.
+  const metaFresh = payloadFresh(metaCache, META_TTL_MS, now);
+  const midsFresh = payloadFresh(midsCache, MIDS_TTL_MS, now);
 
   const [spotMeta, allMids] = await Promise.all([
     metaFresh ? metaCache!.value : info({ type: "spotMeta" }),

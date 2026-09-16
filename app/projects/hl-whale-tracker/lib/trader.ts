@@ -175,6 +175,64 @@ export function parseSpot(raw: unknown): SpotBalance[] | null {
 }
 
 /**
+ * Token names, keyed by the `index` FIELD rather than by array position.
+ *
+ * Measured against the live spotMeta on 2026-09-16: 43 of 501 tokens sit at a position
+ * that differs from their own index (position 458 holds index 478) and the array is
+ * shorter than the highest index it carries, so `tokens[i]` resolved 26 of the 328
+ * universe entries to the wrong base name — @367 came back "SPCXX" when it is "WARS" —
+ * or off the end of the array entirely. Both callers below go through this.
+ */
+function tokenNames(spotMeta: unknown): Map<number, string> {
+  const out = new Map<number, string>();
+  const tokens = (spotMeta as { tokens?: unknown })?.tokens;
+  if (!Array.isArray(tokens)) return out;
+  for (const t of tokens) {
+    const index = (t as { index?: unknown })?.index;
+    const name = (t as { name?: unknown })?.name;
+    if (typeof index === "number" && typeof name === "string" && name) {
+      out.set(index, name);
+    }
+  }
+  return out;
+}
+
+/**
+ * Readable names for the spot markets, keyed by the market id a fill carries.
+ *
+ * Spot fills identify their market by INDEX, not ticker: upstream sends coin "@107",
+ * which is unreadable on screen and appeared on 5.4% of sampled fills — 52% for one
+ * address. This maps it to "HYPE/USDC".
+ *
+ * The key is the universe entry's own `name` and never its array position:
+ * universe[107].name is "@109" live, so a by-position map mislabels almost every spot
+ * fill. A pair whose tokens cannot both be named is left OUT, so the fill falls back to
+ * upstream's own "@107" — honest, where hiding the row would lose a real trade.
+ *
+ * Lives here rather than in the fills route because the route had its own copy of the
+ * same parse, including the token-index trap above, with nothing testing it. See
+ * tests/pairNames.test.ts.
+ */
+export function pairNames(spotMeta: unknown): Map<string, string> {
+  const out = new Map<string, string>();
+  const universe = (spotMeta as { universe?: unknown })?.universe;
+  if (!Array.isArray(universe)) return out;
+
+  const names = tokenNames(spotMeta);
+  if (names.size === 0) return out;
+
+  for (const entry of universe) {
+    const name = (entry as { name?: unknown })?.name;
+    const pair = (entry as { tokens?: unknown })?.tokens;
+    if (typeof name !== "string" || !Array.isArray(pair)) continue;
+    const base = typeof pair[0] === "number" ? names.get(pair[0]) : undefined;
+    const quote = typeof pair[1] === "number" ? names.get(pair[1]) : undefined;
+    if (base && quote) out.set(name, `${base}/${quote}`);
+  }
+  return out;
+}
+
+/**
  * The spot venue's quote token index.
  *
  * Live (2026-09-16): 311 of 328 universe entries quote token 0, which is USDC. The
@@ -191,10 +249,8 @@ const QUOTE_TOKEN = 0;
  * reading. Pure, and given the RAW upstream payloads rather than a pre-built map,
  * because all three ways to get this wrong are in the parsing:
  *
- *   1. A token's array POSITION in `tokens` is not its `index`. 43 of 501 live tokens
- *      sit at a differing position (position 458 holds index 478) and the array is
- *      shorter than its highest index, so 26 of the 328 universe entries resolve to
- *      the wrong base name — or to nothing — when looked up by position.
+ *   1. A token's array POSITION in `tokens` is not its `index` — see tokenNames, which
+ *      both this and pairNames go through for that reason.
  *   2. The mid is keyed by the UNIVERSE entry's name. 327 of the 328 live pairs are
  *      named "@N" and exactly one is "PURR/USDC"; allMids carries whichever form the
  *      universe used. Keying on the coin instead would hand a token that also has a
@@ -218,14 +274,7 @@ export function priceSpot(
   const mids = (allMids ?? null) as Record<string, unknown> | null;
 
   if (Array.isArray(universe) && Array.isArray(tokens) && mids && typeof mids === "object") {
-    const nameByIndex = new Map<number, string>();
-    for (const t of tokens) {
-      const index = (t as { index?: unknown })?.index;
-      const name = (t as { name?: unknown })?.name;
-      if (typeof index === "number" && typeof name === "string" && name) {
-        nameByIndex.set(index, name);
-      }
-    }
+    const nameByIndex = tokenNames(spotMeta);
 
     const quote = nameByIndex.get(QUOTE_TOKEN);
     if (quote) midByCoin.set(quote, 1);

@@ -761,16 +761,22 @@ export default function PositionsPanel({
     positions !== null && positions.length === 0 && spot !== null && spot.length > 0;
   const asOf = <AsOf since={data.fetchedAt} />;
 
-  // Both figures or neither. A ratio needs a positive denominator to be a ratio at
-  // all, and printing "0.00×" against an empty perp account would read as a
-  // measurement rather than as the absence of one.
+  // Both figures or neither, and both above zero. A ratio needs a positive denominator
+  // to be a ratio at all, and it needs a positive NUMERATOR to be worth printing:
+  // "0.00×" against either an empty perp account or a leaderboard row reporting no
+  // equity would read as a measurement rather than as the absence of one.
   const leaderboardEquity =
     leaderboardAccountValue !== null &&
+    leaderboardAccountValue > 0 &&
     margin?.accountValue != null &&
     margin.accountValue > 0
       ? {
           leaderboard: leaderboardAccountValue,
           perp: margin.accountValue,
+          // Stated as a MULTIPLE of the live account, not as a "difference": which way
+          // the two land is a property of the address, and a 0.62x ratio called a
+          // "difference" would read as the leaderboard being 0.62x too small rather
+          // than as it reporting less than the perp account does.
           ratio: leaderboardAccountValue / margin.accountValue,
         }
       : null;
@@ -806,14 +812,16 @@ export default function PositionsPanel({
           stating neither number, and misstating its size in the comment, is the part a
           visitor could not act on; the row that carries the leaderboard figure is
           already in memory for the window on screen, so it is passed in and the ratio
-          is arithmetic rather than a claim. No direction is asserted with it: which way
-          the two land is a property of the address, not of the measurement. */}
+          is arithmetic rather than a claim. It is phrased as a MULTIPLE of the live
+          account ("the leaderboard reads 2.02x the live perp account") rather than as a
+          "difference", so an address where the leaderboard reads LOWER prints a ratio
+          below 1 and still says something true. */}
       <p className="mt-3 text-xs text-muted">
         {leaderboardEquity !== null && (
           <>
             Leaderboard equity {money(leaderboardEquity.leaderboard)} · live perp{" "}
-            {money(leaderboardEquity.perp)} — a {leaderboardEquity.ratio.toFixed(2)}×
-            difference.{" "}
+            {money(leaderboardEquity.perp)} — the leaderboard reads{" "}
+            {leaderboardEquity.ratio.toFixed(2)}× the live perp account.{" "}
           </>
         )}
         Account value here is this address&rsquo;s live perp margin account, read straight

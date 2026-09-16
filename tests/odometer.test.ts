@@ -40,11 +40,12 @@ test("odometerCells: only 0-9 rolls; everything else is a static character", () 
   );
 });
 
-test("odometerCells: a carry adds a column on the left and re-keys nothing", () => {
+test("odometerCells: a carry adds a column on the left and keeps every place value", () => {
   const before = odometerCells("$9.79M");
   const after = odometerCells("$10.06M");
 
-  // The suffix, the fraction and the decimal point all keep their identity.
+  // The suffix, the fraction, the units drum and the decimal point all keep their
+  // identity — every place value, which is the point.
   for (const key of [-1, -2, -3, -4, -5]) {
     const b = cellAt("$9.79M", key);
     const a = cellAt("$10.06M", key);
@@ -53,6 +54,25 @@ test("odometerCells: a carry adds a column on the left and re-keys nothing", () 
   }
   assert.equal(cellAt("$9.79M", -4)?.ch, ".");
   assert.equal(cellAt("$10.06M", -4)?.ch, ".");
+
+  // The one column that DOES change kind, asserted rather than skipped: the prefix
+  // slot. "$" sits at -6 in the shorter figure and the tens digit occupies it in the
+  // longer one, so that node goes from a static char span to a digit strip. It is
+  // unavoidable and harmless — a prefix is not a place value, so there is no drum
+  // identity to lose, and the "$" it is replaced by simply moves one column left. The
+  // comparison that matters is the count: one here against three under string-index
+  // keying (measured in the browser, where "." became a digit strip, a digit strip
+  // became "." and "M" became a digit).
+  assert.equal(cellAt("$9.79M", -6)?.ch, "$");
+  assert.equal(cellAt("$9.79M", -6)?.digit, false);
+  assert.equal(cellAt("$10.06M", -6)?.ch, "1");
+  assert.equal(cellAt("$10.06M", -6)?.digit, true);
+  assert.equal(cellAt("$10.06M", -7)?.ch, "$");
+
+  const kindFlips = [-1, -2, -3, -4, -5, -6].filter(
+    (key) => cellAt("$9.79M", key)!.digit !== cellAt("$10.06M", key)!.digit
+  );
+  assert.deepEqual(kindFlips, [-6]);
 
   // The only key the longer figure introduces is further left than every old one.
   const added = after.map((c) => c.key).filter((k) => !before.some((c) => c.key === k));
