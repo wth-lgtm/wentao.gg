@@ -141,9 +141,27 @@ function rankPositions(positions: PerpPosition[] | null): Ranked | null {
 
 // ── The roll-up ───────────────────────────────────────────────────────────────
 
-/** Sum over the values upstream actually gave. null when it gave none of them, so a
- * total is never a confident 0 built out of unknowns. */
-function sumOf(values: (number | null)[]): number | null {
+/** A sum together with how much of the book it actually covers. */
+interface Aggregate {
+  /** null when upstream gave none of the inputs: the dash, never a 0 built of unknowns. */
+  total: number | null;
+  /** Rows that contributed a figure. */
+  seen: number;
+  /** Rows that were asked for one. */
+  of: number;
+}
+
+/**
+ * Sum over the values upstream actually gave, and remember how many that was.
+ *
+ * Returning only the number was a quieter version of the same lie the dash exists to
+ * prevent: a figure missing from ONE of twelve present rows is a case the data really
+ * produces (tests/trader.test.ts pins that a missing figure inside a present row stays
+ * null, never 0), and the header then printed a sum of eleven under a bare "Unrealised"
+ * as though it were the book's total. The count travels with the total so the cell can
+ * say "11 of 12".
+ */
+function sumOf(values: (number | null)[]): Aggregate {
   let total = 0;
   let seen = 0;
   for (const v of values) {
@@ -152,37 +170,53 @@ function sumOf(values: (number | null)[]): number | null {
       seen += 1;
     }
   }
-  return seen === 0 ? null : total;
+  return { total: seen === 0 ? null : total, seen, of: values.length };
 }
 
 interface PerpTotals {
-  unrealized: number | null;
+  unrealized: Aggregate;
   /** Long notional minus short notional. positionValue is a magnitude upstream, so
    * the sign has to come from `side`. */
-  net: number | null;
+  net: Aggregate;
   longs: number;
   shorts: number;
-  funding: number | null;
+  funding: Aggregate;
 }
 
 function totalPositions(positions: PerpPosition[]): PerpTotals {
   return {
     unrealized: sumOf(positions.map((p) => p.unrealizedPnl)),
     net: sumOf(
-      positions.map((p) =>
-        p.positionValue === null
-          ? null
-          : p.side === "LONG"
-            ? p.positionValue
-            : p.side === "SHORT"
-              ? -p.positionValue
-              : 0
-      )
+      positions.map((p) => {
+        // "FLAT" is two different facts in one word: parsePositions labels a position
+        // flat when szi is 0 AND when szi failed to parse. Only the first contributes a
+        // real 0 to net exposure; an unknown direction — or an unknown notional — has to
+        // contribute null, or a book of unparseable rows would read "FLAT $0.00", which
+        // is a confident claim that this whale is hedged.
+        if (p.positionValue === null || p.szi === null) return null;
+        if (p.side === "LONG") return p.positionValue;
+        if (p.side === "SHORT") return -p.positionValue;
+        return 0;
+      })
     ),
     longs: positions.filter((p) => p.side === "LONG").length,
     shorts: positions.filter((p) => p.side === "SHORT").length,
     funding: sumOf(positions.map((p) => p.fundingSinceOpen)),
   };
+}
+
+/** The honesty valve on a Σ: how much of the book it covers, shown only when that is
+ * not all of it. */
+function Coverage({ agg, what }: { agg: Aggregate; what: string }) {
+  if (agg.total === null || agg.seen >= agg.of) return null;
+  return (
+    <Legend>
+      {agg.seen} of {agg.of}
+      <span className="sr-only">
+        {` positions: upstream reported no ${what} for the other ${agg.of - agg.seen}, so this total is not the whole book`}
+      </span>
+    </Legend>
+  );
 }
 
 /** Maintenance margin as a share of equity: 100% is the liquidation line. Null unless
@@ -197,36 +231,47 @@ function maintenanceShare(
 }
 
 function TotalsRow({ totals, maintenance }: { totals: PerpTotals; maintenance: number | null }) {
-  const netSide =
-    totals.net === null || totals.net === 0 ? "FLAT" : totals.net > 0 ? "LONG" : "SHORT";
+  const net = totals.net.total;
+  const netSide = net === null || net === 0 ? "FLAT" : net > 0 ? "LONG" : "SHORT";
   return (
     <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
       <Metric label="Unrealised">
-        {totals.unrealized === null ? (
+        {totals.unrealized.total === null ? (
           dash
         ) : (
-          <span className={toneClass(totals.unrealized)}>
-            {formatCurrency(totals.unrealized, { showSign: true, compact: true })}
+          <span className="flex flex-wrap items-baseline gap-x-1.5">
+            <span className={toneClass(totals.unrealized.total)}>
+              {formatCurrency(totals.unrealized.total, { showSign: true, compact: true })}
+            </span>
+            <Coverage agg={totals.unrealized} what="unrealised PnL" />
           </span>
         )}
       </Metric>
       <Metric label="Net exposure">
-        {totals.net === null ? (
+        {net === null ? (
           dash
         ) : (
           <span className="flex flex-wrap items-baseline gap-x-1.5">
             <SideBadge side={netSide} />
-            <span>{money(Math.abs(totals.net))}</span>
+            <span>{money(Math.abs(net))}</span>
             <Legend>
               {totals.longs} long · {totals.shorts} short
             </Legend>
+            <Coverage agg={totals.net} what="direction or notional" />
           </span>
         )}
       </Metric>
       <Metric label="Funding since open">
         {/* Same convention as the per-position cell, from the same field, so the
             roll-up and the rows can never disagree about who paid whom. */}
-        {totals.funding === null ? dash : <Funding value={totals.funding} />}
+        {totals.funding.total === null ? (
+          dash
+        ) : (
+          <span className="flex flex-wrap items-baseline gap-x-1.5">
+            <Funding value={totals.funding.total} />
+            <Coverage agg={totals.funding} what="funding since open" />
+          </span>
+        )}
       </Metric>
       <Metric label="Maintenance">
         {maintenance === null ? (
@@ -316,29 +361,35 @@ function PositionList({ rows, dust = false }: { rows: PerpPosition[]; dust?: boo
       <div className="hidden overflow-x-auto sm:block">
         <table className="hl-pos-table w-full text-sm">
           <caption className="sr-only">{caption}</caption>
-          <thead>
-            <tr>
-              <Th pad="pl-4 pr-2">Market</Th>
-              <Th align="right">Size</Th>
-              <Th align="right">Entry</Th>
-              <Th align="right">Value</Th>
-              <Th align="right" className="hidden lg:table-cell">
-                Margin
-              </Th>
-              <Th align="right" className="hidden md:table-cell">
-                ROE
-              </Th>
-              <Th align="right" className="hidden lg:table-cell">
-                Liq.
-              </Th>
-              <Th align="right" className="hidden lg:table-cell">
-                Funding
-              </Th>
-              <Th align="right" pad="pl-2 pr-4">
-                uPnL
-              </Th>
-            </tr>
-          </thead>
+          {/* The drawer's rows are a footnote to the list above, and a second
+              nine-column header — which cannot align with the first, since both tables
+              size to their own content — reads worse than none. The caption still names
+              the table. */}
+          {!dust && (
+            <thead>
+              <tr>
+                <Th pad="pl-4 pr-2">Market</Th>
+                <Th align="right">Size</Th>
+                <Th align="right">Entry</Th>
+                <Th align="right">Value</Th>
+                <Th align="right" className="hidden lg:table-cell">
+                  Margin
+                </Th>
+                <Th align="right" className="hidden md:table-cell">
+                  ROE
+                </Th>
+                <Th align="right" className="hidden lg:table-cell">
+                  Liq.
+                </Th>
+                <Th align="right" className="hidden lg:table-cell">
+                  Funding
+                </Th>
+                <Th align="right" pad="pl-2 pr-4">
+                  uPnL
+                </Th>
+              </tr>
+            </thead>
+          )}
           <tbody>
             {rows.map((p) => (
               <tr key={p.coin} className="hl-pos-row">

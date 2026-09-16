@@ -1290,6 +1290,13 @@ input:focus {
 .hl-pos-dust > summary:hover {
   background: var(--card-hover);
 }
+/* The summary is a full-bleed flex box flush with the section's padding box, and the
+   global ring at `outline-offset: 2px` paints OUTSIDE that box — where the section's
+   own corner clip eats its left, right and bottom edges. Inset it so all four edges
+   land on the plate. */
+.hl-pos-dust > summary:focus-visible {
+  outline-offset: -2px;
+}
 .hl-pos-caret {
   font-size: 0.5rem;
   color: var(--legend);
