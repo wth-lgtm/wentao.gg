@@ -98,8 +98,11 @@ export default function SiteStats() {
   // as base64, and at a 300 px lead a reading-pace scroll reached the card before the download
   // did. Same specifier as the dynamic() loader, so Turbopack dedupes it into the same chunks.
   // ARM (300 px): mount once and never unmount — unmounting rebuilt the WebGL context, the
-  // world and ~110 convex hulls and rained the pile in again on every return. VISIBLE (live,
-  // both directions): only gates the frameloop inside. Callback ref → fires when the node attaches.
+  // world and ~110 convex hulls and rained the pile in again on every return. The mount also
+  // waits for the fetch: the loading card is 226 px tall against 491 loaded, and the pile
+  // freezes its layout at mount, so a pile born in the loading card would spawn across ±19 u
+  // for walls that then snap to ±8.7 u. VISIBLE (live, both directions): only gates the
+  // frameloop inside. Callback ref → fires when the node attaches.
   const bgObserver = useRef<IntersectionObserver | null>(null);
   const warmObserver = useRef<IntersectionObserver | null>(null);
   const attachBg = useCallback((node: HTMLDivElement | null) => {
@@ -110,7 +113,8 @@ export default function SiteStats() {
     if (node) {
       const warm = new IntersectionObserver(([e]) => {
         if (!e.isIntersecting) return;
-        import("./FloatingBackground");
+        // A failed warm is only a lost head start: dynamic() fetches again at mount and reports.
+        import("./FloatingBackground").catch(() => {});
         warm.disconnect();
       }, { rootMargin: "200% 0px" });
       warm.observe(node);
@@ -254,7 +258,7 @@ export default function SiteStats() {
               className="absolute z-0 overflow-hidden rounded-br-2xl"
               style={{ top: "30%", left: "36%", right: 0, bottom: 0 }}
             >
-              {bgArmed && <FloatingBackground active={bgVisible} accent={accentHex} light={resolvedTheme === "light"} />}
+              {bgArmed && !loading && <FloatingBackground active={bgVisible} accent={accentHex} light={resolvedTheme === "light"} />}
             </div>
           )}
 

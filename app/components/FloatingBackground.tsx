@@ -12,16 +12,20 @@ function rand(i: number, seed: number): number {
 }
 
 // Static floor + walls confining the sim to the visible box. Grippy + near-zero bounce
-// so the floor is not a trampoline.
+// so the floor is not a trampoline. The walls reach past the top of the spawn column
+// (3.7·hh plus half a piece): a dense re-lay into a narrow region pushes its topmost pieces
+// sideways, and at the old 3·hh they went over the wall and out of the box (measured: 1–2 of
+// 200 lost per re-lay at 800 px; 0 with the spawn enclosed).
 function Boundary({ hw, hh, hz }: { hw: number; hh: number; hz: number }) {
   const th = 0.6;
+  const wallH = hh * 4;
   return (
     <RigidBody type="fixed" colliders={false} friction={0.6} restitution={0.02}>
       <CuboidCollider args={[hw + th, th, hz + th]} position={[0, -hh - th, 0]} />
-      <CuboidCollider args={[th, hh * 3, hz + th]} position={[-hw - th, 0, 0]} />
-      <CuboidCollider args={[th, hh * 3, hz + th]} position={[hw + th, 0, 0]} />
-      <CuboidCollider args={[hw + th, hh * 3, th]} position={[0, 0, -hz - th]} />
-      <CuboidCollider args={[hw + th, hh * 3, th]} position={[0, 0, hz + th]} />
+      <CuboidCollider args={[th, wallH, hz + th]} position={[-hw - th, 0, 0]} />
+      <CuboidCollider args={[th, wallH, hz + th]} position={[hw + th, 0, 0]} />
+      <CuboidCollider args={[hw + th, wallH, th]} position={[0, 0, -hz - th]} />
+      <CuboidCollider args={[hw + th, wallH, th]} position={[0, 0, hz + th]} />
     </RigidBody>
   );
 }
@@ -131,7 +135,13 @@ function Pile({ count, accent, light, visible }: { count: number; accent: string
   // teleported all 200 settled pieces back to the sky on every aspect change (reproduced on
   // production at 1100→1000 px). Only the walls follow the viewport now; a narrower region
   // nudges edge pieces inward, a wider one leaves a gap at the right — both beat a re-fall.
-  const [spawn] = useState(() => ({ hw, hh }));
+  // Past a quarter of the spawn width, though, the region has changed size class (the card
+  // going fluid below 1072 px, DevTools docking) and a pile laid out for the old width would
+  // leave half the box empty or half the pile outside it — there a re-rain is the honest
+  // answer, so the layout is re-laid to the live size. (setState during render is React's
+  // own pattern for state that follows a prop; an effect would be a cascading render.)
+  const [spawn, setSpawn] = useState(() => ({ hw, hh }));
+  if (Math.abs(hw - spawn.hw) > 0.25 * spawn.hw) setSpawn({ hw, hh });
 
   // One entry per group; aligned by group index. InstancedRigidBodies assigns its ref
   // as an OBJECT ref (writes .current) — a function ref silently no-ops — so we hand it
@@ -139,9 +149,10 @@ function Pile({ count, accent, light, visible }: { count: number; accent: string
   const homeX = useRef<Float32Array[]>([]);
   const massA = useRef<Float32Array[]>([]);
   const captured = useRef(false);
-  // Seconds since the layout was (re)spawned, accumulated from frame deltas: R3F zeroes
-  // clock.elapsedTime on every frameloop switch, and a Canvas-age clock would capture home-X
-  // from mid-air spawn columns after any respawn.
+  // Simulated seconds since the layout was (re)spawned, accumulated from frame deltas clamped
+  // the way rapier clamps them: R3F zeroes clock.elapsedTime on every frameloop switch, and
+  // the first frame after an idle carries the whole idle as its delta — a Canvas-age clock, or
+  // a raw sum, would capture home-X from mid-air spawn columns on a respawn's first frame.
   const sinceSpawn = useRef(0);
   const quietFor = useRef(0);
 
@@ -272,11 +283,11 @@ function Pile({ count, accent, light, visible }: { count: number; accent: string
     invalidate();
   }, [hw, hh, bodyHolders, invalidate]);
 
-  useFrame((state, delta) => {
+  useFrame((_, delta) => {
     const gb = bodyHolders;
     if (!gb.length || homeX.current.length !== layout.length) return;
     const dt = Math.max(1e-4, Math.min(delta, 1 / 30));
-    sinceSpawn.current += delta;
+    sinceSpawn.current += Math.min(delta, 0.5);
 
     // 1) cursor follower (field center) + its RAW velocity. Sampling speed from the raw
     //    hit point — not the low-passed follower — means fast flicks aren't smoothed away.
@@ -301,19 +312,28 @@ function Pile({ count, accent, light, visible }: { count: number; accent: string
     const idling = captured.current && !active.current;
     let maxV2 = 0;
     if (settling || idling) {
-      forEachBody(gb, (b) => {
-        // A piece that has tunnelled out of the box (measured: a 2000 px/s swipe through the
-        // pile launches 3–6 through a wall) would fall forever and hold the loop awake for
-        // nothing visible. Park it where it is and leave it out of the quiet test.
-        const p = b.translation();
-        if (p.y < -hh - 1.5 || Math.abs(p.x) > hw + 1.5 || Math.abs(p.z) > hz + 1.5) {
-          if (!b.isSleeping()) b.sleep();
-          return;
+      // "out" is the union of the live box and the spawn box: a wall that moved inward has
+      // not made the pieces it left behind escapees.
+      const outX = Math.max(hw, spawn.hw) + 1.5;
+      for (let gi = 0; gi < gb.length; gi++) {
+        const list = gb[gi]?.current;
+        if (!list) continue;
+        for (let i = 0; i < list.length; i++) {
+          const b = list[i];
+          if (!b) continue;
+          // A piece that has tunnelled out of the box (measured: a 2000 px/s swipe through the
+          // pile launches 3–6 through a wall) would fall forever and hold the loop awake for
+          // nothing visible. Park it where it is and leave it out of the quiet test.
+          const p = b.translation();
+          if (p.y < -hh - 1.5 || Math.abs(p.x) > outX || Math.abs(p.z) > hz + 1.5) {
+            if (!b.isSleeping()) b.sleep();
+            continue;
+          }
+          const lv = b.linvel();
+          const s2 = lv.x * lv.x + lv.y * lv.y + lv.z * lv.z;
+          if (s2 > maxV2) maxV2 = s2;
         }
-        const lv = b.linvel();
-        const s2 = lv.x * lv.x + lv.y * lv.y + lv.z * lv.z;
-        if (s2 > maxV2) maxV2 = s2;
-      });
+      }
     }
 
     // capture the settled pile as "home" X once it has come to rest
