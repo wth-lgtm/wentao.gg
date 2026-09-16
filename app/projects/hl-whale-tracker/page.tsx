@@ -18,6 +18,7 @@ import { useLeaderboard } from "./hooks/useLeaderboard";
 import { useTableControls } from "./hooks/useTableControls";
 import { useTrader } from "./hooks/useTrader";
 import { useReSeat } from "./hooks/useReSeat";
+import { useTabpanelFocus } from "./hooks/useTabpanelFocus";
 import { formatAddress } from "./lib/formatters";
 
 export default function HLWhaleTracker() {
@@ -54,6 +55,9 @@ export default function HLWhaleTracker() {
   // The re-seat animates rows to new berths whenever the sorted ORDER changes.
   const order = displayTraders.map((t) => t.address);
   const registerRow = useReSeat(order.join("|"), order);
+  // Whether the open panel needs its own tab stop depends on what it currently holds,
+  // so it is measured after render rather than declared per panel. See the hook.
+  const tabpanelRef = useTabpanelFocus();
 
   return (
     <main className="min-h-screen bg-background">
@@ -124,7 +128,7 @@ export default function HLWhaleTracker() {
           )}
 
           {activeTab === "leaderboard" && (
-            <div role="tabpanel" id="hl-panel-leaderboard" aria-labelledby="hl-tab-leaderboard">
+            <div ref={tabpanelRef} role="tabpanel" id="hl-panel-leaderboard" aria-labelledby="hl-tab-leaderboard">
               <div className="flex items-center justify-between mb-4">
                 <TimeFilter value={timePeriod} onChange={setTimePeriod} />
                 <RefreshButton onRefresh={refresh} refreshing={refreshing} />
@@ -153,16 +157,7 @@ export default function HLWhaleTracker() {
           )}
 
           {activeTab === "positions" && (
-            // tabIndex 0 because this panel has no focusable content in ANY state —
-            // it is metrics and legends end to end — and the APG tabs pattern puts a
-            // tabpanel with nothing to focus into the tab sequence itself, or a
-            // keyboard reader leaving the tablist skips the panel entirely.
-            <div
-              role="tabpanel"
-              id="hl-panel-positions"
-              aria-labelledby="hl-tab-positions"
-              tabIndex={0}
-            >
+            <div ref={tabpanelRef} role="tabpanel" id="hl-panel-positions" aria-labelledby="hl-tab-positions">
               <PositionsPanel
                 address={focused}
                 data={trader.data}
@@ -174,7 +169,7 @@ export default function HLWhaleTracker() {
           )}
 
           {activeTab === "trades" && (
-            <div role="tabpanel" id="hl-panel-trades" aria-labelledby="hl-tab-trades">
+            <div ref={tabpanelRef} role="tabpanel" id="hl-panel-trades" aria-labelledby="hl-tab-trades">
               <TradesPanel
                 address={focused}
                 data={trader.data}
@@ -186,15 +181,7 @@ export default function HLWhaleTracker() {
           )}
 
           {activeTab === "analytics" && (
-            // Same reason, for two of this panel's three states: the loaded state has
-            // focusable explorer links in its LeaderCards, but the loading skeleton is
-            // aria-hidden divs and the empty state is a single <p>.
-            <div
-              role="tabpanel"
-              id="hl-panel-analytics"
-              aria-labelledby="hl-tab-analytics"
-              tabIndex={0}
-            >
+            <div ref={tabpanelRef} role="tabpanel" id="hl-panel-analytics" aria-labelledby="hl-tab-analytics">
               <AnalyticsPanel
                 periods={periods}
                 timePeriod={timePeriod}
