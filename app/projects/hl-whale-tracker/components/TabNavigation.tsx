@@ -5,6 +5,15 @@ import { Activity, TrendingUp, Trophy, Wallet } from "lucide-react";
 
 export type Tab = "leaderboard" | "positions" | "trades" | "analytics";
 
+/**
+ * How a tab was activated. The rack does not care, but the page does: selection is
+ * mirrored into the URL, and an arrow key that pushes a history entry means a reader
+ * who walks the four tabs has to press Back four times to leave. Automatic activation
+ * is kept exactly as it was — this only lets the caller tell a deliberate destination
+ * from a pass over one.
+ */
+export type TabActivation = "pointer" | "keyboard";
+
 // The address label used to be appended INSIDE two of these tabs. That was wrong
 // three ways: it duplicated across Positions and Trades, the container's `uppercase`
 // mangled the hex into 0XA822...D748, and at flex-1 the extra text wrapped to a
@@ -30,7 +39,7 @@ export default function TabNavigation({
   onChange,
 }: {
   activeTab: Tab;
-  onChange: (tab: Tab) => void;
+  onChange: (tab: Tab, via: TabActivation) => void;
 }) {
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
@@ -62,7 +71,13 @@ export default function TabNavigation({
     // does — there is no confirm step on the pointer path, so adding one on the
     // keyboard path would make the two disagree. Positions and Trades do fetch, but
     // they render their own loading state exactly as they do for a click.
-    onChange(TABS[next].id);
+    //
+    // "keyboard" is the one thing the caller cannot infer: arrowing across the rack is
+    // four activations of a control the reader is still moving through, not four
+    // destinations. Enter and Space fall through the switch above to the browser's own
+    // button activation, so they arrive as "pointer" — which is what they are, a
+    // deliberate choice of this tab.
+    onChange(TABS[next].id, "keyboard");
     tabRefs.current[next]?.focus();
   };
 
@@ -93,7 +108,7 @@ export default function TabNavigation({
             // here and stays the full word at every width.
             aria-label={tab.label}
             tabIndex={active ? 0 : -1}
-            onClick={() => onChange(tab.id)}
+            onClick={() => onChange(tab.id, "pointer")}
             onKeyDown={(event) => onKeyDown(event, index)}
             className={`hl-tab relative flex min-w-0 items-center justify-center gap-1.5 overflow-hidden rounded-lg py-2.5 font-mono text-[11px] uppercase tracking-[0.16em] whitespace-nowrap transition-colors ${
               active ? "text-white" : "text-[var(--legend)] hover:text-foreground"
