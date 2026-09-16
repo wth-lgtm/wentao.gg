@@ -361,35 +361,35 @@ function PositionList({ rows, dust = false }: { rows: PerpPosition[]; dust?: boo
       <div className="hidden overflow-x-auto sm:block">
         <table className="hl-pos-table w-full text-sm">
           <caption className="sr-only">{caption}</caption>
-          {/* The drawer's rows are a footnote to the list above, and a second
+          {/* The drawer's rows are a footnote to the list above, and a second visible
               nine-column header — which cannot align with the first, since both tables
-              size to their own content — reads worse than none. The caption still names
-              the table. */}
-          {!dust && (
-            <thead>
-              <tr>
-                <Th pad="pl-4 pr-2">Market</Th>
-                <Th align="right">Size</Th>
-                <Th align="right">Entry</Th>
-                <Th align="right">Value</Th>
-                <Th align="right" className="hidden lg:table-cell">
-                  Margin
-                </Th>
-                <Th align="right" className="hidden md:table-cell">
-                  ROE
-                </Th>
-                <Th align="right" className="hidden lg:table-cell">
-                  Liq.
-                </Th>
-                <Th align="right" className="hidden lg:table-cell">
-                  Funding
-                </Th>
-                <Th align="right" pad="pl-2 pr-4">
-                  uPnL
-                </Th>
-              </tr>
-            </thead>
-          )}
+              size to their own content — reads worse than none. So the drawer's header
+              row is rendered and hidden VISUALLY rather than dropped: nine columns of
+              money with no column names in the accessibility tree is a worse bargain
+              than a duplicate header (WCAG 1.3.1). `Th` emits scope="col" either way. */}
+          <thead className={dust ? "sr-only" : undefined}>
+            <tr>
+              <Th pad="pl-4 pr-2">Market</Th>
+              <Th align="right">Size</Th>
+              <Th align="right">Entry</Th>
+              <Th align="right">Value</Th>
+              <Th align="right" className="hidden lg:table-cell">
+                Margin
+              </Th>
+              <Th align="right" className="hidden md:table-cell">
+                ROE
+              </Th>
+              <Th align="right" className="hidden lg:table-cell">
+                Liq.
+              </Th>
+              <Th align="right" className="hidden lg:table-cell">
+                Funding
+              </Th>
+              <Th align="right" pad="pl-2 pr-4">
+                uPnL
+              </Th>
+            </tr>
+          </thead>
           <tbody>
             {rows.map((p) => (
               <tr key={p.coin} className="hl-pos-row">
