@@ -26,6 +26,12 @@ const nextConfig: NextConfig = {
       timeZone: "America/Los_Angeles",
     }).format(build),
   },
+  // Next 16.3 defaults this on: `next dev` (app-info-log.js → generate-agent-files.js)
+  // writes AGENTS.md — untracked and absent from .gitignore — plus an `@AGENTS.md`
+  // CLAUDE.md into the repo root. Being gitignored does not stop that CLAUDE.md from
+  // being read back as this repo's agent instructions, and a dev server does not get
+  // to author those.
+  agentRules: false,
   // Enable compression
   compress: true,
   // Optimize images
