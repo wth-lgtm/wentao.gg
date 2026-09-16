@@ -1,7 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { motion } from "framer-motion";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image";
@@ -149,6 +148,7 @@ function WhaleTracker() {
     error,
     snapshot,
     rowsSeen,
+    rowsPartial,
     ttlSeconds,
     unchanged,
     refresh,
@@ -165,6 +165,20 @@ function WhaleTracker() {
   // Whether the open panel needs its own tab stop depends on what it currently holds,
   // so it is measured after render rather than declared per panel. See the hook.
   const tabpanelRef = useTabpanelFocus();
+
+  // The leaderboard's own equity for the focused address, which the Positions panel
+  // needs to quantify the gap against the live perp account instead of just warning
+  // that one exists. It is already in memory for the window on screen, so this costs
+  // no request; null when the address is not in that window at all (a deep link, or a
+  // row that has dropped out of the top fifty), and the panel says so differently.
+  const focusedEquity = useMemo(
+    () =>
+      focused === null
+        ? null
+        : traders.find((t) => t.address.toLowerCase() === focused.toLowerCase())
+            ?.accountValue ?? null,
+    [focused, traders]
+  );
 
   // A refresh is the one commit the sentence below cannot infer: the CDN can answer a
   // click with the same fifty rows in the same order, and "nothing happened" is still
@@ -227,11 +241,15 @@ function WhaleTracker() {
   }, [sentence, error, loading, refreshing]);
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, delay: 0.1 }}
-    >
+    // The page's one entrance, as a CSS keyframe. It was a framer-motion `motion.div`
+    // fading opacity and 10px of y over 300ms — the only motion component on the route,
+    // for which the initial script set carried ~35-45KB brotli of animation runtime
+    // (chunk d21c4c109d68c963.js, 123.7KB decoded, plus a 9KB br framer chunk) on a
+    // page whose real motion — the re-seat, the odometers, the tape — is Web Animations
+    // and CSS by design. `.animate-fade-in-up` is the same gesture from globals.css, it
+    // runs on the compositor, and the global reduced-motion block already collapses it
+    // to a designed still rather than a slowdown.
+    <div className="animate-fade-in-up">
       {/* The page's ONLY live region (plan of record: exactly one). It is a sibling of
           the panels rather than a child of any of them — a region inside a container
           that goes aria-busy is not announced while it is busy — and it never carries
@@ -247,6 +265,7 @@ function WhaleTracker() {
         refreshing={refreshing}
         unchanged={unchanged}
         rowsSeen={rowsSeen}
+        rowsPartial={rowsPartial}
         surfaced={displayTraders.length}
         period={timePeriod}
         snapshot={snapshot}
@@ -308,9 +327,10 @@ function WhaleTracker() {
         <div ref={tabpanelRef} role="tabpanel" id="hl-panel-positions" aria-labelledby="hl-tab-positions">
           <PositionsPanel
             address={focused}
-            data={trader.data}
-            loading={trader.loading}
-            error={trader.error}
+            data={trader.positions.data}
+            loading={trader.positions.loading}
+            error={trader.positions.error}
+            leaderboardAccountValue={focusedEquity}
             onRetry={trader.reload}
           />
         </div>
@@ -320,9 +340,9 @@ function WhaleTracker() {
         <div ref={tabpanelRef} role="tabpanel" id="hl-panel-trades" aria-labelledby="hl-tab-trades">
           <TradesPanel
             address={focused}
-            data={trader.data}
-            loading={trader.loading}
-            error={trader.error}
+            data={trader.fills.data}
+            loading={trader.fills.loading}
+            error={trader.fills.error}
             onRetry={trader.reload}
           />
         </div>
@@ -358,7 +378,7 @@ function WhaleTracker() {
         </a>
         <span>leaderboard API.</span>
       </p>
-    </motion.div>
+    </div>
   );
 }
 

@@ -137,6 +137,7 @@ export default function SoundingRail({
   refreshing,
   unchanged,
   rowsSeen,
+  rowsPartial,
   surfaced,
   period,
   snapshot,
@@ -146,6 +147,9 @@ export default function SoundingRail({
   /** A refresh answered with the body already on screen. Transient — see useLeaderboard. */
   unchanged: boolean;
   rowsSeen: number | null;
+  /** Rows upstream returned for THIS window that could not be read completely, so they
+   * are not on the board. 0 is a real zero; null is "the body did not say". */
+  rowsPartial: number | null;
   surfaced: number;
   period: TimePeriod;
   snapshot: LeaderboardSnapshot | null;
@@ -180,6 +184,21 @@ export default function SoundingRail({
       <Field label="SURFACED" gloss="rows shown here">
         <span className="tabular-nums">{surfaced}</span>
       </Field>
+      {/* Why the board is short, when it is. The route used to answer 502 as soon as no
+          row parsed, which is the right call for a payload nobody can read — but the
+          likelier shape change is upstream renaming ONE field, which drops every row as
+          incomplete and took the whole board dark with it. The route serves those rows
+          now and this field is the explanation; it appears only when there is something
+          to explain, because 45,092 of 45,092 live rows parse complete today and a
+          permanently-zero reading is not a reading. */}
+      {rowsPartial !== null && rowsPartial > 0 && (
+        <Field
+          label="DROPPED"
+          gloss="rows upstream returned for this window that could not be read completely, so they are not ranked here"
+        >
+          <span className="tabular-nums">{rowsPartial.toLocaleString("en-US")}</span>
+        </Field>
+      )}
       <Field label="WINDOW">{WINDOW_LABEL[period]}</Field>
       {/* "SNAPSHOT 00:06" read as a clock — the only thing saying otherwise was the
           sr-only gloss. AGE says it on the surface, and on a phone it is the only

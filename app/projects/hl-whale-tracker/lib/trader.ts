@@ -43,6 +43,10 @@ export interface SpotBalance {
   total: number | null;
   /** Portion reserved against open orders. */
   hold: number | null;
+  /** USD value of `total` at the current spot mid, or null when the wallet cannot be
+   * priced — see priceSpot. Never 0 for "we don't know": 2,331,863 UBONK is $5.90 and
+   * 0.01 USDH is one cent, so a zero here would be a claim, not a gap. */
+  usdValue: number | null;
 }
 
 export interface Fill {
@@ -84,18 +88,32 @@ export interface MarginSummary {
   crossMaintenanceMarginUsed: number | null;
 }
 
-export interface TraderSnapshot {
+// The snapshot used to be one object from one route, so the Positions tab waited on
+// userFills: timed against api.hyperliquid.xyz, clearinghouseState answers in 0.39-0.49 s
+// and spotClearinghouseState in 0.38-0.41 s, while userFills takes 1.16-1.38 s for
+// 658-745 KB that only the Trades tab reads. It is two routes and two slices now, so
+// each panel waits for its own upstream and nothing else.
+
+/** `/api/hl-trader/[address]` — what the Positions tab reads. */
+export interface TraderPositions {
   address: string;
   /** null when the perp call failed: a live clearinghouseState always carries a
    * marginSummary, even for an address that has never traded. */
   margin: MarginSummary | null;
   // null is "upstream did not answer", [] is "upstream answered and held nothing".
-  // The three calls are independent, so one can be absent while the others are real —
-  // and the route only 502s when all three fail. Flattening the absent one into []
-  // is what let the panels print "currently flat" and "no fill history … a real
-  // state, not an error" over a call that never came back.
+  // The two calls are independent, so one can be absent while the other is real —
+  // and the route only 502s when both fail. Flattening the absent one into []
+  // is what let the panel print "currently flat" over a call that never came back.
   positions: PerpPosition[] | null;
   spot: SpotBalance[] | null;
+  fetchedAt: number;
+}
+
+/** `/api/hl-trader/[address]/fills` — what the Trades tab reads. */
+export interface TraderFills {
+  address: string;
+  /** null is "upstream did not answer", [] is "upstream answered with an empty tape".
+   * The panel's "a real state, not an error" copy is only ever correct for []. */
   fills: Fill[] | null;
   fetchedAt: number;
 }
@@ -143,9 +161,96 @@ export function parseSpot(raw: unknown): SpotBalance[] | null {
   return list
     .map((b) => {
       const o = b as Record<string, unknown>;
-      return { coin: str(o.coin), total: num(o.total), hold: num(o.hold) };
+      // usdValue is not in this payload at all — pricing needs spotMeta and allMids,
+      // which are separate calls. It starts as the honest unknown and priceSpot fills
+      // it in; a parser cannot price.
+      return {
+        coin: str(o.coin),
+        total: num(o.total),
+        hold: num(o.hold),
+        usdValue: null,
+      };
     })
     .filter((b) => b.coin && b.total !== null && b.total !== 0);
+}
+
+/**
+ * The spot venue's quote token index.
+ *
+ * Live (2026-09-16): 311 of 328 universe entries quote token 0, which is USDC. The
+ * other 17 quote something else — their base needs a second hop to reach dollars, so
+ * they stay unpriced rather than being priced against the wrong unit.
+ */
+const QUOTE_TOKEN = 0;
+
+/**
+ * Attach a USD value to each spot balance, from spotMeta + allMids.
+ *
+ * Without this the panel showed raw coin counts and nothing said that 556,416 HYPE is
+ * $43.25M while 2,331,863 UBONK is $5.90 — an order that invited exactly the wrong
+ * reading. Pure, and given the RAW upstream payloads rather than a pre-built map,
+ * because all three ways to get this wrong are in the parsing:
+ *
+ *   1. A token's array POSITION in `tokens` is not its `index`. 43 of 501 live tokens
+ *      sit at a differing position (position 458 holds index 478) and the array is
+ *      shorter than its highest index, so 26 of the 328 universe entries resolve to
+ *      the wrong base name — or to nothing — when looked up by position.
+ *   2. The mid is keyed by the UNIVERSE entry's name. 327 of the 328 live pairs are
+ *      named "@N" and exactly one is "PURR/USDC"; allMids carries whichever form the
+ *      universe used. Keying on the coin instead would hand a token that also has a
+ *      perp its PERP mid (HYPE: 77.99 perp against 77.7305 spot on 2026-09-16).
+ *   3. The quote token prices at exactly one unit of itself, because that is the unit
+ *      the mids are quoted in — not a claim about USDC's peg.
+ *
+ * Verified end to end on the live 7d #1 wallet: 11 non-zero balances totalling
+ * ~$207.51M, of which one row (USDH, $0.01) is under a dollar.
+ */
+export function priceSpot(
+  balances: SpotBalance[] | null,
+  spotMeta: unknown,
+  allMids: unknown
+): SpotBalance[] | null {
+  if (balances === null) return null;
+
+  const midByCoin = new Map<string, number>();
+  const universe = (spotMeta as { universe?: unknown })?.universe;
+  const tokens = (spotMeta as { tokens?: unknown })?.tokens;
+  const mids = (allMids ?? null) as Record<string, unknown> | null;
+
+  if (Array.isArray(universe) && Array.isArray(tokens) && mids && typeof mids === "object") {
+    const nameByIndex = new Map<number, string>();
+    for (const t of tokens) {
+      const index = (t as { index?: unknown })?.index;
+      const name = (t as { name?: unknown })?.name;
+      if (typeof index === "number" && typeof name === "string" && name) {
+        nameByIndex.set(index, name);
+      }
+    }
+
+    const quote = nameByIndex.get(QUOTE_TOKEN);
+    if (quote) midByCoin.set(quote, 1);
+
+    for (const entry of universe) {
+      const pairName = (entry as { name?: unknown })?.name;
+      const pair = (entry as { tokens?: unknown })?.tokens;
+      if (typeof pairName !== "string" || !Array.isArray(pair)) continue;
+      if (pair[1] !== QUOTE_TOKEN) continue;
+      const base = typeof pair[0] === "number" ? nameByIndex.get(pair[0]) : undefined;
+      if (!base || base === quote) continue;
+      const mid = num(mids[pairName]);
+      if (mid !== null) midByCoin.set(base, mid);
+    }
+  }
+
+  // A new array of new objects: the caller's rows are upstream's parse and are read
+  // again for the coin counts.
+  return balances.map((b) => {
+    const mid = midByCoin.get(b.coin);
+    return {
+      ...b,
+      usdValue: b.total === null || mid === undefined ? null : b.total * mid,
+    };
+  });
 }
 
 /**

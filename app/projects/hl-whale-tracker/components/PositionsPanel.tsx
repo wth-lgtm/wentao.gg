@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AddressLegend, Legend, dash } from "./Instrument";
 import { formatCurrency, formatPercent, toneClass } from "../lib/formatters";
 import { formatPrice, formatSize } from "../lib/fills";
-import { PerpPosition, SpotBalance, TraderSnapshot } from "../lib/trader";
+import { PerpPosition, SpotBalance, TraderPositions } from "../lib/trader";
 
 // The Positions tab: what one whale is actually holding right now.
 //
@@ -207,13 +207,23 @@ function totalPositions(positions: PerpPosition[]): PerpTotals {
 
 /** The honesty valve on a Σ: how much of the book it covers, shown only when that is
  * not all of it. */
-function Coverage({ agg, what }: { agg: Aggregate; what: string }) {
+function Coverage({
+  agg,
+  what,
+  unit = "positions",
+}: {
+  agg: Aggregate;
+  what: string;
+  /** What the counts are counting. The spot roll-up sums BALANCES, and a legend
+   * reading "9 of 11 positions" over a wallet would name the wrong thing. */
+  unit?: string;
+}) {
   if (agg.total === null || agg.seen >= agg.of) return null;
   return (
     <Legend>
       {agg.seen} of {agg.of}
       <span className="sr-only">
-        {` positions: upstream reported no ${what} for the other ${agg.of - agg.seen}, so this total is not the whole book`}
+        {` ${unit}: upstream reported no ${what} for the other ${agg.of - agg.seen}, so this total is not the whole book`}
       </span>
     </Legend>
   );
@@ -529,9 +539,10 @@ function ReRead({ onRetry, busy }: { onRetry: () => void; busy: boolean }) {
   );
 }
 
-/** Biggest count first, unknown last. Ordering by count is not ordering by value —
- * the section legend says so, because 2,331,863 UBONK is worth about six dollars
- * while 556,416 HYPE is worth tens of millions, and USD pricing is not in this panel. */
+// ── Spot ordering, pricing and its own dust gate ──────────────────────────────
+
+/** Biggest count first, unknown last. Only the tie-break behind byUsdDesc now: on its
+ * own it ranked 2,331,863 UBONK ($5.90) above 556,416 HYPE ($43.25M). */
 function byTotalDesc(a: SpotBalance, b: SpotBalance): number {
   if (a.total === b.total) return 0;
   if (a.total === null) return 1;
@@ -539,12 +550,75 @@ function byTotalDesc(a: SpotBalance, b: SpotBalance): number {
   return b.total - a.total;
 }
 
+/** Biggest holding first, in money. An unpriced row cannot be ranked against a dollar
+ * figure at all, so it sinks below every priced one and keeps count order among its
+ * own kind — rather than being sorted as though its value were zero. */
+function byUsdDesc(a: SpotBalance, b: SpotBalance): number {
+  if (a.usdValue !== null && b.usdValue !== null) {
+    return a.usdValue === b.usdValue ? 0 : b.usdValue - a.usdValue;
+  }
+  if (a.usdValue !== null) return -1;
+  if (b.usdValue !== null) return 1;
+  return byTotalDesc(a, b);
+}
+
+/**
+ * A dollar, and for the same reason the perp gate is ten.
+ *
+ * The live 7d #1 wallet holds eleven balances of which one — 0.01 USDH, a single cent
+ * — is under a dollar, while the rows just above it ($1.93 FUND, $2.06 LICKO, $5.90
+ * UBONK) are small but real and stay on the list. It earns its keep on the long tail:
+ * the zero address holds 174 non-zero balances and 63 of them are under a dollar, so
+ * without the drawer its real $31.29M of holdings sat below sixty rows of residue.
+ *
+ * An UNPRICED row is never dust: "we could not price this" is not "this is worth
+ * nothing", and folding it away would hide a holding the panel has no figure for.
+ */
+const SPOT_DUST_USD = 1;
+
+/**
+ * A holding too small for two decimal places still has to read as a holding.
+ *
+ * money() prints two decimals, so the long tail of a memecoin wallet rounds to "$0.00"
+ * — a confident zero over something the account genuinely owns. Measured on the zero
+ * address: 39 of its 63 sub-dollar balances price below a cent (KNTQ at $0.00000064),
+ * and "0" is reserved in this panel for a real zero.
+ */
+function spotValue(usd: number): string {
+  if (usd > 0 && usd < 0.005) return "<$0.01";
+  // Same tiers as money(), inlined because the null branch — which hands back a JSX
+  // dash — cannot be reached here and the row renders the unpriced case itself.
+  return formatCurrency(usd, { compact: Math.abs(usd) >= 10_000, decimals: 2 });
+}
+
+const isSpotDust = (b: SpotBalance) => b.usdValue !== null && b.usdValue < SPOT_DUST_USD;
+
+interface SpotRanked {
+  main: SpotBalance[];
+  dust: SpotBalance[];
+  /** Σ usdValue with its coverage, over ALL balances including the folded ones. */
+  value: Aggregate;
+}
+
+function rankSpot(spot: SpotBalance[] | null): SpotRanked | null {
+  if (spot === null) return null;
+  const sorted = [...spot].sort(byUsdDesc);
+  return {
+    main: sorted.filter((b) => !isSpotDust(b)),
+    dust: sorted.filter(isSpotDust),
+    value: sumOf(sorted.map((b) => b.usdValue)),
+  };
+}
+
 function SpotRow({ b }: { b: SpotBalance }) {
   return (
     <li className="hl-pos-slab flex items-baseline justify-between gap-3 py-2">
       <span className="font-medium text-foreground">{b.coin}</span>
-      <span className="flex items-baseline gap-3 tabular-nums text-sm">
-        <span className="text-foreground">{size(b.total)}</span>
+      <span className="flex flex-wrap items-baseline justify-end gap-x-3 gap-y-1 tabular-nums text-sm">
+        {/* The count is now the SECONDARY figure. It used to be the only one, and
+            nothing on screen said that this wallet's 2.33M UBONK is $5.90 while its
+            556K HYPE is $43.25M — an order that invited exactly the wrong reading. */}
+        <span className="text-muted">{size(b.total)}</span>
         {b.hold !== null && b.hold > 0 && (
           // "HELD" said nothing: the number is the part of the balance the exchange
           // has already committed to the trader's own resting orders. 118.1M of the
@@ -555,8 +629,54 @@ function SpotRow({ b }: { b: SpotBalance }) {
             <span className="sr-only"> — reserved against open orders, not spendable</span>
           </Legend>
         )}
+        <span className="text-foreground">
+          {b.usdValue === null ? (
+            <>
+              {dash}
+              <span className="sr-only"> no spot mid for this token, so it is unpriced</span>
+            </>
+          ) : (
+            spotValue(b.usdValue)
+          )}
+        </span>
       </span>
     </li>
+  );
+}
+
+/** The cents, folded away but never dropped: the count in the section legend stays the
+ * full total and the summary names what is behind it. Same native `<details>` as the
+ * perp drawer — no motion of its own, a designed still under reduced motion, no live
+ * region. The negative margin is what lines the full-bleed summary up with this
+ * Panel's own padding box. */
+function SpotDustBlock({ rows, total }: { rows: SpotBalance[]; total: number }) {
+  const named = rows
+    .slice(0, 3)
+    // `?? 0` would have been a zero standing in for an unknown. A dust row always
+    // carries a value by construction (isSpotDust requires one), so the dash branch is
+    // unreachable — and it is written anyway, because the alternative is a literal 0.
+    .map((b) => `${b.coin} ${b.usdValue === null ? "—" : spotValue(b.usdValue)}`)
+    .join(" · ");
+  return (
+    <details className="hl-pos-dust -mx-4 mt-1">
+      <summary>
+        <span aria-hidden className="hl-pos-caret">
+          ▶
+        </span>
+        <span className="hl-plate" data-tier="4">
+          dust
+        </span>
+        <Legend>
+          {rows.length} of {total} under ${SPOT_DUST_USD} · {named}
+          {rows.length > 3 ? " · …" : ""}
+        </Legend>
+      </summary>
+      <ul className="px-4">
+        {rows.map((b) => (
+          <SpotRow key={b.coin} b={b} />
+        ))}
+      </ul>
+    </details>
   );
 }
 
@@ -565,13 +685,21 @@ export default function PositionsPanel({
   data,
   loading,
   error,
+  leaderboardAccountValue,
   onRetry,
 }: {
   address: string | null;
-  data: TraderSnapshot | null;
+  /** The positions slice only. Fills live in their own route and their own slice, so
+   * this panel no longer waits on a 1.16-1.38s userFills call it never reads. */
+  data: TraderPositions | null;
   loading: boolean;
   error: string | null;
-  /** Re-runs the snapshot fetch for this address (useTrader's reload). */
+  /** This address's equity as the LEADERBOARD measures it, from the row that is
+   * already in memory for the window on screen. null when the address is not in that
+   * window — a deep-linked one, or a row that dropped out of the top fifty — and the
+   * note below then explains the discrepancy without inventing a size for it. */
+  leaderboardAccountValue: number | null;
+  /** Re-reads this trader, both slices (useTrader's reload). */
   onRetry?: () => void;
 }) {
   // Derived before the early returns, because hooks cannot live behind a branch. Each
@@ -582,10 +710,7 @@ export default function PositionsPanel({
     () => (data?.positions?.length ? totalPositions(data.positions) : null),
     [data]
   );
-  const spotRows = useMemo(
-    () => (data?.spot ? [...data.spot].sort(byTotalDesc) : null),
-    [data]
-  );
+  const spotRanked = useMemo(() => rankSpot(data?.spot ?? null), [data]);
 
   if (!address) {
     return (
@@ -636,6 +761,20 @@ export default function PositionsPanel({
     positions !== null && positions.length === 0 && spot !== null && spot.length > 0;
   const asOf = <AsOf since={data.fetchedAt} />;
 
+  // Both figures or neither. A ratio needs a positive denominator to be a ratio at
+  // all, and printing "0.00×" against an empty perp account would read as a
+  // measurement rather than as the absence of one.
+  const leaderboardEquity =
+    leaderboardAccountValue !== null &&
+    margin?.accountValue != null &&
+    margin.accountValue > 0
+      ? {
+          leaderboard: leaderboardAccountValue,
+          perp: margin.accountValue,
+          ratio: leaderboardAccountValue / margin.accountValue,
+        }
+      : null;
+
   const perpAccount = (
     <Panel key="account">
       <div className="mb-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
@@ -660,19 +799,28 @@ export default function PositionsPanel({
           />
         </>
       )}
-      {/* This note used to read "PERPS ONLY — DIFFERS FROM LEADERBOARD EQUITY" over a
-          comment claiming the two "disagree by orders of magnitude". Measured: the
-          leaderboard reports $214.63M for this address while marginSummary.accountValue
-          is $110.04M — a 1.95x gap, not orders of magnitude. The size was wrong and the
-          cause was never stated, which is the part a visitor needs. The two numbers
-          cannot be put side by side here (the panel is passed only `address`), so the
-          copy explains the mechanism instead of inventing a comparison. */}
+      {/* This note read "PERPS ONLY — DIFFERS FROM LEADERBOARD EQUITY" over a comment
+          claiming the two "disagree by orders of magnitude". Measured on 2026-09-16:
+          the leaderboard reports $216.43M for this address while
+          marginSummary.accountValue is $107.37M — a 2.02x gap. Warning of a gap while
+          stating neither number, and misstating its size in the comment, is the part a
+          visitor could not act on; the row that carries the leaderboard figure is
+          already in memory for the window on screen, so it is passed in and the ratio
+          is arithmetic rather than a claim. No direction is asserted with it: which way
+          the two land is a property of the address, not of the measurement. */}
       <p className="mt-3 text-xs text-muted">
+        {leaderboardEquity !== null && (
+          <>
+            Leaderboard equity {money(leaderboardEquity.leaderboard)} · live perp{" "}
+            {money(leaderboardEquity.perp)} — a {leaderboardEquity.ratio.toFixed(2)}×
+            difference.{" "}
+          </>
+        )}
         Account value here is this address&rsquo;s live perp margin account, read straight
         from Hyperliquid. The equity on the leaderboard is a different measurement —
         Hyperliquid&rsquo;s own stats snapshot, refreshed on its own schedule and over a
-        wider scope than perps — so expect it to read higher and do not expect the two to
-        tie. The figures on this tab are the live ones.
+        wider scope than perps — so the two are not expected to tie. The figures on this
+        tab are the live ones.
       </p>
     </Panel>
   );
@@ -727,6 +875,19 @@ export default function PositionsPanel({
               : `Spot balances${spot.length > 0 ? ` · ${spot.length}` : ""}`}
           </Legend>
         )}
+        {/* The roll-up the section was missing. "≈" is load-bearing: this is a sum of
+            balances at the current mids, not a settled figure, and the mids are a live
+            market. Coverage states how much of the wallet it covers whenever some of
+            it could not be priced. */}
+        {spotRanked && spotRanked.value.total !== null && (
+          <Legend>
+            Total ≈{" "}
+            <span className="tabular-nums text-foreground">
+              {money(spotRanked.value.total)}
+            </span>{" "}
+            <Coverage agg={spotRanked.value} what="spot mid" unit="balances" />
+          </Legend>
+        )}
         {spotFirst && asOf}
       </div>
       {spot === null ? (
@@ -739,13 +900,22 @@ export default function PositionsPanel({
         <p className="mt-2 text-sm text-muted">No non-zero spot balances.</p>
       ) : (
         <>
-          <ul>{spotRows?.map((b) => <SpotRow key={b.coin} b={b} />)}</ul>
-          {/* Said out loud because the order invites the wrong reading: these are coin
-              counts, not dollars, so the biggest row is not necessarily the biggest
-              holding — 2.33M UBONK is about $6 next to 556K HYPE at tens of millions. */}
+          <ul>
+            {spotRanked?.main.map((b) => (
+              <SpotRow key={b.coin} b={b} />
+            ))}
+          </ul>
+          {spotRanked && spotRanked.dust.length > 0 && (
+            <SpotDustBlock rows={spotRanked.dust} total={spot.length} />
+          )}
+          {/* The order ranks MONEY now, so the note that used to warn "coin counts, not
+              USD value" would be false. What still needs saying is where the dollars
+              come from and what an em dash in that column means. */}
           <p className="mt-3 text-xs text-muted">
-            Coin counts, largest first — not USD value. A large count can be a small
-            holding, so the order ranks quantity, not money.
+            Largest holding first, valued at the current spot mid — so the figure moves
+            with the market and is an estimate, not a settled balance. A dash means this
+            token has no USDC spot pair to price it against; the coin count beside it is
+            still exactly what Hyperliquid reported.
           </p>
         </>
       )}
