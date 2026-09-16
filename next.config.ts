@@ -34,6 +34,41 @@ const nextConfig: NextConfig = {
     deviceSizes: [640, 750, 828, 1080, 1200],
     imageSizes: [16, 32, 48, 64, 96, 128, 256],
   },
+  // `curl -sI` against every production surface — /, /projects/hl-whale-tracker,
+  // /projects/progdash, /api/geo, /api/github-stats, /sitemap.xml — came back with
+  // strict-transport-security and nothing else: Vercel adds HSTS, the app added no
+  // headers at all. These five are the subset that is provably inert here, so they
+  // can be ENFORCED rather than shipped Report-Only:
+  //   - DENY/frame-ancestors: the repo has no <iframe>, no postMessage, and
+  //     signIn("google") is a top-level redirect, so nothing renders us framed.
+  //   - Permissions-Policy: no navigator.geolocation, getUserMedia or clipboard
+  //     call exists anywhere (the visitor geo probes are plain fetches).
+  //     interest-cohort=() is deliberately absent — FLoC is dead.
+  // script-src is deliberately NOT here. The served home HTML carries 15 inline
+  // <script> blocks, 8 of them self.__next_f.push RSC flight chunks whose contents
+  // change per build and per page, so a hash-based policy breaks hydration and a
+  // nonce-based one has to move to proxy.ts and forfeit the prerender these pages
+  // currently serve from (x-nextjs-prerender: 1). That trade is a separate change.
+  async headers() {
+    return [
+      {
+        source: "/(.*)",
+        headers: [
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          {
+            key: "Permissions-Policy",
+            value: "camera=(), microphone=(), geolocation=()",
+          },
+          {
+            key: "Content-Security-Policy",
+            value: "frame-ancestors 'none'; object-src 'none'; base-uri 'self'",
+          },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;
