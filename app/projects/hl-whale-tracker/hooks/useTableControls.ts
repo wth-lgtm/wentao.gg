@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { TraderMetrics, SortField, TimePeriod } from "../lib/types";
 import { readWhaleState, whaleQuery, type WhaleUrlState } from "../lib/urlState";
-import type { Tab } from "../components/TabNavigation";
+import type { Tab, TabActivation } from "../components/TabNavigation";
 
 // Was useSortAndFilter, then a bag of plain useStates. Renamed once already because it
 // never filtered and used to TAKE the traders array — the page called it with a literal
@@ -81,7 +81,16 @@ export function useTableControls() {
     [commit]
   );
 
-  const selectTab = useCallback((tab: Tab) => commit({ tab }, "push"), [commit]);
+  // A click (or Enter/Space) on a tab is a destination, so it gets a history entry and
+  // Back returns to the board. An ARROW key is not: the rack activates on focus, so
+  // walking Leaderboard → Analytics is four activations of a control the reader is still
+  // moving through, and pushing four entries would mean four Back presses to leave the
+  // page. The URL still ends up correct either way — only the history does not grow.
+  const selectTab = useCallback(
+    (tab: Tab, via: TabActivation) =>
+      commit({ tab }, via === "keyboard" ? "replace" : "push"),
+    [commit]
+  );
 
   // Selecting a row jumps straight to its positions — the tab is the destination, so
   // one history entry covers both halves of the change and one Back returns to the

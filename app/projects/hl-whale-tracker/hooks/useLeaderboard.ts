@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { TraderMetrics, TimePeriod } from "../lib/types";
+import { TTL_S } from "../lib/config";
 
 // Fetches /api/hl-leaderboard and keeps all four periods in memory, so changing the
 // time filter is instant and costs no network. Previously this re-downloaded the entire
@@ -39,6 +40,36 @@ const UNCHANGED_MS = 1200;
 // a single decision.
 const WAKE_DEBOUNCE_MS = 300;
 
+/**
+ * The earliest moment a wake refetch is allowed, on the client clock — the whole of the
+ * refetch policy, as the later of two gates:
+ *
+ *   - the FLOOR, one request per TTL counted from when we last asked. This is the gate
+ *     that bounds the rate: inside `stale-while-revalidate` the edge legitimately
+ *     answers with a body ALREADY past its s-maxage, so an expiry-only gate is
+ *     satisfied by the very answer it just produced and the page would refetch as fast
+ *     as the network allowed.
+ *   - the EXPIRY, which only exists once there is a snapshot to age. With none — a
+ *     first load that failed — the floor alone schedules the retry, which is what
+ *     makes recovery automatic instead of dependent on the visitor doing something.
+ *
+ * Exported because this is the part with two failure modes that no screenshot shows: a
+ * request loop, and a page that never comes back. See tests/wakeSchedule.test.ts.
+ */
+export function nextWakeAt({
+  snapshot,
+  ttlMs,
+  attemptedAt,
+}: {
+  snapshot: LeaderboardSnapshot | null;
+  ttlMs: number;
+  attemptedAt: number;
+}): number {
+  const floor = attemptedAt + ttlMs;
+  if (snapshot === null) return floor;
+  return Math.max(floor, snapshot.receivedAt + ttlMs - snapshot.ageAtReceipt);
+}
+
 export function useLeaderboard(timePeriod: TimePeriod) {
   const [periods, setPeriods] = useState<Periods>({});
   // `loading` means "there is nothing to show yet"; `refreshing` means "a fetch is
@@ -53,6 +84,11 @@ export function useLeaderboard(timePeriod: TimePeriod) {
   // A refresh that came back byte-identical. Transient: the rail's STATE field and the
   // button label say so for UNCHANGED_MS and then return to IDLE / Refresh.
   const [unchanged, setUnchanged] = useState(false);
+  // Bumped whenever a load SETTLES, success or failure. The wake effect below keys on
+  // it: a failed refetch leaves `snapshot` untouched, so without this the effect never
+  // re-ran and the expiry timer was never rescheduled — one failure and the page
+  // stopped trying until the visitor switched tabs.
+  const [attempts, setAttempts] = useState(0);
 
   // Monotonic run id: a late response from a superseded request must not overwrite a newer
   // one, which is the bug that let the slowest filter click win.
@@ -109,6 +145,7 @@ export function useLeaderboard(timePeriod: TimePeriod) {
       setTtlSeconds(typeof body.ttlSeconds === "number" ? body.ttlSeconds : null);
       setLoading(false);
       setRefreshing(false);
+      setAttempts((n) => n + 1);
 
       // Only the button's own action reports this. `stale-while-revalidate=900` means
       // even the first click AFTER the TTL is answered from the same CDN snapshot, so
@@ -126,6 +163,7 @@ export function useLeaderboard(timePeriod: TimePeriod) {
       setError(err instanceof Error ? err.message : "Failed to fetch data");
       setLoading(false);
       setRefreshing(false);
+      setAttempts((n) => n + 1);
     }
   }, []);
 
@@ -153,27 +191,27 @@ export function useLeaderboard(timePeriod: TimePeriod) {
   // left open showed a snapshot whose age counter rolled past an hour with no comment
   // (critic: "nothing ever refetches after the snapshot ages out").
   //
-  // Two gates, both required:
-  //   1. the snapshot has passed its TTL — otherwise there is nothing to fetch;
-  //   2. at least a TTL has passed since we last asked. This is the one that bounds
-  //      the rate. Inside the SWR window the CDN legitimately answers with a body
-  //      that is ALREADY past its TTL, so gate 1 alone would be satisfied by the very
-  //      answer it just produced and the page would refetch as fast as the network
-  //      allowed.
-  // A hidden tab is never fetched for: the timer that fires behind it does nothing and
-  // the visibility listener picks it up when the reader actually comes back.
+  // The decision is nextWakeAt's; this effect only arranges the three moments it can be
+  // asked. It runs on every settled attempt, not just on a new snapshot, because a
+  // FAILED refetch changes neither `snapshot` nor `ttlSeconds` — keying on those alone
+  // meant one failure ended the retries, and a failed FIRST load returned early here
+  // and never registered a listener at all.
+  //
+  // A hidden tab is never fetched for: the timer that fires behind it declines, and the
+  // visibility listener picks it up when the reader actually comes back.
   useEffect(() => {
-    if (snapshot === null || ttlSeconds === null) return;
-    const ttlMs = ttlSeconds * 1000;
-    const expiresAt = snapshot.receivedAt + ttlMs - snapshot.ageAtReceipt;
+    // Until a body has told us, our own route's s-maxage is the honest cadence — it is
+    // the window the CDN would have served anyway, and a failed first load never got
+    // to report one.
+    const ttlMs = (ttlSeconds ?? TTL_S) * 1000;
 
     let debounce: number | undefined;
     const consider = () => {
       window.clearTimeout(debounce);
       debounce = window.setTimeout(() => {
         if (document.visibilityState !== "visible") return;
-        const now = Date.now();
-        if (now < expiresAt || now - attemptedAtRef.current < ttlMs) return;
+        if (Date.now() < nextWakeAt({ snapshot, ttlMs, attemptedAt: attemptedAtRef.current }))
+          return;
         refetch("wake");
       }, WAKE_DEBOUNCE_MS);
     };
@@ -182,10 +220,12 @@ export function useLeaderboard(timePeriod: TimePeriod) {
       if (document.visibilityState === "visible") consider();
     };
 
-    // Fires at the later of the two gates, so a page left open in the foreground
-    // refreshes itself once without waiting for a tab switch that may never come.
-    const dueIn = Math.max(0, Math.max(expiresAt, attemptedAtRef.current + ttlMs) - Date.now());
-    const expiry = window.setTimeout(consider, dueIn);
+    // The timer means a page left open in the foreground recovers on its own, without
+    // waiting for a tab switch that may never come.
+    const expiry = window.setTimeout(
+      consider,
+      Math.max(0, nextWakeAt({ snapshot, ttlMs, attemptedAt: attemptedAtRef.current }) - Date.now())
+    );
     document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("focus", consider);
 
@@ -195,7 +235,7 @@ export function useLeaderboard(timePeriod: TimePeriod) {
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("focus", consider);
     };
-  }, [snapshot, ttlSeconds, refetch]);
+  }, [snapshot, ttlSeconds, attempts, refetch]);
 
   return {
     traders: periods[timePeriod] ?? [],

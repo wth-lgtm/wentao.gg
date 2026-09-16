@@ -86,22 +86,42 @@ function settledSentence({
 }
 
 /**
- * The instrument's geometry, held for the one frame between the prerendered HTML and
+ * The instrument's geometry, held for the gap between the prerendered HTML and
  * hydration. The controls live in the query string now, and `useSearchParams` is not
  * available during a static prerender — Next bails the boundary below to this instead,
- * which is why it must occupy the rail's and the rack's exact height rather than
- * nothing. It states no value: a placeholder that reads "SURFACED 0" would be a number
- * the page does not have yet.
+ * so whatever this does NOT occupy is a layout shift at hydration. The first version
+ * stood in for the rail and the rack only, which left the filter row, the table card
+ * (which used to prerender a five-row skeleton) and the footer line to appear from
+ * nothing: ~400px of movement on every cold load.
+ *
+ * Every height below is measured off the real LOADING hull in `next dev`, which is the
+ * state hydration lands in — the fetch has not resolved yet — at the two widths the
+ * board is checked at:
+ *
+ *            390px   1440px
+ *   rail       59       59   (two wrapped lines at both; one line, 36px, from 640-767
+ *                             where SRC is still hidden and the fields fit)
+ *   rack       48       48
+ *   filter     32       44
+ *   table     596      338   (three card skeletons vs. a thead and five rows)
+ *   footer     20       20
+ *
+ * It states no value. A placeholder reading "SURFACED 0" or "AGE --:--" would be the
+ * instrument asserting a reading before it has one, which is the thing this page is
+ * most careful about.
  */
 function HullPlaceholder() {
   return (
     <div aria-hidden>
-      <div className="mb-4 rounded-xl border border-border bg-card px-3 py-2 font-mono text-[11px] uppercase tracking-[0.16em]">
-        &nbsp;
-      </div>
-      <div className="mb-3 rounded-xl border border-border bg-card p-1">
-        <div className="py-2.5 font-mono text-[11px]">&nbsp;</div>
-      </div>
+      <div className="mb-4 h-[59px] rounded-xl border border-border bg-card sm:h-9 md:h-[59px]" />
+      <div className="mb-3 h-12 rounded-xl border border-border bg-card" />
+      {/* The filter row is deliberately an empty spacer, not a card: the real row is
+          `bg-background` pills on the page's own `bg-background`, so a filled block
+          here would be MORE visible than the thing it stands in for and would flash
+          out at hydration. */}
+      <div className="mb-4 h-8 sm:h-11" />
+      <div className="h-[596px] rounded-xl border border-border bg-card sm:h-[338px]" />
+      <div className="mt-4 h-5" />
     </div>
   );
 }
@@ -182,17 +202,26 @@ function WhaleTracker() {
       if (loading) return;
       const settled = askedRef.current && !refreshing;
       if (settled) askedRef.current = false;
+      // An identical string is not written back to the DOM, which is what keeps a
+      // repeated state (a wake refetch that changed nothing, a sort that reverses and
+      // reverses again) from announcing twice.
+      //
+      // A refresh that FAILED gets its own sentence rather than the completion head
+      // over the failure: "Refresh complete. Leaderboard unavailable: …" both
+      // contradicts itself and, because the error string is usually the same one
+      // already showing, was the only way a failed click could announce nothing at all.
+      if (error !== null) {
+        setAnnouncement(
+          settled ? `Refresh failed: ${error}` : `Leaderboard unavailable: ${error}`
+        );
+        return;
+      }
       const head = settled
         ? unchangedRef.current
           ? "Refresh complete, the snapshot has not changed. "
           : "Refresh complete. "
         : "";
-      // An identical string is not written back to the DOM, which is what keeps a
-      // repeated state (a wake refetch that changed nothing, a sort that reverses and
-      // reverses again) from announcing twice.
-      setAnnouncement(
-        head + (error ? `Leaderboard unavailable: ${error}` : sentence)
-      );
+      setAnnouncement(head + sentence);
     }, ANNOUNCE_DEBOUNCE_MS);
     return () => window.clearTimeout(id);
   }, [sentence, error, loading, refreshing]);

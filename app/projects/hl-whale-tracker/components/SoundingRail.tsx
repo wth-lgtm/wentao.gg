@@ -91,10 +91,14 @@ function SnapshotAge({
     <span className="inline-flex items-baseline gap-1.5" aria-live="off">
       <span className={`tabular-nums ${stale ? "text-[var(--legend)]" : ""}`}>{label}</span>
       {/* Not a colour swap alone — the rail's own sign convention is that a state is
-          always carried by something you can read. Reaching this word now takes a tab
-          that was hidden for the whole TTL + SWR window: the hook refetches once the
-          snapshot passes its TTL and again whenever the tab comes forward, so a
-          foreground reader should never see it. */}
+          always carried by something you can read. The hook now refetches once the
+          snapshot passes its TTL and whenever the tab comes forward, so this word is no
+          longer the page's only invitation — but it is still reachable in the
+          foreground, and for a while: a refetch that FAILS leaves this age climbing,
+          and the next attempt is a TTL away by design (one request per TTL, whatever
+          happened last time). An answer served at the far end of the SWR window lands
+          here already at the threshold. So it means "nothing is currently guaranteeing
+          this reading", not "nobody is trying". */}
       {stale ? <span className="text-[var(--legend)]">STALE</span> : null}
     </span>
   );
