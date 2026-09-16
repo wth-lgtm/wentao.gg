@@ -1,6 +1,7 @@
 "use client";
 
 import { TraderMetrics, SortField, SortDirection } from "../lib/types";
+import { Legend } from "./Instrument";
 import SortHeader from "./SortHeader";
 import LeaderboardRow from "./LeaderboardRow";
 import TraderCard from "./TraderCard";
@@ -11,6 +12,10 @@ interface LeaderboardTableProps {
   sortDirection: SortDirection;
   onSort: (field: SortField) => void;
   loading: boolean;
+  /** The leaderboard fetch's failure, if it failed. Zero rows WITH an error is an
+   * unknown board; zero rows WITHOUT one is a genuinely empty board, and only the
+   * second may say so. */
+  error?: string | null;
   /** Address currently focused for the Positions / Trades tabs. */
   selectedAddress?: string | null;
   registerRow?: (key: string, el: HTMLElement | null) => void;
@@ -83,11 +88,20 @@ export default function LeaderboardTable({
   sortDirection,
   onSort,
   loading,
+  error = null,
   selectedAddress = null,
   registerRow,
   onSelect,
 }: LeaderboardTableProps) {
-  const isEmpty = !loading && traders.length === 0;
+  // Two different nothings. useLeaderboard leaves `periods` at {} when the first load
+  // throws, so a 502 arrived here as traders: [] and printed "No traders found with
+  // activity in this period" — a fabricated fact about the market, sitting directly
+  // under page.tsx's red error banner saying the request failed. The upstream always
+  // publishes a top-N per window (45,086 rows live), so that copy was in practice
+  // reachable ONLY through the error path.
+  const noRows = !loading && traders.length === 0;
+  const unavailable = noRows && error !== null;
+  const isEmpty = noRows && error === null;
 
   return (
     <>
@@ -153,6 +167,14 @@ export default function LeaderboardTable({
           <tbody>
             {loading ? (
               <TableSkeleton />
+            ) : unavailable ? (
+              // Quiet legend colour, no error string: the banner above already carries
+              // the detail, and the same failure twice in --loss would read as two.
+              <tr>
+                <td colSpan={6} className="py-12 text-center">
+                  <Legend>Board unavailable</Legend>
+                </td>
+              </tr>
             ) : isEmpty ? (
               <tr>
                 <td colSpan={6} className="py-12 text-center text-muted">
@@ -179,6 +201,10 @@ export default function LeaderboardTable({
       <div className="sm:hidden space-y-3">
         {loading ? (
           <CardSkeleton />
+        ) : unavailable ? (
+          <div className="py-12 text-center bg-card rounded-xl">
+            <Legend>Board unavailable</Legend>
+          </div>
         ) : isEmpty ? (
           <div className="py-12 text-center text-muted bg-card rounded-xl">
             No traders found with activity in this period

@@ -103,29 +103,41 @@ export async function GET(
 
   // Independent requests: one failing must not fail the others, because a trader
   // with no spot balances is a normal case, not an error.
-  const [perp, spot, fills, spotNames] = await Promise.all([
+  const [perp, spotState, fills, spotNames] = await Promise.all([
     info({ type: "clearinghouseState", user }),
     info({ type: "spotClearinghouseState", user }),
     info({ type: "userFills", user }),
     spotNameMap(),
   ]);
 
-  if (perp === null && spot === null && fills === null) {
+  if (perp === null && spotState === null && fills === null) {
     return NextResponse.json({ error: "Trader data unavailable" }, { status: 502 });
   }
 
   // Resolve here rather than shipping the whole 316-pair table to the browser.
-  const parsedFills = parseFills(fills, FILL_LIMIT).map((f) => {
-    const label = spotNames.get(f.coin);
-    return label ? { ...f, label } : f;
-  });
+  const parsed = fills === null ? null : parseFills(fills, FILL_LIMIT);
+  const parsedFills =
+    parsed === null
+      ? null
+      : parsed.map((f) => {
+          const label = spotNames.get(f.coin);
+          return label ? { ...f, label } : f;
+        });
+
+  // One upstream failing is a partial answer, and it goes out as nulls rather than
+  // empty arrays so the panels can say "unavailable" instead of "flat". A partial
+  // body must also not be pinned at the edge: the public header below served that
+  // answer to every visitor of the address for up to 150 s, turning one 429 — which
+  // Hyperliquid returns on a second sequential call from a shared egress IP — into
+  // two and a half minutes of a confident, wrong empty state.
+  const partial = perp === null || spotState === null || fills === null;
 
   return NextResponse.json(
     {
       address: user,
       margin: parseMargin(perp),
       positions: parsePositions(perp),
-      spot: parseSpot(spot),
+      spot: parseSpot(spotState),
       // Trimmed deliberately: hash/oid/tid/cloid are wallet-identifying internals
       // the UI never renders, so they are not echoed back to the browser.
       fills: parsedFills,
@@ -133,7 +145,9 @@ export async function GET(
     },
     {
       headers: {
-        "Cache-Control": "public, s-maxage=30, stale-while-revalidate=120",
+        "Cache-Control": partial
+          ? "no-store"
+          : "public, s-maxage=30, stale-while-revalidate=120",
       },
     }
   );

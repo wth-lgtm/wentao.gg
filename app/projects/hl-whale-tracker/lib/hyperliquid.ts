@@ -76,27 +76,69 @@ function readWindow(
   return !Array.isArray(at) && isPerf(at) ? at : null;
 }
 
-function rowToMetrics(row: LeaderboardRow, period: TimePeriod): TraderMetrics | null {
+/**
+ * A row's outcome, distinguishing the two reasons a row is dropped.
+ *
+ * "partial" is a shape we DO understand whose figures are incomplete; "unreadable" is
+ * a window we cannot read at all. Only the second means the payload changed shape, so
+ * only the second should be able to trip the route's all-rows-failed guard on its own.
+ */
+type RowOutcome =
+  | { kind: "row"; metrics: TraderMetrics }
+  | { kind: "partial" }
+  | { kind: "unreadable" };
+
+function rowToMetrics(row: LeaderboardRow, period: TimePeriod): RowOutcome {
   const perf = readWindow(row, period);
-  if (!perf) return null;
+  if (!perf) return { kind: "unreadable" };
 
   const pnl = num(perf.pnl);
   const roi = num(perf.roi);
   const volume = num(perf.vlm);
   // If not one of the three numbers parsed, this is a shape we don't understand — drop the
   // row so the caller can notice, rather than publishing zeros.
-  if (pnl === null && roi === null && volume === null) return null;
+  if (pnl === null && roi === null && volume === null) return { kind: "unreadable" };
 
   const address = typeof row.ethAddress === "string" ? row.ethAddress : "";
-  if (!address) return null;
+  if (!address) return { kind: "unreadable" };
+
+  const accountValue = num(row.accountValue);
+
+  // A PARTIALLY parsed row is dropped and counted, not zero-filled.
+  //
+  // This used to read `pnl ?? 0`, `(roi ?? 0) * 100`, `volume ?? 0`,
+  // `num(row.accountValue) ?? 0` — so the all-three-null guard above was the only
+  // guard, and a row missing one figure published a confident zero for it. The
+  // consequences were specific: a missing vlm joined the analytics "NONE" cohort,
+  // which whale-analytics verified is a real cohort of spot-only holders (2,922 rows
+  // of the live 45,086 have a genuine all-time volume of exactly 0), a missing roi
+  // sorted to the bottom of the ROI column as 0%, and a missing accountValue printed
+  // $0 capital. A missing figure is not a zero.
+  //
+  // Dropping rather than widening TraderMetrics to number|null is deliberate: the
+  // four fields are read on 33 lines across five files that do bare arithmetic on
+  // them (lib/analytics.ts sums, means, Spearman and the Lorenz curve;
+  // hooks/useTableControls.ts sort accessors; LeaderboardRow, TraderCard and
+  // AnalyticsPanel formatters), so a null threaded through without a decision at each
+  // one would land as NaN on screen — a worse lie than the zero. The drop is counted
+  // instead, so a shape change still surfaces: rowsPartial here, and rowsParsed
+  // falling to 0 trips the 502 in app/api/hl-leaderboard/route.ts. Verified against
+  // the live payload: 45,086 of 45,086 rows parse complete today, so nothing is
+  // dropped in practice and the four boards are unchanged row for row.
+  if (pnl === null || roi === null || volume === null || accountValue === null) {
+    return { kind: "partial" };
+  }
 
   return {
-    address,
-    pnl: pnl ?? 0,
-    winRate: (roi ?? 0) * 100, // ROI arrives as a decimal (0.1 = 10%)
-    volume: volume ?? 0,
-    accountValue: num(row.accountValue) ?? 0,
-    lastUpdated: Date.now(),
+    kind: "row",
+    metrics: {
+      address,
+      pnl,
+      winRate: roi * 100, // ROI arrives as a decimal (0.1 = 10%)
+      volume,
+      accountValue,
+      lastUpdated: Date.now(),
+    },
   };
 }
 
@@ -104,6 +146,8 @@ export interface MappedLeaderboard {
   periods: Record<TimePeriod, TraderMetrics[]>;
   rowsSeen: number;
   rowsParsed: number;
+  /** Rows understood but incomplete, dropped rather than zero-filled. */
+  rowsPartial: number;
 }
 
 /**
@@ -120,19 +164,28 @@ export function mapAllPeriods(
 
   const periods = {} as Record<TimePeriod, TraderMetrics[]>;
   let rowsParsed = 0;
+  let rowsPartial = 0;
 
   for (const period of ALL_PERIODS) {
     const traders: TraderMetrics[] = [];
+    let partial = 0;
     for (const row of rows) {
-      const m = rowToMetrics(row, period);
-      if (m) traders.push(m);
+      const outcome = rowToMetrics(row, period);
+      if (outcome.kind === "row") traders.push(outcome.metrics);
+      else if (outcome.kind === "partial") partial++;
     }
-    if (period === "allTime") rowsParsed = traders.length;
+    // Both counts are taken over the all-time pass, which is the pass the route's
+    // "rows arrived but none parsed" guard reads. accountValue is not window-scoped,
+    // so an incomplete row is usually incomplete in every window anyway.
+    if (period === "allTime") {
+      rowsParsed = traders.length;
+      rowsPartial = partial;
+    }
     traders.sort((a, b) => b.pnl - a.pnl);
     periods[period] = traders.slice(0, limit);
   }
 
-  return { periods, rowsSeen: rows.length, rowsParsed };
+  return { periods, rowsSeen: rows.length, rowsParsed, rowsPartial };
 }
 
 // Kept for callers that want a single period (server-side only).

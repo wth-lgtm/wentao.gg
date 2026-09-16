@@ -143,6 +143,7 @@ export default function HLWhaleTracker() {
                   sortDirection={sortDirection}
                   onSort={handleSort}
                   loading={loading}
+                  error={error}
                   selectedAddress={focused}
                   onSelect={selectTrader}
                   registerRow={registerRow}
@@ -157,6 +158,7 @@ export default function HLWhaleTracker() {
               data={trader.data}
               loading={trader.loading}
               error={trader.error}
+              onRetry={trader.reload}
             />
           )}
 
@@ -166,11 +168,17 @@ export default function HLWhaleTracker() {
               data={trader.data}
               loading={trader.loading}
               error={trader.error}
+              onRetry={trader.reload}
             />
           )}
 
           {activeTab === "analytics" && (
-            <AnalyticsPanel periods={periods} timePeriod={timePeriod} loading={loading} />
+            <AnalyticsPanel
+              periods={periods}
+              timePeriod={timePeriod}
+              loading={loading}
+              error={error}
+            />
           )}
 
           <p className="mt-4 flex items-center justify-center gap-1 flex-wrap text-center text-xs text-muted">

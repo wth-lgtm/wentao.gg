@@ -110,10 +110,16 @@ export default function AnalyticsPanel({
   periods,
   timePeriod,
   loading,
+  error = null,
 }: {
   periods: Periods;
   timePeriod: TimePeriod;
   loading: boolean;
+  /** The leaderboard fetch's failure. This tab needs it more than the table does:
+   * page.tsx renders the error banner only under the Leaderboard tab, so a failed
+   * first load showed "a failure here means the board itself is empty" with no
+   * indication anywhere that anything had failed. */
+  error?: string | null;
 }) {
   const present = useMemo(
     () => WINDOWS.filter((w) => (periods[w]?.length ?? 0) > 0),
@@ -137,6 +143,19 @@ export default function AnalyticsPanel({
             <div key={i} className="h-20 animate-pulse rounded-lg bg-card-hover" />
           ))}
         </div>
+      </Panel>
+    );
+  }
+
+  // Absent before empty: with no windows AND a failed fetch, nothing is known about
+  // the board, so the panel cannot say the board is empty.
+  if (present.length === 0 && error !== null) {
+    return (
+      <Panel title="Board unavailable">
+        <p className="text-sm text-muted">
+          The leaderboard request failed, so there is nothing in memory to aggregate.
+          Retry from the Leaderboard tab.
+        </p>
       </Panel>
     );
   }

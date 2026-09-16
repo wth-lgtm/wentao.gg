@@ -41,5 +41,20 @@ export function useTrader(address: string | null) {
     return () => controller.abort();
   }, [address, load]);
 
-  return { data, loading, error };
+  // The one thing this hook had no way to do: ask again for the SAME address. The
+  // effect keys on `address`, so re-selecting the row a visitor is already on is a
+  // no-op — which meant the panels' failure states had nothing to offer but a page
+  // reload. It keeps its own controller so a second click abandons the first request
+  // instead of racing it, and `load`'s monotonic run id still decides which answer
+  // wins if the effect fires in between. Same shape as useLeaderboard's refresh.
+  const reloadRef = useRef<AbortController | null>(null);
+  const reload = useCallback(() => {
+    if (!address) return;
+    reloadRef.current?.abort();
+    const controller = new AbortController();
+    reloadRef.current = controller;
+    void load(address, controller.signal);
+  }, [address, load]);
+
+  return { data, loading, error, reload };
 }

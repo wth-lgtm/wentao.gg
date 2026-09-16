@@ -84,6 +84,50 @@ function PositionCard({ p }: { p: PerpPosition }) {
   );
 }
 
+/**
+ * The absent state, which is NOT the empty state.
+ *
+ * The route answers 200 with a partial body when one of its three upstream calls
+ * fails — Hyperliquid returns 429 on a second sequential call from a shared egress IP
+ * — and the snapshot carries that as null. Rendering the designed "currently flat"
+ * copy over it asserted a fact about the whale that the app did not have.
+ */
+function Unavailable({
+  reason,
+  onRetry,
+  busy,
+}: {
+  reason: string;
+  onRetry?: () => void;
+  busy: boolean;
+}) {
+  return (
+    <>
+      <p className="mt-2 font-mono text-xs uppercase tracking-[0.16em] text-[var(--loss)]">
+        {reason}
+      </p>
+      {onRetry && <ReRead onRetry={onRetry} busy={busy} />}
+    </>
+  );
+}
+
+// Re-asks for THIS address through useTrader's reload, so the tab, the selection and
+// the rest of the snapshot all survive the retry. Disabled while a request is in
+// flight because a partial 200 leaves `data` populated, so nothing else on screen
+// changes to say the click landed.
+function ReRead({ onRetry, busy }: { onRetry: () => void; busy: boolean }) {
+  return (
+    <button
+      type="button"
+      onClick={onRetry}
+      disabled={busy}
+      className="mt-3 rounded border border-border px-2 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--legend)] transition-colors hover:text-foreground disabled:opacity-50"
+    >
+      {busy ? "Re-reading" : "Re-read"}
+    </button>
+  );
+}
+
 function SpotRow({ b }: { b: SpotBalance }) {
   return (
     <li className="flex items-baseline justify-between gap-3 border-b border-border py-2 last:border-0">
@@ -107,11 +151,14 @@ export default function PositionsPanel({
   data,
   loading,
   error,
+  onRetry,
 }: {
   address: string | null;
   data: TraderSnapshot | null;
   loading: boolean;
   error: string | null;
+  /** Re-runs the snapshot fetch for this address (useTrader's reload). */
+  onRetry?: () => void;
 }) {
   if (!address) {
     return (
@@ -171,9 +218,17 @@ export default function PositionsPanel({
 
       <Panel>
         <Legend>
-          Open perp positions{positions.length > 0 ? ` · ${positions.length}` : ""}
+          {positions === null
+            ? "Perp state unavailable"
+            : `Open perp positions${positions.length > 0 ? ` · ${positions.length}` : ""}`}
         </Legend>
-        {positions.length === 0 ? (
+        {positions === null ? (
+          <Unavailable
+            reason="Upstream did not answer for this address"
+            onRetry={onRetry}
+            busy={loading}
+          />
+        ) : positions.length === 0 ? (
           <p className="mt-2 text-sm text-muted">
             This address holds no open perp positions right now. That is common among the
             top fifty — several rank on realised PnL and are currently flat.
@@ -188,8 +243,18 @@ export default function PositionsPanel({
       </Panel>
 
       <Panel>
-        <Legend>Spot balances{spot.length > 0 ? ` · ${spot.length}` : ""}</Legend>
-        {spot.length === 0 ? (
+        <Legend>
+          {spot === null
+            ? "Spot balances unavailable"
+            : `Spot balances${spot.length > 0 ? ` · ${spot.length}` : ""}`}
+        </Legend>
+        {spot === null ? (
+          <Unavailable
+            reason="Upstream did not answer for this address"
+            onRetry={onRetry}
+            busy={loading}
+          />
+        ) : spot.length === 0 ? (
           <p className="mt-2 text-sm text-muted">No non-zero spot balances.</p>
         ) : (
           <ul className="mt-2">
