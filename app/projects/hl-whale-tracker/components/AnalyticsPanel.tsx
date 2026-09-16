@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { TimePeriod, TraderMetrics } from "../lib/types";
+import { Legend } from "./Instrument";
 import { formatAddress, formatCurrency } from "../lib/formatters";
 import {
   Periods,
@@ -35,12 +36,6 @@ import {
 
 const CURVE_W = 100;
 const CURVE_H = 40;
-
-const Legend = ({ children }: { children: React.ReactNode }) => (
-  <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--legend)]">
-    {children}
-  </span>
-);
 
 function Panel({
   children,

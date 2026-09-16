@@ -1,6 +1,7 @@
 "use client";
 
-import { formatAddress, formatCurrency, toneClass } from "../lib/formatters";
+import { AddressLegend, Legend, dash } from "./Instrument";
+import { formatCurrency, toneClass } from "../lib/formatters";
 import { formatPrice, formatSize } from "../lib/fills";
 import { PerpPosition, SpotBalance, TraderSnapshot } from "../lib/trader";
 
@@ -12,12 +13,6 @@ import { PerpPosition, SpotBalance, TraderSnapshot } from "../lib/trader";
 // especially since these accounts always hold spot balances, so "nothing here"
 // would be actively misleading.
 
-const Legend = ({ children }: { children: React.ReactNode }) => (
-  <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--legend)]">
-    {children}
-  </span>
-);
-
 function Metric({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-0.5">
@@ -27,7 +22,6 @@ function Metric({ label, children }: { label: string; children: React.ReactNode 
   );
 }
 
-const dash = <span className="text-muted">—</span>;
 const money = (v: number | null, decimals = 2) =>
   v === null ? dash : formatCurrency(v, { compact: Math.abs(v) >= 10_000, decimals });
 
@@ -133,7 +127,7 @@ export default function PositionsPanel({
   if (loading && !data) {
     return (
       <Panel>
-        <Legend>Reading {formatAddress(address, 6)}</Legend>
+        <AddressLegend prefix="Reading " address={address} />
         <div className="mt-3 space-y-2" aria-hidden>
           {[0, 1, 2].map((i) => (
             <div key={i} className="h-16 animate-pulse rounded-xl bg-card-hover" />
@@ -146,7 +140,7 @@ export default function PositionsPanel({
   if (error) {
     return (
       <Panel>
-        <Legend>Could not read {formatAddress(address, 6)}</Legend>
+        <AddressLegend prefix="Could not read " address={address} />
         <p className="mt-2 font-mono text-xs uppercase tracking-[0.16em] text-[var(--loss)]">
           {error}
         </p>
@@ -162,7 +156,7 @@ export default function PositionsPanel({
     <div className="space-y-4">
       <Panel>
         <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-          <Legend>Perp account · {formatAddress(address, 6)}</Legend>
+          <AddressLegend prefix="Perp account · " address={address} />
           {/* Labelled "perps" on purpose: the leaderboard's accountValue measures
               something different and the two disagree by orders of magnitude. */}
           <Legend>Perps only — differs from leaderboard equity</Legend>

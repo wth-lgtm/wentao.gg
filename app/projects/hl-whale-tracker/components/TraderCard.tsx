@@ -111,8 +111,13 @@ export default function TraderCard({
           <div className="text-[10px] uppercase tracking-wide text-muted mb-0.5">
             ROI
           </div>
-          <div className={`font-semibold tabular-nums ${toneClass(trader.winRate)}`}>
-            {formatPercent(trader.winRate)}
+          {/* Same compact form as the desktop row, so the two views never print the
+              same ROI two different ways. The exact figure rides in the title. */}
+          <div
+            className={`font-semibold tabular-nums ${toneClass(trader.winRate)}`}
+            title={formatPercent(trader.winRate)}
+          >
+            {formatPercent(trader.winRate, { compact: true })}
           </div>
         </div>
         <div className="bg-background rounded-lg p-2.5">

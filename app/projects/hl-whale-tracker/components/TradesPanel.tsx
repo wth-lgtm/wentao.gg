@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { formatAddress, formatCurrency, toneClass } from "../lib/formatters";
+import { AddressLegend, Legend, dash } from "./Instrument";
+import { formatCurrency, toneClass } from "../lib/formatters";
 import { TraderSnapshot } from "../lib/trader";
 import {
   DirFacets,
@@ -33,14 +34,6 @@ import {
 // nothing is concealed.
 
 const VENUE_TAG: Record<Venue, string> = { PERP: "PERP", SPOT: "SPOT", EQUITY: "EQ" };
-
-const Legend = ({ children }: { children: React.ReactNode }) => (
-  <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--legend)]">
-    {children}
-  </span>
-);
-
-const dash = <span className="text-muted">—</span>;
 
 /**
  * Direction as a mechanism rather than a string.
@@ -159,7 +152,7 @@ export default function TradesPanel({
   if (loading && !data) {
     return (
       <Panel>
-        <Legend>Reading tape · {formatAddress(address, 6)}</Legend>
+        <AddressLegend prefix="Reading tape · " address={address} />
         <div className="mt-3 space-y-1.5" aria-hidden>
           {[0, 1, 2, 3, 4, 5].map((i) => (
             <div key={i} className="h-8 animate-pulse rounded bg-card-hover" />
@@ -172,7 +165,7 @@ export default function TradesPanel({
   if (error) {
     return (
       <Panel>
-        <Legend>Could not read {formatAddress(address, 6)}</Legend>
+        <AddressLegend prefix="Could not read " address={address} />
         <p className="mt-2 font-mono text-xs uppercase tracking-[0.16em] text-[var(--loss)]">
           {error}
         </p>
@@ -185,7 +178,7 @@ export default function TradesPanel({
   if (fills.length === 0) {
     return (
       <Panel>
-        <Legend>No recent fills · {formatAddress(address, 6)}</Legend>
+        <AddressLegend prefix="No recent fills · " address={address} />
         <p className="mt-2 text-sm text-muted">
           Upstream answered but reported no fill history for this address. That is a
           real state, not an error — one of the fourteen addresses sampled while
@@ -227,7 +220,7 @@ export default function TradesPanel({
     <div className="space-y-4">
       <Panel>
         <div className="mb-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
-          <Legend>Recent tape · {formatAddress(address, 6)}</Legend>
+          <AddressLegend prefix="Recent tape · " address={address} />
           <Legend>
             {span
               ? `${formatClock(span.from)} → ${formatClock(span.to)} · ${formatElapsed(

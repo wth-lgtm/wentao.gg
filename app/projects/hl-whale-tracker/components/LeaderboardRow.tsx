@@ -86,8 +86,14 @@ export default function LeaderboardRow({
       </td>
 
       <td className="px-2 sm:px-4 text-right">
-        <span className={`tabular-nums ${toneClass(trader.winRate)}`}>
-          {formatPercent(trader.winRate)}
+        {/* Compact because this column is locked to 96px by the colgroup and all-time
+            ROI runs to 2,641,203.9%: that string measured 94px against a 64px content
+            box and spilled into Volume. The exact figure rides in the title. */}
+        <span
+          className={`tabular-nums ${toneClass(trader.winRate)}`}
+          title={formatPercent(trader.winRate)}
+        >
+          {formatPercent(trader.winRate, { compact: true })}
         </span>
       </td>
 
