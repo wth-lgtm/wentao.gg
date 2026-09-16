@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronUp, ChevronDown } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { SortField, SortDirection } from "../lib/types";
 
 interface SortHeaderProps {
@@ -12,6 +12,13 @@ interface SortHeaderProps {
   align?: "left" | "right";
 }
 
+// One chevron that TURNS, not two that swap colour. A direction toggle is not a travel
+// commit — reversing fifty rows says nothing the reader did not already have — so the
+// header is the whole of that moment: the chevron rotates through one 180ms settle
+// (globals.css .hl-chevron, gated on the commit tier) and the rows simply swap.
+//
+// The chevron's box keeps the stacked pair's 20px, so the header row — and with it the
+// HullPlaceholder's measured 2253px — does not move by a pixel.
 export default function SortHeader({
   label,
   field,
@@ -31,20 +38,14 @@ export default function SortHeader({
       } ${align === "right" ? "ml-auto" : ""}`}
     >
       <span>{label}</span>
-      <div className="flex flex-col -space-y-1">
-        <ChevronUp
-          size={12}
-          className={`${
-            isActive && direction === "asc" ? "text-accent" : "text-[var(--legend)]/70"
-          }`}
-        />
+      {/* An inactive header points down: that is the direction a click gives it. The
+          <th>'s aria-sort carries the state for assistive tech; this is the picture. */}
+      <span className="hl-chevron" data-dir={isActive ? direction : "desc"} aria-hidden>
         <ChevronDown
           size={12}
-          className={`${
-            isActive && direction === "desc" ? "text-accent" : "text-[var(--legend)]/70"
-          }`}
+          className={isActive ? "text-accent" : "text-[var(--legend)]/70"}
         />
-      </div>
+      </span>
     </button>
   );
 }

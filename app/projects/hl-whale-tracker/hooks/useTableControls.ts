@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { TraderMetrics, SortField, TimePeriod } from "../lib/types";
 import { readWhaleState, whaleQuery, type WhaleUrlState } from "../lib/urlState";
 import { withCanonicalRank, type RankedTrader } from "../lib/rank";
+import { changeKind, NO_CHANGE, type BoardChange } from "../lib/commitPlan";
 import type { Tab, TabActivation } from "../components/TabNavigation";
 
 // Was useSortAndFilter, then a bag of plain useStates. Renamed once already because it
@@ -63,6 +64,27 @@ export function useTableControls() {
   useEffect(() => {
     base.current = state;
   }, [state]);
+
+  // The KIND of the last change — period, sort field or sort direction — for the
+  // board's commit engine, which runs a different moment for each (useCommit.ts). It is
+  // derived from the URL state rather than recorded at the click, so it lands in the
+  // SAME render as the new order (both come off `state`), and Back or Forward — which
+  // never pass through a handler here — get the same moment a click would. The
+  // previous-render comparison is React's own pattern for it: a conditional setState
+  // during render, which React re-runs immediately, once, before anything is committed.
+  // The seq makes the same kind twice in a row two commits; a URL change that moves
+  // none of the three (a tab, a trader) leaves it be.
+  const [seen, setSeen] = useState<{ state: WhaleUrlState; change: BoardChange }>({
+    state,
+    change: NO_CHANGE,
+  });
+  if (seen.state !== state) {
+    const kind = changeKind(seen.state, state);
+    setSeen({
+      state,
+      change: kind === null ? seen.change : { kind, seq: seen.change.seq + 1 },
+    });
+  }
 
   const commit = useCallback(
     (patch: Partial<WhaleUrlState>, mode: Mode) => {
@@ -153,6 +175,7 @@ export function useTableControls() {
     timePeriod: state.period,
     sortField: state.sort,
     sortDirection: state.dir,
+    change: seen.change,
     setTimePeriod,
     handleSort,
     selectTab,

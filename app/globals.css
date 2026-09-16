@@ -795,9 +795,9 @@ input:focus {
    1. An ENGRAVED rule is two lines, never one — a groove that sits below the
       surface and a lit lip that catches the key light. Polarity is already swapped
       per theme by --engrave-lo/-hi, so this reads as cut metal on both.
-   2. Every row is locked to the same height, so the re-seat animation can compute
+   2. Every row is locked to the same height, so the commit engine can compute
       travel as (Δrank × ROW_H) arithmetic instead of measuring the DOM. The height
-      lives here, in one place, and hooks/useReSeat.ts imports the same number. */
+      lives here, in one place, and lib/commitPlan.ts carries the same number. */
 
 .hl-rack {
   border-top-color: var(--engrave-hi);
@@ -867,7 +867,7 @@ input:focus {
   border-spacing: 0;
 }
 .hl-board tbody tr {
-  height: 44px; /* ROW_H — keep in sync with hooks/useReSeat.ts */
+  height: 44px; /* ROW_H — keep in sync with lib/commitPlan.ts */
 }
 .hl-board tbody td {
   border-bottom: 1px solid var(--engrave-lo);
@@ -928,10 +928,12 @@ input:focus {
 }
 
 /* A row is a berth you can select. The whole row is the target for a pointer; the
-   trailing control is the keyboard path. */
+   trailing control is the keyboard path. No transition on the fill: an animated
+   background-color on a row is on the plan's banned list, a hard hover fill is the
+   ESCAPEMENT hard stop anyway, and the travel fill below toggles this very property —
+   with the old 180ms fade every travelling row would have faded in its own fill. */
 .hl-berth {
   cursor: pointer;
-  transition: background-color var(--dur-fast) var(--ease-entrance);
 }
 .hl-berth:hover {
   background: var(--card-hover);
@@ -943,6 +945,106 @@ input:focus {
 }
 .hl-berth[data-selected="true"] td:first-child {
   box-shadow: inset 3px 0 0 var(--accent), inset 0 1px 0 var(--engrave-hi);
+}
+/* Travelling (hooks/useCommit.ts sets and clears this around the animation): an opaque
+   --card fill, because a row has no fill of its own and two rows crossing were
+   transparent text over transparent text. After hover and selected, so it wins for the
+   380–500ms it is on; a transform already makes the row its own stacking context, so
+   the fill paints over the rows it passes. */
+.hl-berth[data-travel="true"] {
+  background: var(--card);
+}
+
+/* THE GHOST SHEET (hooks/useCommit.ts mountGhost). On a period switch the rows that
+   leave the board dissolve as ONE sheet: a cloneNode(true) of the outgoing table,
+   inert, mounted over the live table's own box, its held rows hidden (they travel as
+   themselves) so only the departures remain. Under the live rows — z-index -1 inside
+   the wrapper's isolated stacking context — so the travelling rows' --card fill passes
+   OVER the dissolving ones and the arrivals fade in over them. Its thead is kept for
+   the geometry alone: invisible, and not sticky, so the ghost rows begin exactly where
+   the live rows begin without anyone measuring the header. */
+.hl-ghost {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+.hl-ghost thead {
+  visibility: hidden;
+}
+.hl-ghost thead th {
+  position: static;
+}
+/* visibility, not display: a collapsed row would move every row under it. */
+.hl-ghost tbody tr[data-held="true"] {
+  visibility: hidden;
+}
+.hl-ghost tbody tr {
+  cursor: default;
+}
+
+/* THE ZERO-VOLUME BLOCK (LeaderboardTable). Sorted by volume, the rows that traded
+   nothing tie at 0.00 and stack together — 41 of 50 on the live 30D board — and
+   forty-one "none" tokens in a column is a fault light, not a reading. This plate sits
+   over the volume column for the height of the block and says it once. Opaque --card
+   with the same engraved frame as .hl-plate, so it reads as a plate riveted onto the
+   rows rather than a highlight (the rows' own hover fill stops at its edge, as a plate's
+   would). `display` is left to the utilities on the element, which hide it below lg
+   where the volume column itself is hidden. The stamp is a discrete change on the 400ms
+   beat — the block forms in the 380ms inversion, then it is labelled — so step-end, and
+   `both` so the frame before it is empty, not a flash.
+
+   The words sit in the block's FIRST row, not its centre: the live 30D block is 41 rows
+   (1804px), and a label centred in it is 900px of blank plate before the reader learns
+   what the plate is. Three 12px lines under 4px of padding fill one 44px berth. */
+.hl-block {
+  position: absolute;
+  right: 2.25rem; /* the 36px inspect column */
+  width: 112px; /* the volume column, as the colgroup locks it */
+  padding: 0.25rem 1rem 0;
+  gap: 0.125rem;
+  pointer-events: none;
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--engrave-lo), inset 0 1px 0 var(--engrave-hi);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.625rem;
+  line-height: 1.2;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  text-align: right;
+  color: var(--legend);
+  animation: hlBlockStamp 0.4s step-end both;
+}
+@keyframes hlBlockStamp {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* THE CHEVRON (SortHeader). A direction toggle is not a travel — it turns this, in one
+   180ms settle, and the rows swap under it. The box is the stacked pair's 20px so the
+   header row keeps its height. The settle runs at the commit tier only; the seat and
+   the still get the turned chevron with no travel between. */
+.hl-chevron {
+  display: inline-grid;
+  place-items: center;
+  width: 0.75rem;
+  height: 1.25rem;
+}
+.hl-chevron > svg {
+  transform: rotate(0deg);
+}
+.hl-chevron[data-dir="asc"] > svg {
+  transform: rotate(180deg);
+}
+[data-surface="commit"] .hl-chevron > svg {
+  transition: transform 0.18s var(--ease-entrance);
 }
 
 /* The inspect affordance: hidden until the row is hovered or its control focused,
