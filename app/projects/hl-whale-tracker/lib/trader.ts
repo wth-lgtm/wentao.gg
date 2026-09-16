@@ -61,6 +61,15 @@ export interface Fill {
   closedPnl: number | null;
   fee: number | null;
   feeToken: string;
+  /**
+   * Exchange ORDER id. Kept because it is the only field that says which fills were
+   * one decision: the 7d #1 address's hundred most recent fills carry 73 distinct
+   * oids, and the time heuristic that stood in for this collapsed them into ten rows
+   * labelled "one order".
+   */
+  oid: number | null;
+  /** Parent id of a TWAP: many child oids, one intent, so it groups ahead of oid. */
+  twapId: number | null;
 }
 
 export interface MarginSummary {
@@ -134,8 +143,16 @@ export function parseSpot(raw: unknown): SpotBalance[] | null {
     .filter((b) => b.coin && b.total !== null && b.total !== 0);
 }
 
+/**
+ * How many of the most recent fills the tape asks upstream for. Upstream itself
+ * returns up to 2000, so this is a SAMPLE, and the panel states it as one: exported
+ * rather than inlined because the visitor-facing cap statement has to be the same
+ * number that was actually applied.
+ */
+export const FILL_LIMIT = 100;
+
 /** null when upstream did not answer; [] when it answered with an empty tape. */
-export function parseFills(raw: unknown, limit = 100): Fill[] | null {
+export function parseFills(raw: unknown, limit = FILL_LIMIT): Fill[] | null {
   if (raw == null) return null;
   // A 200 whose body is not a list is a shape problem, not a failed call, so it keeps
   // the empty answer: the absent signal is reserved for the null info() returns.
@@ -154,6 +171,8 @@ export function parseFills(raw: unknown, limit = 100): Fill[] | null {
       closedPnl: num(o.closedPnl),
       fee: num(o.fee),
       feeToken: str(o.feeToken),
+      oid: num(o.oid),
+      twapId: num(o.twapId),
     });
     if (out.length >= limit) break;
   }
