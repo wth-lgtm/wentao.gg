@@ -80,8 +80,17 @@ function readWindow(
  * A row's outcome, distinguishing the two reasons a row is dropped.
  *
  * "partial" is a shape we DO understand whose figures are incomplete; "unreadable" is
- * a window we cannot read at all. Only the second means the payload changed shape, so
- * only the second should be able to trip the route's all-rows-failed guard on its own.
+ * a window we cannot read at all. The distinction is reported, not yet acted on:
+ * rowsParsed is the count of rows that became metrics, so it excludes partials too,
+ * and an ALL-PARTIAL payload — upstream renaming the row-level `accountValue`, say —
+ * gives rowsParsed 0 and makes app/api/hl-leaderboard/route.ts answer 502. The board
+ * then goes dark with BOARD UNAVAILABLE where the old code would have shown fifty
+ * rows carrying a wrong $0 capital. That is deliberate here: dark and honest beats
+ * populated and wrong, and the rail already reports rowsSeen so the payload is
+ * visibly not empty. The refinement that keeps the board up in that case — 502 only
+ * when rowsParsed and rowsPartial are BOTH 0, otherwise serve the rows and let the
+ * rail say how many were incomplete — belongs to whoever owns that route, which is
+ * why rowsPartial is published here rather than consumed.
  */
 type RowOutcome =
   | { kind: "row"; metrics: TraderMetrics }
@@ -146,8 +155,10 @@ export interface MappedLeaderboard {
   periods: Record<TimePeriod, TraderMetrics[]>;
   rowsSeen: number;
   rowsParsed: number;
-  /** Rows understood but incomplete, dropped rather than zero-filled. */
-  rowsPartial: number;
+  /** Rows understood but incomplete, dropped rather than zero-filled — PER WINDOW,
+   * because pnl/roi/vlm are window-scoped: a row whose 7d vlm is missing is dropped
+   * from the 7d board alone, and a single all-time figure would report that as 0. */
+  rowsPartial: Record<TimePeriod, number>;
 }
 
 /**
@@ -163,8 +174,8 @@ export function mapAllPeriods(
   if (!Array.isArray(rows)) return null;
 
   const periods = {} as Record<TimePeriod, TraderMetrics[]>;
+  const rowsPartial = {} as Record<TimePeriod, number>;
   let rowsParsed = 0;
-  let rowsPartial = 0;
 
   for (const period of ALL_PERIODS) {
     const traders: TraderMetrics[] = [];
@@ -174,13 +185,11 @@ export function mapAllPeriods(
       if (outcome.kind === "row") traders.push(outcome.metrics);
       else if (outcome.kind === "partial") partial++;
     }
-    // Both counts are taken over the all-time pass, which is the pass the route's
-    // "rows arrived but none parsed" guard reads. accountValue is not window-scoped,
-    // so an incomplete row is usually incomplete in every window anyway.
-    if (period === "allTime") {
-      rowsParsed = traders.length;
-      rowsPartial = partial;
-    }
+    rowsPartial[period] = partial;
+    // rowsParsed stays the all-time figure: it is the count the route's "rows arrived
+    // but none parsed" guard reads, and all-time is the window every ranked address
+    // has. The partial counts are per window because the figures are.
+    if (period === "allTime") rowsParsed = traders.length;
     traders.sort((a, b) => b.pnl - a.pnl);
     periods[period] = traders.slice(0, limit);
   }
