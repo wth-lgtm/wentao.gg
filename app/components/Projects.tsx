@@ -34,8 +34,13 @@ const projectCategories: ProjectCategory[] = [
     projects: [
       {
         title: "Whale Tracker",
+        // Four tabs, not one. This described the leaderboard and its sort controls and
+        // stopped there, so the card on the homepage advertised none of what the route
+        // grew: what a selected whale is holding, what it just traded, and the
+        // board-wide analytics. Kept in step with the route's own meta description
+        // (app/projects/hl-whale-tracker/layout.tsx).
         description:
-          "A Hyperliquid trader leaderboard tracking top whales by PnL, ROI, and volume. Live data from the Hyperliquid leaderboard API with sortable columns and time period filters.",
+          "Hyperliquid's top 50 perp accounts by PnL, ROI and volume across four windows. Select a berth to read its live positions and recent fills, or read the board itself in the analytics tab.",
         technologies: ["Next.js", "TypeScript", "Tailwind", "Hyperliquid API"],
         href: "/projects/hl-whale-tracker",
         icon: TrendingUp,

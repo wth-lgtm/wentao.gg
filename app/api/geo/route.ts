@@ -11,6 +11,17 @@ import { NextResponse } from "next/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// Every response here is ONE visitor's own location and IP, so it is stated explicitly
+// as uncacheable rather than left to whatever a dynamic route defaults to. `private` is
+// the load-bearing word: a shared cache — a CDN, a corporate proxy — keying this on the
+// path alone would hand one visitor's city and IP to the next person through it. The
+// UPSTREAM body is still cached (`next: { revalidate: 600 }` below, keyed on a URL that
+// contains the visitor's IP), which is what keeps the ip-api budget; that cache is
+// server-side and per-IP, and this header is about the hop to the browser.
+const NO_STORE = {
+  "Cache-Control": "private, no-store, max-age=0, must-revalidate",
+} as const;
+
 function isPrivate(ip: string): boolean {
   return (
     !ip ||
@@ -58,23 +69,26 @@ export async function GET(req: Request) {
       next: { revalidate: 600 },
       signal: AbortSignal.timeout(5000),
     });
-    if (!r.ok) return NextResponse.json({});
+    if (!r.ok) return NextResponse.json({}, { headers: NO_STORE });
     const d = await r.json();
-    if (!d || d.status !== "success") return NextResponse.json({});
+    if (!d || d.status !== "success") return NextResponse.json({}, { headers: NO_STORE });
 
     // isp = carrier / ASN (e.g. Zayo Bandwidth); org = end-customer org (e.g. Mercor.io
     // Corporation — what whatismyipaddress labels "ISP"). Return both.
-    return NextResponse.json({
-      ip: typeof d.query === "string" ? d.query : ip,
-      city: typeof d.city === "string" ? d.city : "",
-      region: typeof d.regionName === "string" ? d.regionName : "",
-      country_code: typeof d.countryCode === "string" ? d.countryCode : "",
-      latitude: toNum(d.lat),
-      longitude: toNum(d.lon),
-      isp: typeof d.isp === "string" ? d.isp : "",
-      org: typeof d.org === "string" ? d.org : "",
-    });
+    return NextResponse.json(
+      {
+        ip: typeof d.query === "string" ? d.query : ip,
+        city: typeof d.city === "string" ? d.city : "",
+        region: typeof d.regionName === "string" ? d.regionName : "",
+        country_code: typeof d.countryCode === "string" ? d.countryCode : "",
+        latitude: toNum(d.lat),
+        longitude: toNum(d.lon),
+        isp: typeof d.isp === "string" ? d.isp : "",
+        org: typeof d.org === "string" ? d.org : "",
+      },
+      { headers: NO_STORE }
+    );
   } catch {
-    return NextResponse.json({});
+    return NextResponse.json({}, { headers: NO_STORE });
   }
 }

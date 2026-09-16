@@ -52,12 +52,22 @@ export const metadata: Metadata = {
   },
 };
 
-// Script to prevent flash of wrong theme
+// Script to prevent flash of wrong theme.
+//
+// The localStorage read is guarded, because this is the one place on the site where it
+// was not. WebKit throws SecurityError on ANY localStorage access under "Block all
+// cookies" (and in some embedded webviews) — ThemeProvider wraps its reads for exactly
+// that reason — and here the throw happens in a blocking inline script in <head>,
+// BEFORE the class is applied and before React exists to catch anything. A blocked-
+// storage visitor got no theme class at all, so every token fell back to its :root
+// default for the life of the page. Falling through to the system preference is the
+// same answer an absent key gets, which is the right one: nothing was stored.
 const themeScript = `
   (function() {
-    const stored = localStorage.getItem('theme');
-    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    const theme = stored === 'light' ? 'light' : stored === 'dark' ? 'dark' : (prefersDark ? 'dark' : 'light');
+    var stored = null;
+    try { stored = localStorage.getItem('theme'); } catch (e) {}
+    var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    var theme = stored === 'light' ? 'light' : stored === 'dark' ? 'dark' : (prefersDark ? 'dark' : 'light');
     document.documentElement.classList.add(theme);
   })();
 `;

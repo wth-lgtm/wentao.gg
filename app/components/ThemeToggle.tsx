@@ -124,9 +124,17 @@ export default function ThemeToggle() {
                     setTheme(option.value);
                     closeMenu(true);
                   }}
+                  // The checked row used to be `bg-accent text-white`, which is a
+                  // hardcoded colour and, on dark, an unreadable one: white on the dark
+                  // theme's --accent (#3b82f6) measures 3.68:1, under the 4.5:1 WCAG AA
+                  // asks of 14px text. (Light passes at 5.19:1 on #2563eb, so only one
+                  // of the two themes was ever legible.) The page colour is the label
+                  // instead — #0a0a0b on #3b82f6 is 5.33:1 and #ffffff on #2563eb is
+                  // the same 5.19:1 — so one token pair passes in both themes and the
+                  // accent chip keeps its emphasis.
                   className={`w-full flex items-center gap-2 px-3 py-2 text-sm rounded-lg transition-colors ${
                     theme === option.value
-                      ? "bg-accent text-white"
+                      ? "bg-accent text-[var(--background)]"
                       : "text-muted hover:text-foreground hover:bg-background"
                   }`}
                 >

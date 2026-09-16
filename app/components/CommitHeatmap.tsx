@@ -141,11 +141,18 @@ export default function SiteStats() {
   const attachTray = useCallback((node: HTMLDivElement | null) => {
     trayObserver.current?.disconnect();
     trayObserver.current = null;
-    if (node) {
-      const io = new IntersectionObserver(([e]) => setTrayInView(e.isIntersecting), { threshold: 0.3 });
-      io.observe(node);
-      trayObserver.current = io;
+    if (!node) {
+      // The tray is taken away and given back — the ResizeObserver below drops it when
+      // the block narrows past TRAY.kLegible and restores it when it widens — and this
+      // state outlived the node that produced it. The next mount was handed the OLD
+      // answer for the frame or two before the fresh observer's first callback, so a tray
+      // reappearing off-screen could be told to pour where nobody could see it.
+      setTrayInView(false);
+      return;
     }
+    const io = new IntersectionObserver(([e]) => setTrayInView(e.isIntersecting), { threshold: 0.3 });
+    io.observe(node);
+    trayObserver.current = io;
   }, []);
   // The activity block's size, in both of its shapes (one column or board + tray), decides
   // whether a tray fits: the block is what the grid divides, and its height is column 1's.
@@ -321,9 +328,15 @@ export default function SiteStats() {
   const wantTray = trayShown ? kFit >= TRAY.kLegible : kFit >= TRAY.kLegible + 0.05;
   if (wantTray !== trayShown) setTrayShown(wantTray);
   // The pile is a second reading of the same window, so it exists only when the window is
-  // known and the tray fits; without it the activity block is one column, as it is for every
-  // non-3D visitor.
-  const showTray = use3D && windowKnown && trayShown;
+  // known, there is something to pour, and the tray fits; without it the activity block is
+  // one column, as it is for every non-3D visitor.
+  //
+  // `pieces.length > 0` is the case the other two gates miss. A window that is KNOWN and
+  // genuinely holds no commit is a real state — twelve quiet weeks — and fillScale returns
+  // 1 for an empty pile (no area to fit, so nothing constrains the scale), which clears
+  // TRAY.kLegible and opened an empty tray beside the board under a legend reading "one
+  // block per commit … push them", with nothing in it to push.
+  const showTray = use3D && windowKnown && pieces.length > 0 && trayShown;
   // The legend states the encoding, and the cut when there is one.
   const cut = pile.total > pieces.length ? ` · ${pieces.length} of ${pile.total} shown` : "";
   const trayLegend = `one block per commit, shaded by its day's level${cut} · push them`;

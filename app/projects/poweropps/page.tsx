@@ -248,7 +248,7 @@ function SegmentButton({ options, value, onChange }: { options: { value: string;
           type="button"
           onClick={() => onChange(opt.value)}
           className={`flex-1 px-2 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm font-medium rounded-md transition-colors ${
-            value === opt.value ? "bg-accent text-white" : "text-muted hover:text-foreground"
+            value === opt.value ? "bg-accent text-[var(--background)]" : "text-muted hover:text-foreground"
           }`}
         >
           {opt.label}
@@ -258,6 +258,16 @@ function SegmentButton({ options, value, onChange }: { options: { value: string;
   );
 }
 
+// Palette steps are gone from this file; --gain / --loss / --accent carry the colour.
+// Two reasons beyond the repo's own rule. The measurements: white on --accent is 3.68:1
+// on dark and red-500 text is 3.36:1 on the light card, both under the 4.5:1 WCAG AA
+// asks of 14px text, and every replacement below passes in BOTH themes. And the light
+// theme: a fixed palette step cannot track a theme, so the light page was rendering the
+// dark page's reds.
+//
+// The Beat-Your-Opp section's red is section identity rather than a loss reading, and it
+// maps to --loss anyway — it is the repo's measured red, and the alternative is a second
+// red that means the same thing to a reader and nothing to the stylesheet.
 function ToggleSwitch({ checked, onChange, labelLeft, labelRight }: { checked: boolean; onChange: (v: boolean) => void; labelLeft: string; labelRight: string }) {
   return (
     <div className="flex items-center justify-center gap-3">
@@ -265,9 +275,11 @@ function ToggleSwitch({ checked, onChange, labelLeft, labelRight }: { checked: b
       <button
         type="button"
         onClick={() => onChange(!checked)}
-        className={`relative w-14 h-8 rounded-full transition-colors ${checked ? "bg-green-500" : "bg-red-500"}`}
+        className={`relative w-14 h-8 rounded-full transition-colors ${checked ? "bg-gain" : "bg-loss"}`}
       >
-        <div className={`absolute top-1 w-6 h-6 bg-white rounded-full transition-transform ${checked ? "translate-x-7" : "translate-x-1"}`} />
+        {/* --background, not white: on the dark theme's --gain (#34d399) a white knob
+            measures 1.92:1 and disappears, where the page colour is 10.2:1. */}
+        <div className={`absolute top-1 w-6 h-6 bg-background rounded-full transition-transform ${checked ? "translate-x-7" : "translate-x-1"}`} />
       </button>
       <span className={`text-sm ${checked ? "text-foreground font-medium" : "text-muted"}`}>{labelRight}</span>
     </div>
@@ -514,7 +526,15 @@ export default function PowerOPPS() {
   return (
     <main className="min-h-screen bg-background">
       {/* Header */}
-      <header className="sticky top-0 z-50 bg-background/90 backdrop-blur-md border-b border-border">
+      {/* Opaque, and no backdrop-blur — the same decision, and the same reason, as the
+          whale tracker's header. Until body's `overflow-x: hidden` became `clip` (PR #61)
+          this header never actually stuck: body was a scroll container, so it stuck to
+          body and scrolled away with the page, and the fill never had anything behind it.
+          Now it engages, and measured in Chromium at 1440x620 and 390x500 in both themes
+          there are 2-10 text-bearing elements under its band at a scroll of 250px, at a
+          0.9 fill with blur(12px) over them. A full-width backdrop-filter also
+          re-rasterises on every scroll frame. */}
+      <header className="sticky top-0 z-50 bg-background border-b border-border">
         <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
           <Link href="/#projects" className="flex items-center gap-2 text-muted hover:text-foreground transition-colors">
             <ArrowLeft size={18} />
@@ -547,7 +567,7 @@ export default function PowerOPPS() {
           <button
             onClick={() => setActiveTab("scores")}
             className={`flex-1 flex items-center justify-center gap-1.5 sm:gap-2 py-2.5 sm:py-3 rounded-lg font-medium transition-colors text-sm ${
-              activeTab === "scores" ? "bg-accent text-white" : "text-muted hover:text-foreground"
+              activeTab === "scores" ? "bg-accent text-[var(--background)]" : "text-muted hover:text-foreground"
             }`}
           >
             <Calculator size={16} className="sm:w-[18px] sm:h-[18px]" />
@@ -556,7 +576,7 @@ export default function PowerOPPS() {
           <button
             onClick={() => setActiveTab("target")}
             className={`flex-1 flex items-center justify-center gap-1.5 sm:gap-2 py-2.5 sm:py-3 rounded-lg font-medium transition-colors text-sm ${
-              activeTab === "target" ? "bg-accent text-white" : "text-muted hover:text-foreground"
+              activeTab === "target" ? "bg-accent text-[var(--background)]" : "text-muted hover:text-foreground"
             }`}
           >
             <Target size={16} className="sm:w-[18px] sm:h-[18px]" />
@@ -565,7 +585,7 @@ export default function PowerOPPS() {
           <button
             onClick={() => setActiveTab("opp")}
             className={`flex-1 flex items-center justify-center gap-1.5 sm:gap-2 py-2.5 sm:py-3 rounded-lg font-medium transition-colors text-sm ${
-              activeTab === "opp" ? "bg-accent text-white" : "text-muted hover:text-foreground"
+              activeTab === "opp" ? "bg-accent text-[var(--background)]" : "text-muted hover:text-foreground"
             }`}
           >
             <Sword size={16} className="sm:w-[18px] sm:h-[18px]" />
@@ -638,11 +658,11 @@ export default function PowerOPPS() {
                   <InputField label="Total Lifted" value={weightLifted} onChange={setWeightLifted} placeholder="0" suffix={unitLabel} />
                 </div>
 
-                {error && <p className="text-red-500 text-sm text-center">{error}</p>}
+                {error && <p className="text-loss text-sm text-center">{error}</p>}
 
                 <button
                   onClick={handleCalculateScores}
-                  className="w-full py-3 sm:py-3.5 bg-accent hover:bg-accent-hover text-white font-semibold rounded-lg transition-colors"
+                  className="w-full py-3 sm:py-3.5 bg-accent hover:bg-accent-hover text-[var(--background)] font-semibold rounded-lg transition-colors"
                 >
                   Calculate
                 </button>
@@ -749,11 +769,11 @@ export default function PowerOPPS() {
                   <InputField label="Target Score" value={targetScore} onChange={setTargetScore} placeholder="e.g. 400" suffix="pts" />
                 </div>
 
-                {targetError && <p className="text-red-500 text-sm text-center">{targetError}</p>}
+                {targetError && <p className="text-loss text-sm text-center">{targetError}</p>}
 
                 <button
                   onClick={handleCalculateTarget}
-                  className="w-full py-3 sm:py-3.5 bg-accent hover:bg-accent-hover text-white font-semibold rounded-lg transition-colors"
+                  className="w-full py-3 sm:py-3.5 bg-accent hover:bg-accent-hover text-[var(--background)] font-semibold rounded-lg transition-colors"
                 >
                   Calculate
                 </button>
@@ -933,7 +953,7 @@ export default function PowerOPPS() {
                             onClick={() => setBeatMargin(val)}
                             className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
                               beatMargin === val
-                                ? "bg-red-500 text-white"
+                                ? "bg-loss text-[var(--background)]"
                                 : "bg-background text-muted hover:text-foreground border border-border"
                             }`}
                           >
@@ -953,7 +973,7 @@ export default function PowerOPPS() {
                             }}
                             placeholder="Custom"
                             className={`w-full px-3 py-1.5 text-sm bg-background border rounded-lg placeholder:text-muted/50 focus:outline-none transition-colors ${
-                              isCustom ? "border-red-500 text-foreground" : "border-border text-muted"
+                              isCustom ? "border-loss text-foreground" : "border-border text-muted"
                             }`}
                           />
                         </div>
@@ -975,11 +995,11 @@ export default function PowerOPPS() {
                   )}
                 </div>
 
-                {oppError && <p className="text-red-500 text-sm text-center">{oppError}</p>}
+                {oppError && <p className="text-loss text-sm text-center">{oppError}</p>}
 
                 <button
                   onClick={handleCalculateOpp}
-                  className="w-full py-3 sm:py-3.5 bg-red-500 hover:bg-red-600 text-white font-semibold rounded-lg transition-colors"
+                  className="w-full py-3 sm:py-3.5 bg-loss hover:bg-loss-hover text-[var(--background)] font-semibold rounded-lg transition-colors"
                 >
                   Calculate What I Need
                 </button>
@@ -1005,9 +1025,9 @@ export default function PowerOPPS() {
                       <div className="text-xs text-muted mt-1">Total: {oppResult.oppTotal.toFixed(1)} {oppUnitLabel}</div>
                     </div>
 
-                    <div className="text-center p-5 bg-red-500/10 rounded-xl border border-red-500/20">
+                    <div className="text-center p-5 bg-loss/10 rounded-xl border border-loss/20">
                       <div className="text-xs text-muted uppercase tracking-wide mb-2">You need to {liftName.toLowerCase()} at least</div>
-                      <div className="text-4xl font-bold text-red-500 tabular-nums">
+                      <div className="text-4xl font-bold text-loss tabular-nums">
                         {oppResult.myLiftNeeded.toFixed(1)} <span className="text-xl">{oppUnitLabel}</span>
                       </div>
                       <p className="text-muted text-sm mt-2">

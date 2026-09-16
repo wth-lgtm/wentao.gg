@@ -2,13 +2,21 @@
 
 import { useEffect, useState, useRef } from "react";
 
-// What patches/webgl-fluid+0.3.9.patch adds. Upstream 0.3.9 returns nothing and has no
-// teardown, so the rAF loop kept stepping a detached 0x0 canvas at 57-104 frames/s after a
-// client-side route change off the home page (measured in headless Chromium; a direct load of
-// the same route idles at 0/s), and each home -> project -> home round trip leaked another
-// loop and another WebGL context. The package ships no .d.ts, and types/webgl-fluid.d.ts
-// declares the old `void` return, so the call site casts.
-type FluidHandle = { destroy(): void; pause(paused: boolean): void };
+// The patch that gives this module a teardown, and the one thing to know about it:
+// patches/webgl-fluid+0.3.9.patch modifies dist/webgl-fluid.mjs and nothing else, so the
+// UMD build this package also ships (its `main`, and what the `require` export condition
+// resolves to) is unpatched and still returns undefined. The dynamic `import()` below gets
+// the ESM entry, which is the patched one — and the guard after the call is what says so
+// out loud if that ever stops being true.
+//
+// Upstream 0.3.9 returns nothing and has no teardown, so the rAF loop kept stepping a
+// detached 0x0 canvas at 57-104 frames/s after a client-side route change off the home
+// page (measured in headless Chromium; a direct load of the same route idles at 0/s), and
+// each home -> project -> home round trip leaked another loop and another WebGL context.
+//
+// The handle's type lives in types/webgl-fluid.d.ts now, declared as the module's actual
+// return, which is what removed the `as unknown as FluidHandle` this file used to need.
+import type { FluidHandle } from "webgl-fluid";
 
 export default function InteractiveEffects() {
   const [mounted, setMounted] = useState(false);
@@ -49,15 +57,13 @@ export default function InteractiveEffects() {
         // `isMobile ? 1024 : 2048` only ever moved iPad-class devices with a desktop UA.
         const dyeRes = 1024;
 
-        // webgl-fluid@0.3.9 supports these keys at runtime, but its bundled types
-        // omit some — widen the config type rather than casting to `any`.
-        type FluidConfig = NonNullable<Parameters<typeof WebGLFluid>[1]> & {
-          SPLAT_COUNT?: number;
-          BLOOM_INTENSITY?: number;
-          SUNRAYS?: boolean;
-          SUNRAYS_WEIGHT?: number;
-        };
-        const config: FluidConfig = {
+        // No local widening any more. webgl-fluid ships no types at all, so
+        // types/webgl-fluid.d.ts IS the declaration — and the four keys this used to add
+        // back were three that were already there and SPLAT_COUNT, which now is. A
+        // widening beside the call site only hides the gap from the next caller. (The
+        // comment here used to say the "bundled types omit some", which contradicted the
+        // note above it: there are no bundled types.)
+        const config: NonNullable<Parameters<typeof WebGLFluid>[1]> = {
           // A small ignition bloom on load so the canvas isn't dead-black, then the
           // fluid is driven purely by the real cursor (TRIGGER: "hover") — no synthetic
           // ambient strokes.
@@ -88,7 +94,23 @@ export default function InteractiveEffects() {
           SUNRAYS: !isMobile,
           SUNRAYS_WEIGHT: 0.3,
         };
-        fluidInstance = WebGLFluid(canvasRef.current, config) as unknown as FluidHandle;
+        fluidInstance = WebGLFluid(canvasRef.current, config);
+        // Patch-drift guard. The teardown below is the only thing stopping a leaked rAF
+        // loop per route change, and it exists purely because patch-package applied a
+        // patch at install time — a failed `postinstall`, a bumped version whose patch no
+        // longer applies, or a bundler that resolved the unpatched UMD entry all leave a
+        // handle with no destroy() and no error anywhere. Dev-only: in production this
+        // cannot be acted on, and the optional call below already degrades quietly.
+        if (
+          process.env.NODE_ENV !== "production" &&
+          typeof fluidInstance?.destroy !== "function"
+        ) {
+          console.error(
+            "webgl-fluid returned no destroy(): patches/webgl-fluid+0.3.9.patch is not " +
+              "applied to the resolved build. The fluid rAF loop will keep running after " +
+              "a route change off this page."
+          );
+        }
       } catch (error) {
         console.error("Failed to initialize WebGL Fluid:", error);
       }
@@ -116,6 +138,15 @@ export default function InteractiveEffects() {
       fluidInstance?.destroy();
       fluidInstance = null;
     };
+    // Both deps settle on the first commit and never change again: `mounted` goes
+    // false -> true once, and `isMobile` is written in the same effect that sets it. That
+    // is load-bearing rather than incidental, because a RE-RUN of this effect could not
+    // work: the cleanup calls destroy(), which calls WEBGL_lose_context.loseContext(), and
+    // the patch never calls restoreContext — a lost context is permanent, and
+    // canvas.getContext() hands back the same lost object, so a second WebGLFluid() on
+    // this canvas would initialise against a dead context. Anything that makes either dep
+    // genuinely change has to remount the <canvas> (give it a `key`) rather than rely on
+    // re-initialising in place.
   }, [mounted, isMobile]);
 
   // Forward touch events to canvas on mobile (allows scroll + fluid effect)

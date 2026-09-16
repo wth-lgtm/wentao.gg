@@ -50,6 +50,19 @@ const nextConfig: NextConfig = {
   //   - Permissions-Policy: no navigator.geolocation, getUserMedia or clipboard
   //     call exists anywhere (the visitor geo probes are plain fetches).
   //     interest-cohort=() is deliberately absent — FLoC is dead.
+  //   - nosniff: every response here declares its own type — NextResponse.json for the
+  //     nine /api routes, ImageResponse for the four opengraph-image routes, the static
+  //     /icon.svg — so nothing on this origin depends on a browser GUESSING a type, and
+  //     the guess is the vector: a JSON body sniffed as HTML executes as HTML. Inert
+  //     here, which is why it can be enforced rather than reported.
+  //   - Referrer-Policy: strict-origin-when-cross-origin is already the default in
+  //     current Chrome and Firefox, so this PINS a default rather than changing
+  //     behaviour — for older engines, for any future change to it, and because the
+  //     URLs on this site carry state: the whale page writes the selected trader
+  //     address, window and tab into its query string (lib/urlState.ts) and the rows on
+  //     that page link out to app.hyperliquid.xyz. Under a full-URL referrer the board's
+  //     state travels to every third party a visitor clicks through to. Nothing here
+  //     needs a cross-origin referrer, so there is nothing to trade away.
   // script-src is deliberately NOT here. The served home HTML carries 15 inline
   // <script> blocks, 8 of them self.__next_f.push RSC flight chunks whose contents
   // change per build and per page, so a hash-based policy breaks hydration and a
