@@ -15,7 +15,9 @@ import {
   formatRoi,
   formatShare,
   overlapKey,
+  plural,
   rhoLabel,
+  rhoNoiseFloor,
   zeroVolumeCohort,
 } from "../lib/analytics";
 
@@ -23,19 +25,39 @@ import {
 //
 // This is the one tab that does not describe a trader — it describes the BOARD, and
 // it exists because measuring the payload contradicts how the board reads. Sorted by
-// PnL it looks like a ranking of skill. Across the 24H, 7D and 30D windows the
-// address at #1 by PnL sits at #50 of 50 by return, rho(PnL, return) is negative and
-// rho(PnL, account size) is +0.73. So it is much closer to a ranking of capital.
+// PnL it looks like a ranking of skill; measured, it tracks capital much more closely
+// than it tracks return.
 //
-// That claim is deliberately scoped. In the all-time window it does NOT hold: there
-// the top address leads on both, and the correlation flips weakly positive. Stating
-// the finding as universal would have been the easier, wronger page.
+// Every sentence below is templated over `divs`, `churn` and `conc`. That is the
+// whole point of this file's history: the prose used to be a July snapshot, so the
+// live table rendered its own refutation 40px above a paragraph claiming the PnL
+// leader "has the worst return on the board" (live ranks: #21, #26, #50, #1) and that
+// the all-time relationship "flips weakly positive" (live: -0.01, within noise). Any
+// number in the JSX must come from the payload; any number in a comment is dated.
 //
 // Costs no network. The leaderboard hook already fetches all four windows in one
 // request; this reads what is already in memory.
 
 const CURVE_W = 100;
 const CURVE_H = 40;
+
+// Identity for the four concentration curves rides on a dash pattern, not a hue: the
+// single-accent rule left every unfocused line and every legend swatch the identical
+// grey, so the legend could not say which line was which (and at opacity 0.4 the
+// strokes measured 2.18:1 on dark, under the 3:1 WCAG 1.4.11 asks of a graphical
+// object). One map, read by both the path and its swatch, is what stops the two
+// drifting apart — and 30D is dash-dot rather than the obvious "2 3" because "2 3" is
+// the equality diagonal's pattern, and two lines in one chart wearing one pattern is
+// the defect this map exists to fix.
+const WINDOW_DASH: Record<TimePeriod, string | undefined> = {
+  "1d": undefined,
+  "7d": "6 3",
+  "30d": "4 2 1 2",
+  allTime: "1 2",
+};
+// Raised from the stylesheet's 0.4 (≈3.9:1 on dark). It lives here rather than in
+// globals.css so the stroke and its swatch cannot be given different values.
+const UNFOCUSED_OPACITY = 0.7;
 
 function Panel({
   children,
@@ -65,13 +87,15 @@ function LeaderCard({
   role,
   trader,
   note,
+  className,
 }: {
   role: string;
   trader: TraderMetrics;
   note: string;
+  className?: string;
 }) {
   return (
-    <div className="hl-archetype">
+    <div className={className ? `hl-archetype ${className}` : "hl-archetype"}>
       <Legend>{role}</Legend>
       <a
         href={`https://app.hyperliquid.xyz/explorer/address/${trader.address}`}
@@ -105,6 +129,10 @@ function Cell({ label, children }: { label: string; children: React.ReactNode })
     </div>
   );
 }
+
+/** A signed rho, or the em dash that means it could not be computed. */
+const fmtRho = (value: number | null): string =>
+  value === null ? "—" : (value > 0 ? "+" : "") + value.toFixed(2);
 
 export default function AnalyticsPanel({
   periods,
@@ -179,6 +207,45 @@ export default function AnalyticsPanel({
   const focusCohort = zeroVolumeCohort(periods[focus.window] ?? []);
   const inverted = focus.pnlLeaderRoiRank === focus.count && focus.count > 1;
 
+  // Two independent reduces can land on one address, and in the live all-time window
+  // they do (0x4ec8fe22, #1 by both). Two identical cards used to render, the second
+  // captioned "a different trader entirely".
+  const sameLeader =
+    !!focus.pnlLeader && focus.pnlLeader.address === focus.roiLeader?.address;
+
+  // Magnitudes, not signed values: rho(PnL, return) is negative in most windows, so a
+  // signed comparison against rho(PnL, capital) would be vacuously true. A window
+  // missing either rho is out of the denominator too — counting it as "not capital"
+  // would read as evidence for return.
+  const comparable = present.filter((w) => {
+    const d = divs.get(w)!;
+    return d.pnlVsCapital !== null && d.pnlVsRoi !== null;
+  });
+  const capitalCloser = comparable.filter((w) => {
+    const d = divs.get(w)!;
+    return Math.abs(d.pnlVsCapital!) > Math.abs(d.pnlVsRoi!);
+  }).length;
+
+  // Ordered largest first so the concentration sentence never presumes which window
+  // is the concentrated one — the live order has already swapped once.
+  const topShares = present
+    .map((w) => ({ window: w, share: conc.get(w)?.topShare ?? null }))
+    .filter((s): s is { window: TimePeriod; share: number } => s.share !== null)
+    .sort((a, b) => b.share - a.share);
+  const shareHi = topShares[0];
+  const shareLo = topShares[topShares.length - 1];
+
+  // The board is fifty rows per window today, but that is upstream's choice, not
+  // ours, and the panel used to spell it "fifty" in four places.
+  const boardSize = Math.max(
+    ...present.map((w) => churn.overlap[overlapKey(w, w)] ?? 0)
+  );
+
+  const monthlyOverlap =
+    present.includes("30d") && present.includes("allTime")
+      ? (churn.overlap[overlapKey("30d", "allTime")] ?? null)
+      : null;
+
   return (
     <div className="space-y-4">
       {/* ── 1. What the board is actually sorting ───────────────────────────── */}
@@ -189,30 +256,52 @@ export default function AnalyticsPanel({
         <div className="grid gap-3 sm:grid-cols-2">
           {focus.pnlLeader && (
             <LeaderCard
-              role="Ranked #1 by PnL"
+              role={sameLeader ? "Ranked #1 by both PnL and return" : "Ranked #1 by PnL"}
               trader={focus.pnlLeader}
+              // One card spans both columns rather than leaving an empty cell.
+              className={sameLeader ? "sm:col-span-2" : undefined}
               note={
-                inverted
-                  ? `Also ranks #${focus.pnlLeaderRoiRank} of ${focus.count} by return — last on the board.`
-                  : focus.pnlLeaderRoiRank !== null
-                    ? `Ranks #${focus.pnlLeaderRoiRank} of ${focus.count} by return.`
-                    : ""
+                sameLeader
+                  ? "In this window the largest earner is also the best earner."
+                  : inverted
+                    ? `Also ranks #${focus.pnlLeaderRoiRank} of ${focus.count} by return — last on the board.`
+                    : focus.pnlLeaderRoiRank !== null
+                      ? `Ranks #${focus.pnlLeaderRoiRank} of ${focus.count} by return.`
+                      : ""
               }
             />
           )}
-          {focus.roiLeader && (
+          {!sameLeader && focus.roiLeader && (
             <LeaderCard
               role="Ranked #1 by return"
               trader={focus.roiLeader}
-              note="Same window, same fifty addresses — a different trader entirely."
+              note={
+                focus.roiLeaderPnlRank !== null
+                  ? `Ranks #${focus.roiLeaderPnlRank} of ${focus.count} by PnL — same window, same ${focus.count} addresses.`
+                  : `Same window, same ${focus.count} addresses.`
+              }
             />
           )}
         </div>
 
         {/* The correlation strip. Both numbers per window, so the reader watches the
-            relationship change rather than taking one figure on trust. */}
-        <div className="mt-4 overflow-x-auto">
+            relationship change rather than taking one figure on trust.
+
+            Four columns cannot fit a 390px phone — the three left columns and their
+            cell padding alone measure ~318px of a ~324px content width — so the
+            scroll stays and .hl-scroll-x makes it discoverable. role/tabIndex are the
+            scrollable-region pattern: a focusable div with no role fails axe. */}
+        <div
+          className="hl-scroll-x mt-4 overflow-x-auto"
+          role="region"
+          aria-label="Rank correlation by window"
+          tabIndex={0}
+        >
           <table className="hl-corr w-full text-sm">
+            <caption className="sr-only">
+              Spearman rank correlation per time window: PnL against return, PnL against
+              account size, and where the window&rsquo;s PnL leader places by return.
+            </caption>
             <thead>
               <tr>
                 <th scope="col" className="text-left">
@@ -225,7 +314,7 @@ export default function AnalyticsPanel({
                   <Legend>PnL vs capital</Legend>
                 </th>
                 <th scope="col" className="text-right">
-                  <Legend>#1 by PnL, ranked by return</Legend>
+                  <Legend>Leader&rsquo;s return rank</Legend>
                 </th>
               </tr>
             </thead>
@@ -241,10 +330,10 @@ export default function AnalyticsPanel({
                       </span>
                     </td>
                     <td className="text-right">
-                      <Rho value={d.pnlVsRoi} />
+                      <Rho value={d.pnlVsRoi} n={d.count} />
                     </td>
                     <td className="text-right">
-                      <Rho value={d.pnlVsCapital} />
+                      <Rho value={d.pnlVsCapital} n={d.count} />
                     </td>
                     <td className="text-right">
                       <span className="tabular-nums text-xs text-muted">
@@ -261,11 +350,33 @@ export default function AnalyticsPanel({
         </div>
 
         <p className="mt-3 text-xs text-muted">
-          Across the shorter windows, PnL tracks account size far better than it tracks
-          return — and the address at the top has the worst return on the board. The
-          all-time window is the exception: there the leader tops both, and the
-          relationship flips weakly positive. Rank correlation is Spearman&rsquo;s rho over
-          the same fifty rows the table shows.
+          In the {WINDOW_LABEL[focus.window]} window, among the {focus.count} largest
+          PnLs, PnL against capital is {rhoLabel(focus.pnlVsCapital, focus.count)} (
+          {fmtRho(focus.pnlVsCapital)}) and PnL against return is{" "}
+          {rhoLabel(focus.pnlVsRoi, focus.count)} ({fmtRho(focus.pnlVsRoi)})
+          {focus.pnlLeaderRoiRank !== null && (
+            <>
+              ; the PnL leader ranks #{focus.pnlLeaderRoiRank} of {focus.count} by return
+            </>
+          )}
+          .
+          {comparable.length > 0 && (
+            <>
+              {" "}
+              PnL tracks capital more closely than return in {capitalCloser} of{" "}
+              {plural(comparable.length, "window", "windows")}.
+            </>
+          )}{" "}
+          The scoping matters: a sample truncated at the {focus.count} largest PnLs
+          mechanically favours capital over return, so this is a statement about the top
+          of the board, not about the board.
+        </p>
+        <p className="mt-2 text-xs text-muted">
+          Rank correlation is Spearman&rsquo;s rho over the same rows the table shows. At
+          n&nbsp;={" "}
+          {focus.count}, |rho| below {rhoNoiseFloor(focus.count).toFixed(2)} is within
+          what that many ranks produce by chance, so nothing under it is given a
+          direction.
         </p>
       </Panel>
 
@@ -287,32 +398,41 @@ export default function AnalyticsPanel({
             preserveAspectRatio="none"
             className="hl-curve h-24 w-full sm:flex-1"
             role="img"
-            aria-label={
-              focusConc
-                ? `Cumulative profit share for the ${WINDOW_LABEL[focus.window]} window: the top address holds ${formatShare(focusConc.topShare)} and the top five hold ${formatShare(focusConc.top5Share)} of the window total.`
-                : "Cumulative profit share"
-            }
+            // All four curves are drawn, so all four are described. The label used to
+            // cover only the focused window, leaving three lines with no text at all.
+            aria-label={`Cumulative share of each window's profit, richest address first. ${present
+              .map((w) => {
+                const c = conc.get(w);
+                return `${WINDOW_LABEL[w]}: top address ${formatShare(c?.topShare ?? null)}, top five ${formatShare(c?.top5Share ?? null)}`;
+              })
+              .join("; ")}. The ${WINDOW_LABEL[focus.window]} window is emphasised.`}
           >
-            {/* Perfect-equality diagonal: what the curve would be if all fifty
-                addresses had earned the same. The gap to it IS the concentration. */}
+            {/* Perfect-equality diagonal: what the curve would be if every address in
+                the window had earned the same. The gap to it IS the concentration.
+                Drawn in --muted because --engrave-lo measured 1.11:1 on dark, which
+                is not a reference line anyone can see. */}
             <line
               x1="0"
               y1={CURVE_H}
               x2={CURVE_W}
               y2="0"
               className="hl-curve-equality"
+              style={{ stroke: "var(--muted)" }}
               vectorEffect="non-scaling-stroke"
             />
             {present.map((w) => {
               const c = conc.get(w);
               const d = c ? curvePath(c.curve, CURVE_W, CURVE_H) : "";
               if (!d) return null;
+              const isFocus = w === focus.window;
               return (
                 <path
                   key={w}
                   d={d}
                   className="hl-curve-line"
-                  data-focus={w === focus.window}
+                  data-focus={isFocus}
+                  strokeDasharray={WINDOW_DASH[w]}
+                  style={{ opacity: isFocus ? 1 : UNFOCUSED_OPACITY }}
                   vectorEffect="non-scaling-stroke"
                 />
               );
@@ -322,14 +442,31 @@ export default function AnalyticsPanel({
           <dl className="grid grid-cols-2 gap-x-4 gap-y-2 sm:w-56 sm:shrink-0">
             {present.map((w) => {
               const c = conc.get(w)!;
+              const isFocus = w === focus.window;
               return (
                 <div key={w} className="min-w-0">
                   <dt>
-                    <span
-                      className="hl-curve-key"
-                      data-focus={w === focus.window}
+                    {/* An actual line, not a coloured block: the swatch has to carry
+                        the same dash pattern as the curve it names, and the only way
+                        to guarantee that is to draw it the same way. */}
+                    <svg
+                      className="mr-1.5 inline-block align-middle"
+                      width="16"
+                      height="4"
+                      viewBox="0 0 16 4"
                       aria-hidden
-                    />
+                    >
+                      <line
+                        x1="0"
+                        y1="2"
+                        x2="16"
+                        y2="2"
+                        stroke={isFocus ? "var(--accent)" : "var(--legend)"}
+                        strokeWidth={isFocus ? 3 : 2}
+                        strokeDasharray={WINDOW_DASH[w]}
+                        opacity={isFocus ? 1 : UNFOCUSED_OPACITY}
+                      />
+                    </svg>
                     <span className="font-mono text-[10px] tracking-[0.12em] text-[var(--legend)]">
                       {WINDOW_LABEL[w]}
                     </span>
@@ -346,26 +483,33 @@ export default function AnalyticsPanel({
 
         <p className="mt-3 text-xs text-muted">
           Each line is the cumulative share of a window&rsquo;s total profit, richest
-          address first; the straight diagonal is what perfect equality would look
-          like. Concentration is not stable — one address holds{" "}
-          {formatShare(conc.get("7d")?.topShare ?? null)} of the 7-day total but only{" "}
-          {formatShare(conc.get("allTime")?.topShare ?? null)} of the all-time total.
+          address first; the straight diagonal is what perfect equality would look like.
+          {shareHi && shareLo && shareHi.window !== shareLo.window ? (
+            <>
+              {" "}
+              Concentration is not stable across windows: one address holds{" "}
+              {formatShare(shareHi.share)} of the {WINDOW_LABEL[shareHi.window]} total and{" "}
+              {formatShare(shareLo.share)} of the {WINDOW_LABEL[shareLo.window]} total.
+            </>
+          ) : null}
         </p>
       </Panel>
 
       {/* ── 3. Churn ────────────────────────────────────────────────────────── */}
       <Panel
-        title="How much the top fifty is the same fifty"
+        title={`How much the top ${boardSize} is the same ${boardSize}`}
         aside={
           <Legend>
-            {churn.persistent.length} of 50 in all {present.length} windows
+            {plural(churn.persistent.length, "address", "addresses")} in all{" "}
+            {plural(present.length, "window", "windows")}
           </Legend>
         }
       >
-        <div className="overflow-x-auto">
+        <div className="hl-scroll-x overflow-x-auto">
           <table className="hl-matrix">
             <caption className="sr-only">
-              Number of addresses shared between each pair of time windows, out of fifty.
+              Number of addresses shared between each pair of time windows; the diagonal
+              is each window against itself.
             </caption>
             <thead>
               <tr>
@@ -403,19 +547,24 @@ export default function AnalyticsPanel({
         </div>
 
         <p className="mt-3 text-xs text-muted">
-          Only {churn.persistent.length} addresses hold a place in every window, and the
-          30-day and all-time boards share just{" "}
-          {churn.overlap[overlapKey("30d", "allTime")] ?? 0}. The leaderboard renders one
-          window at a time, so this churn is invisible in the view it belongs to.
+          {plural(churn.persistent.length, "address holds", "addresses hold")} a place in
+          every window
+          {monthlyOverlap !== null && (
+            <>, and the 30-day and all-time boards share {monthlyOverlap}</>
+          )}
+          . The leaderboard renders one window at a time, so this churn is invisible in
+          the view it belongs to.
         </p>
       </Panel>
 
-      {/* ── 4. The zero-reported-volume cohort ──────────────────────────────── */}
+      {/* ── 4. The zero-perpetuals-volume cohort ────────────────────────────── */}
       <Panel
-        title="Addresses reporting no volume"
+        title="Addresses with no perpetuals volume"
         aside={<Legend>{WINDOW_LABEL[focus.window]} window</Legend>}
       >
-        <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3">
+        {/* A <dl>, because Cell emits a dt/dd pair and this grid was a plain div —
+            three term/definition pairs with no list to belong to. */}
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3">
           <Cell label="Addresses">
             {focusCohort.count} of {focus.count}
           </Cell>
@@ -423,29 +572,31 @@ export default function AnalyticsPanel({
             {formatCurrency(focusCohort.pnl, { compact: true, showSign: true })}
           </Cell>
           <Cell label="Share of window total">{formatShare(focusCohort.share)}</Cell>
-        </div>
+        </dl>
         <p className="mt-3 text-xs text-muted">
-          Upstream reports volume as exactly zero for {focusCohort.count} of these fifty,
-          and those addresses carry {formatShare(focusCohort.share)} of the window&rsquo;s
-          profit. Read that as <em>reported</em> volume: a zero here is as likely to mean
-          upstream published no figure as it is to mean the address did not trade, and
-          the two are not the same claim. It is the reason the board&rsquo;s volume column
-          reads <span className="font-mono text-[10px] tracking-[0.16em]">none</span>{" "}
-          rather than $0.00.
+          Volume here is perpetuals volume. The board&rsquo;s PnL and account value also
+          mark spot holdings to market, so an address can post a large PnL in a window
+          without a single perp trade.
+          {focusCohort.count > focus.count / 2 && (
+            <>
+              {" "}
+              In the {WINDOW_LABEL[focus.window]} window that is most of the board:{" "}
+              {focusCohort.count} of {focus.count}, carrying{" "}
+              {formatShare(focusCohort.share)} of the profit.
+            </>
+          )}
         </p>
       </Panel>
     </div>
   );
 }
 
-function Rho({ value }: { value: number | null }) {
+function Rho({ value, n }: { value: number | null; n: number }) {
   return (
     <span className="inline-flex items-baseline gap-1.5">
-      <span className="tabular-nums text-xs text-foreground">
-        {value === null ? "—" : (value > 0 ? "+" : "") + value.toFixed(2)}
-      </span>
+      <span className="tabular-nums text-xs text-foreground">{fmtRho(value)}</span>
       <span className="font-mono text-[9px] uppercase tracking-[0.12em] text-[var(--legend)]">
-        {rhoLabel(value)}
+        {rhoLabel(value, n)}
       </span>
     </span>
   );

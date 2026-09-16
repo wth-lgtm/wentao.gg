@@ -20,6 +20,15 @@ import { useTrader } from "./hooks/useTrader";
 import { useReSeat } from "./hooks/useReSeat";
 import { formatAddress } from "./lib/formatters";
 
+// The tabs that describe one trader. The Inspecting strip and the per-trader fetch
+// were both gated on `!== "leaderboard"`, which put "INSPECTING 0x5b5d…" directly
+// above the board-wide Analytics panels — implying they were scoped to that address —
+// gave that tab a CLEAR button that yanked the reader back to the leaderboard, and
+// fired an unused GET /api/hl-trader (12 positions + 100 fills) that nothing there
+// reads. Positions → Analytics → Positions now re-fetches, which is exactly what
+// Positions → Leaderboard → Positions already did.
+const TRADER_TABS: readonly Tab[] = ["positions", "trades"];
+
 export default function HLWhaleTracker() {
   const [activeTab, setActiveTab] = useState<Tab>("leaderboard");
   const [focused, setFocused] = useState<string | null>(null);
@@ -39,7 +48,7 @@ export default function HLWhaleTracker() {
     refresh,
   } = useLeaderboard(timePeriod);
 
-  const trader = useTrader(activeTab === "leaderboard" ? null : focused);
+  const trader = useTrader(TRADER_TABS.includes(activeTab) ? focused : null);
 
   // Selecting a row jumps straight to its positions — the tab is the destination,
   // so making the click do nothing visible would be the wrong affordance.
@@ -105,7 +114,7 @@ export default function HLWhaleTracker() {
 
           {/* The focused address lives HERE, once, where it cannot fight the tab
               layout. Not uppercased — a hex address rendered 0XA822 is just wrong. */}
-          {focused && activeTab !== "leaderboard" && (
+          {focused && TRADER_TABS.includes(activeTab) && (
             <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-2">
               <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--legend)]">
                 Inspecting
