@@ -77,6 +77,11 @@ export interface MarginSummary {
   totalNtlPos: number | null;
   totalMarginUsed: number | null;
   withdrawable: number | null;
+  /** Equity the account must keep to avoid liquidation. Lives at the TOP level of
+   * clearinghouseState, not inside marginSummary (live 7d #1: 16,832,367.54 against
+   * 108.44M of equity, i.e. 15.5%), and it is the only figure in the payload that
+   * says how close the account is to the edge. */
+  crossMaintenanceMarginUsed: number | null;
 }
 
 export interface TraderSnapshot {
@@ -187,6 +192,9 @@ export function parseMargin(raw: unknown): MarginSummary | null {
     totalNtlPos: num(m.totalNtlPos),
     totalMarginUsed: num(m.totalMarginUsed),
     withdrawable: num((raw as Record<string, unknown>).withdrawable),
+    crossMaintenanceMarginUsed: num(
+      (raw as Record<string, unknown>).crossMaintenanceMarginUsed
+    ),
   };
 }
 

@@ -1305,3 +1305,105 @@ input:focus {
      row stuck at opacity 0. */
   .hl-tape-row { animation: none; opacity: 1; transform: none; }
 }
+
+/* ── The ledger (Positions) ───────────────────────────────────────────────────
+   Positions was the one tab still speaking a different language: twelve rounded,
+   bordered cards nested inside a rounded, bordered card, visibly softer and taller
+   than the board or the tape beside it. These rules put it back in the hull — the
+   same two-line engraved rule (a groove below the surface, a lit lip catching the
+   upper-right key light) that .hl-board and .hl-tape already cut.
+
+   No animation here on purpose. The board re-seats because ranks move and the tape
+   reveals because fills arrive; a position list does neither — it is a standing
+   inventory, so it is machined, not staged. */
+.hl-pos-table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+.hl-pos-table tbody td {
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--engrave-lo);
+  box-shadow: inset 0 1px 0 var(--engrave-hi);
+  vertical-align: baseline;
+}
+.hl-pos-table thead th {
+  border-bottom: 1px solid var(--engrave-lo);
+}
+.hl-pos-row {
+  transition: background-color var(--dur-fast) var(--ease-entrance);
+}
+.hl-pos-row:hover {
+  background: var(--card-hover);
+}
+
+/* .hl-plate is sized for a two-digit berth number; a leverage plate carries
+   "5× CROSS", so it is let out to its content and kept on one line — nine columns
+   have to fit the 862px panel and a wrapped plate cost two extra row heights. */
+.hl-pos-lev {
+  min-width: 0;
+  white-space: nowrap;
+  text-transform: uppercase;
+}
+
+/* The same rule, for the stacked form below sm and for the spot list. A slab is a
+   row separated by cut metal, NOT a card: the card-in-card stack is what made this
+   tab read as a different instrument. */
+.hl-pos-slab {
+  border-bottom: 1px solid var(--engrave-lo);
+  box-shadow: inset 0 1px 0 var(--engrave-hi);
+}
+.hl-pos-slab:last-child {
+  border-bottom: 0;
+}
+
+/* Divider between the account figures and the roll-up computed from the rows: one
+   engraved line, because they are two readings of one account rather than two
+   sections. */
+.hl-pos-rule {
+  height: 1px;
+  margin: 0.875rem 0;
+  background: var(--engrave-lo);
+  box-shadow: 0 1px 0 var(--engrave-hi);
+}
+
+/* Dust drawer. The default disclosure triangle is the one glyph on this page that is
+   not ours, so it is replaced by a caret that turns on the compositor. */
+.hl-pos-dust > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1rem;
+  cursor: pointer;
+  list-style: none;
+  box-shadow: inset 0 1px 0 var(--engrave-hi);
+}
+.hl-pos-dust > summary::-webkit-details-marker {
+  display: none;
+}
+.hl-pos-dust > summary:hover {
+  background: var(--card-hover);
+}
+/* The summary is a full-bleed flex box flush with the section's padding box, and the
+   global ring at `outline-offset: 2px` paints OUTSIDE that box — where the section's
+   own corner clip eats its left, right and bottom edges. Inset it so all four edges
+   land on the plate. */
+.hl-pos-dust > summary:focus-visible {
+  outline-offset: -2px;
+}
+.hl-pos-caret {
+  font-size: 0.5rem;
+  color: var(--legend);
+  transition: transform var(--dur-fast) var(--ease-entrance);
+}
+.hl-pos-dust[open] > summary .hl-pos-caret {
+  transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* The caret still has to point the right way, so the rotation stays and only the
+     travel goes. */
+  .hl-pos-caret { transition: none; }
+  .hl-pos-row { transition: none; }
+}
