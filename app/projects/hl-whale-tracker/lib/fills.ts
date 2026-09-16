@@ -7,21 +7,28 @@
 //  1. A "fill" is not an order. Sampling fourteen top-50 addresses, one whale's 100
 //     most recent fills were THREE actual orders sliced into pieces — 58 consecutive
 //     ETH shorts of 0.0157 each. Rendering raw fills there means printing one
-//     near-identical row fifty-eight times. Compression measured 5x to 33x.
-//  2. `dir` is a structured pair, not a label. The eight observed values decompose
-//     cleanly into an action and a side, which lets the UI carry direction with
-//     glyph + word instead of a string nobody can scan.
+//     near-identical row fifty-eight times. Compression measured 5x to 33x. WHICH
+//     fills were one order is a fact upstream ships as `oid`, not something to infer:
+//     the 7d #1 address's hundred fills carry 73 distinct oids, and the time
+//     heuristic that used to stand in for them printed ten rows saying "one order".
+//  2. `dir` is a structured pair, not a label. The observed values decompose cleanly
+//     into an action and a side, which lets the UI carry direction with glyph + word
+//     instead of a string nobody can scan. The vocabulary is Hyperliquid's and it
+//     GROWS — settlement and dust-conversion fills were live and unmapped — so an
+//     unmapped dir now reads its realised PnL off the data instead of assuming there
+//     is none.
 //  3. Fees arrive in DIFFERENT CURRENCIES — USDC, HYPE and UZEC across one sample.
 //     A single summed fee number would add unlike units and state a false total.
 
 import { Fill, num } from "./trader";
 
-// How far apart two fills can be and still belong to the same order. Slices of one
-// order land within milliseconds of each other; a minute is loose enough to absorb a
-// slow book without merging two genuinely separate decisions.
+// How far apart two fills can be and still belong to the same order, for the fills
+// that arrive with no order id — see groupFills, where this is the fallback and not
+// the rule. Slices of one order land within milliseconds of each other; a minute is
+// loose enough to absorb a slow book without merging two genuinely separate decisions.
 const SAME_ORDER_WINDOW_MS = 60_000;
 
-export type FillAction = "OPEN" | "CLOSE" | "FLIP" | "SPOT" | "OTHER";
+export type FillAction = "OPEN" | "CLOSE" | "FLIP" | "SPOT" | "SETTLE" | "OTHER";
 export type FillSide = "LONG" | "SHORT" | "BUY" | "SELL" | "NONE";
 
 /**
@@ -29,7 +36,8 @@ export type FillSide = "LONG" | "SHORT" | "BUY" | "SELL" | "NONE";
  * documentation — the top fifty trade all three:
  *
  *   PERP    plain ticker, e.g. "BTC", "ETH", "WLD"
- *   SPOT    a pair INDEX, e.g. "@107", which is meaningless until resolved
+ *   SPOT    a pair INDEX, e.g. "@107", which is meaningless until resolved, or the
+ *           one canonically NAMED pair, "PURR/USDC"
  *   EQUITY  an "xyz:"-prefixed tokenised stock, e.g. "xyz:GOOGL", "xyz:NVDA"
  *
  * One sampled address traded nothing but equity perps, so collapsing these into one
@@ -40,7 +48,10 @@ export type Venue = "PERP" | "SPOT" | "EQUITY";
 const EQUITY_PREFIX = "xyz:";
 
 export function venueOf(coin: string): Venue {
-  if (coin.startsWith("@")) return "SPOT";
+  // A slash is as much a spot marker as the "@": universe[0] is the one pair upstream
+  // writes as a name rather than an index, and spot fills report the universe name,
+  // so a PURR/USDC fill arrived with a slash and was badged a perp.
+  if (coin.startsWith("@") || coin.includes("/")) return "SPOT";
   if (coin.startsWith(EQUITY_PREFIX)) return "EQUITY";
   return "PERP";
 }
@@ -63,11 +74,25 @@ export interface DirFacets {
   side: FillSide;
   /** Closing PnL only exists once a position is reduced or reversed. */
   realises: boolean;
+  /**
+   * Column word for the rows where the action alone would mislabel them. Deliberately
+   * short: .hl-dir is 10px nowrap tracked mono, so printing the raw dir ("SPOT DUST
+   * CONVERSION") would widen the column for every other row.
+   */
+  word?: string;
 }
 
-// The eight values actually observed upstream, by frequency over 1,300 fills:
+// The values actually observed upstream, by frequency over 1,300 fills:
 // Open Short 551, Close Short 382, Open Long 140, Close Long 89, Buy 69,
 // Long > Short 34, Short > Long 34, Sell 1.
+//
+// Those eight were taken for the whole vocabulary, and everything else fell through
+// to OTHER with realises:false — which silently deleted money. A sweep of 105,931 raw
+// fills across 70 board addresses found five more, four of which realise: Settlement
+// 25, Spot Dust Conversion 25, Liquidated Isolated Short 2, Liquidated Isolated Long
+// 2, Auto-Deleveraging 1. One address on the board (0xbdfa4f44…) held ten Settlement
+// fills summing to -$14,018.65, so its Realised stat read -$23.4K over "4 closes"
+// where the truth was -$37.4K over 14.
 const DIR_TABLE: Record<string, DirFacets> = {
   "Open Long": { action: "OPEN", side: "LONG", realises: false },
   "Open Short": { action: "OPEN", side: "SHORT", realises: false },
@@ -78,25 +103,79 @@ const DIR_TABLE: Record<string, DirFacets> = {
   "Short > Long": { action: "FLIP", side: "LONG", realises: true },
   Buy: { action: "SPOT", side: "BUY", realises: false },
   Sell: { action: "SPOT", side: "SELL", realises: false },
+  // A forced close is still a close, and it realises. The dir does NOT say whose
+  // liquidation it was — 951 of 956 fills carrying a `liquidation` object have a
+  // plain Close/Open dir — so these facets claim only what the string itself says.
+  "Liquidated Isolated Long": { action: "CLOSE", side: "LONG", realises: true, word: "LIQ" },
+  "Liquidated Isolated Short": { action: "CLOSE", side: "SHORT", realises: true, word: "LIQ" },
+  // Auto-deleveraging closes a position the exchange chose, and the string carries no
+  // side. ADL is the exchange's own word for it.
+  "Auto-Deleveraging": { action: "CLOSE", side: "NONE", realises: true, word: "ADL" },
+  // Settlement is neither an open nor a close: a market resolved and the position was
+  // booked out. Every one observed carried a non-zero closedPnl.
+  Settlement: { action: "SETTLE", side: "NONE", realises: true },
+  // A dust sweep is a spot trade, and spot fills carry a token-denominated closedPnl
+  // that is not realised perp PnL, so it stays out of the total like Buy and Sell.
+  "Spot Dust Conversion": { action: "SPOT", side: "NONE", realises: false, word: "DUST" },
 };
 
+// The cross-margin siblings of the two isolated liquidation dirs, matched by SHAPE
+// because their exact wording has not been observed and the cost of missing one is a
+// realised loss dropped from the total.
+const LIQUIDATED_RE = /^Liquidated\b.*\b(Long|Short)$/;
+
 /**
- * Decompose upstream's `dir` string. Unknown values degrade to a neutral facet
- * rather than throwing: the vocabulary belongs to Hyperliquid and may grow, and a
- * new order type should render plainly, not blank the table.
+ * Decompose upstream's `dir` string. Unknown values degrade to a neutral facet rather
+ * than throwing: the vocabulary belongs to Hyperliquid and does grow, and a new order
+ * type should render plainly, not blank the table.
+ *
+ * `closedPnl` is what stops that graceful degradation from deleting money. An unmapped
+ * dir used to be ASSUMED not to realise, which dropped its PnL from the row and from
+ * the total — a wrong figure shown with full confidence. Whether a fill realised is a
+ * fact the fill carries: a non-zero closedPnl on an unmapped dir means money moved. A
+ * 0 keeps the meaning it has on an open — "not applicable", not "broke even".
  */
-export function dirFacets(dir: string): DirFacets {
-  return DIR_TABLE[dir] ?? { action: "OTHER", side: "NONE", realises: false };
+export function dirFacets(dir: string, closedPnl: number | null = null): DirFacets {
+  const known = DIR_TABLE[dir];
+  if (known) return known;
+
+  const liquidated = LIQUIDATED_RE.exec(dir);
+  if (liquidated) {
+    return {
+      action: "CLOSE",
+      side: liquidated[1] === "Long" ? "LONG" : "SHORT",
+      realises: true,
+      word: "LIQ",
+    };
+  }
+
+  return {
+    action: "OTHER",
+    side: "NONE",
+    realises: closedPnl !== null && closedPnl !== 0,
+  };
 }
 
 export interface Order {
-  /** Stable within one snapshot: the newest fill's time plus the coin and dir. */
+  /**
+   * Unique within one snapshot. The group INDEX is what makes it unique: fills
+   * settled in one block share a `time` (43 adjacent same-millisecond pairs in the
+   * live hundred), so a basket close across markets produced two identical
+   * time+coin+dir keys and React reused the wrong row.
+   */
   key: string;
   coin: string;
   label: string;
   venue: Venue;
   dir: string;
   facets: DirFacets;
+  /** Upstream's id for this order: `twapId` when it was a TWAP, else `oid`. */
+  orderId: number | null;
+  /**
+   * True when this row is an order upstream named, false when the time fallback drew
+   * it. The panel only promises "one order" for the rows that can keep the promise.
+   */
+  byId: boolean;
   /** Count of raw fills collapsed into this order. Always shown when > 1. */
   fills: number;
   /** Summed size in coin units, or null if any slice failed to parse. */
@@ -118,11 +197,25 @@ export interface Order {
 export type LabelledFill = Fill & { label?: string };
 
 /**
- * Collapse consecutive fills that share a coin and direction into single orders.
+ * Collapse consecutive fills that belong to one order into single rows.
  *
- * Only CONSECUTIVE runs merge. Grouping globally by coin+dir would fuse two
- * decisions made hours apart into one line and invent an order that never existed.
- * Upstream delivers newest-first and that order is preserved.
+ * The key is the ORDER ID upstream ships — `twapId` first, so a TWAP's many child
+ * oids read as the single intent they were, then `oid`. This replaced a time
+ * heuristic, and the difference is not academic: on the 7d #1 address the heuristic
+ * drew 10 rows over 43 real orders and told the visitor each row was "one order"
+ * (one ×24 row was 5 oids, one ×11 row was 10 separate ETH orders in 27 s); another
+ * board address rendered all 100 fills — 51 orders over 9.4 minutes — as a single
+ * "×100" line with one clock time.
+ *
+ * Only CONSECUTIVE runs merge, even when the id matches. Grouping globally would
+ * fuse two decisions made hours apart into one line and invent an order that never
+ * existed; across 500 sampled fills no oid ever reappeared after a different one, so
+ * this costs nothing real. Upstream delivers newest-first and that order is preserved.
+ *
+ * The 60 s window survives only as the FALLBACK for fills that carry no id, and it is
+ * now measured from the group's NEWEST fill rather than the preceding one. Against the
+ * preceding fill the window slid: twenty fills 50 s apart merged into one order
+ * spanning 950 s, under a rule the panel described as "within a minute".
  */
 export function groupFills(fills: LabelledFill[]): Order[] {
   const out: Order[] = [];
@@ -130,19 +223,26 @@ export function groupFills(fills: LabelledFill[]): Order[] {
   for (const f of fills) {
     const prev = out[out.length - 1];
     const t = f.time;
+    const id = f.twapId ?? f.oid;
     const contiguous =
       prev !== undefined &&
       prev.coin === f.coin &&
       prev.dir === f.dir &&
-      // A null timestamp cannot be proven contiguous, so it starts a new group.
-      t !== null &&
-      prev.earliest !== null &&
-      Math.abs(prev.earliest - t) <= SAME_ORDER_WINDOW_MS;
+      (prev.orderId !== null || id !== null
+        ? // An id on either side settles it. An identified fill is never absorbed into
+          // an unidentified group, which would claim an order upstream did not report.
+          prev.orderId === id
+        : // A null timestamp cannot be proven contiguous, so it starts a new group.
+          t !== null &&
+          prev.latest !== null &&
+          Math.abs(prev.latest - t) <= SAME_ORDER_WINDOW_MS);
 
     if (!contiguous) {
-      const facets = dirFacets(f.dir);
+      const facets = dirFacets(f.dir, f.closedPnl);
       out.push({
-        key: `${t ?? out.length}-${f.coin}-${f.dir}`,
+        key: `${out.length}-${id ?? t ?? "na"}-${f.coin}-${f.dir}`,
+        orderId: id,
+        byId: id !== null,
         coin: f.coin,
         label: coinLabel(f.coin, f.label),
         venue: venueOf(f.coin),
@@ -169,6 +269,12 @@ export function groupFills(fills: LabelledFill[]): Order[] {
       prev.notional !== null && f.sz !== null && f.px !== null
         ? prev.notional + f.sz * f.px
         : null;
+    // Only an UNMAPPED dir can disagree with its own group about realising: mapped
+    // facets come from the dir, which the group shares. When a later slice of such a
+    // group realises, the group has to start summing or the rest of its PnL is lost.
+    if (!prev.facets.realises && dirFacets(f.dir, f.closedPnl).realises) {
+      prev.facets = { ...prev.facets, realises: true };
+    }
     if (prev.facets.realises) {
       prev.closedPnl =
         prev.closedPnl !== null && f.closedPnl !== null
@@ -211,12 +317,16 @@ export function feeTotals(fills: LabelledFill[]): Record<string, number> {
  * `closedPnl` is 0 on every opening fill, where it means "not applicable" rather
  * than "broke even" — six of fourteen sampled addresses had zero realising fills in
  * their window. `count` lets the caller say so instead of printing a hollow $0.00.
+ *
+ * The fill's own closedPnl is passed to dirFacets so that a dir this file has never
+ * seen still contributes the money it moved. Settlement fills alone were -$14,018.65
+ * missing from one board address's total.
  */
 export function realisedTotal(fills: LabelledFill[]): { total: number; count: number } {
   let total = 0;
   let count = 0;
   for (const f of fills) {
-    if (!dirFacets(f.dir).realises || f.closedPnl === null) continue;
+    if (!dirFacets(f.dir, f.closedPnl).realises || f.closedPnl === null) continue;
     total += f.closedPnl;
     count += 1;
   }
@@ -236,7 +346,15 @@ export function fillSpan(fills: LabelledFill[]): { from: number; to: number } | 
   return Number.isFinite(from) && Number.isFinite(to) ? { from, to } : null;
 }
 
-/** Clock time in the viewer's own zone. Fills span minutes, so seconds matter. */
+/**
+ * Clock time in the viewer's own zone. Fills span minutes, so seconds matter.
+ *
+ * Viewer-local rather than UTC because Hyperliquid's own UI is local and this is the
+ * only wall clock on the page. That makes it the caller's job to say WHICH clock and
+ * WHICH day, which is what `formatZone`, `formatDate` and `dayKey` below are for: the
+ * live 7d #1 tape ran 22:45Z → 03:59Z, so a UTC viewer read a header whose end was
+ * earlier than its start and a column that stepped from 00:xx to 23:xx unannounced.
+ */
 export function formatClock(ms: number | null): string {
   if (ms === null) return "—";
   return new Date(ms).toLocaleTimeString("en-US", {
@@ -247,13 +365,76 @@ export function formatClock(ms: number | null): string {
   });
 }
 
-/** Compact elapsed label: 8s, 4m, 3h, 2d. */
+/**
+ * Compact elapsed label: 8s, 1m 29s, 5h 31m, 1d 12h.
+ *
+ * FLOORED, and two units below a day. Rounding at every tier overstated the span it
+ * was printed beside: a 5 h 31 m tape read "6H OF ACTIVITY" next to two
+ * second-resolution clocks, and 36 h read "2d". The second unit is dropped when it is
+ * zero, so an exact span stays exact ("2h", not "2h 0m").
+ */
 export function formatElapsed(fromMs: number, nowMs: number): string {
-  const s = Math.max(0, Math.round((nowMs - fromMs) / 1000));
+  const s = Math.max(0, Math.floor((nowMs - fromMs) / 1000));
   if (s < 60) return `${s}s`;
-  if (s < 3600) return `${Math.round(s / 60)}m`;
-  if (s < 86_400) return `${Math.round(s / 3600)}h`;
-  return `${Math.round(s / 86_400)}d`;
+  const pair = (big: number, unit: string, small: number, smallUnit: string) =>
+    small === 0 ? `${big}${unit}` : `${big}${unit} ${small}${smallUnit}`;
+  if (s < 3600) return pair(Math.floor(s / 60), "m", s % 60, "s");
+  if (s < 86_400) return pair(Math.floor(s / 3600), "h", Math.floor((s % 3600) / 60), "m");
+  return pair(Math.floor(s / 86_400), "d", Math.floor((s % 86_400) / 3600), "h");
+}
+
+/**
+ * The viewer-zone calendar day, as an opaque key.
+ *
+ * Only ever compared, never shown — which is why its format does not matter and its
+ * ZONE does. The tape is newest-first, so when the viewer's midnight falls inside the
+ * span the clock column steps 03:59 … 00:12 … 23:58 and nothing says a day passed.
+ */
+export function dayKey(ms: number | null): string | null {
+  if (ms === null) return null;
+  return new Date(ms).toLocaleDateString("en-US");
+}
+
+// Assembled from parts rather than taken from a locale pattern. en-GB orders the day
+// before the month but renders September as "Sept" — the one four-letter month, which
+// breaks a mono column — while en-US renders "Sep 15". Every en-US short month is
+// three letters, so the parts come from en-US and the order is imposed here.
+function dateParts(ms: number): { weekday: string; day: string; month: string } {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  }).formatToParts(new Date(ms));
+  const value = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  return { weekday: value("weekday"), day: value("day"), month: value("month") };
+}
+
+/** "15 Sep" — for the header, which has to carry two dates when the tape crosses one. */
+export function formatDate(ms: number | null): string {
+  if (ms === null) return "—";
+  const { day, month } = dateParts(ms);
+  return `${day} ${month}`;
+}
+
+/** "Tue 15 Sep" — the full-width row that marks a day change inside the tape. */
+export function formatDayLabel(ms: number | null): string {
+  if (ms === null) return "—";
+  const { weekday, day, month } = dateParts(ms);
+  return `${weekday} ${day} ${month}`;
+}
+
+/**
+ * The viewer's zone, to be named ONCE per panel.
+ *
+ * en-US short names are "PDT" for US-named zones and "GMT+2" elsewhere, never
+ * "UTC+1". Either form answers the only question the column raises — which clock am I
+ * reading — so the inconsistency is not worth a hand-rolled offset.
+ */
+export function formatZone(ms: number): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZoneName: "short",
+  }).formatToParts(new Date(ms));
+  return parts.find((p) => p.type === "timeZoneName")?.value ?? "";
 }
 
 /** Coin-unit size: large counts need no decimals, fractional ones need four. */
@@ -275,11 +456,25 @@ export function formatPrice(v: number | null): string {
   return `$${v.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
 }
 
-/** Fee amounts are small and multi-token, so the token travels with the number. */
+// Three digits is the resolution of the fee column, for every row in it.
+const FEE_DIGITS = 3;
+
+/**
+ * Fee amounts are small and multi-token, so the token travels with the number.
+ *
+ * ONE precision for the whole column. Picking the digits by magnitude with only a
+ * maximum set produced "0.29924 / 1.714 / 21 / 6.58 USDC" in a single right-aligned
+ * column, where the decimal points did not line up and every row asserted a different
+ * resolution. Below the column's resolution the value says so rather than rounding to
+ * a bare "0.000", which would read as free.
+ */
 export function formatFee(amount: number, token: string): string {
   const abs = Math.abs(amount);
-  const digits = abs >= 100 ? 2 : abs >= 1 ? 3 : 5;
-  return `${amount.toLocaleString("en-US", { maximumFractionDigits: digits })} ${token}`;
+  if (abs > 0 && abs < 0.0005) return `${amount < 0 ? "-" : ""}<0.001 ${token}`;
+  return `${amount.toLocaleString("en-US", {
+    minimumFractionDigits: FEE_DIGITS,
+    maximumFractionDigits: FEE_DIGITS,
+  })} ${token}`;
 }
 
 /**

@@ -138,8 +138,12 @@ export async function GET(
       margin: parseMargin(perp),
       positions: parsePositions(perp),
       spot: parseSpot(spotState),
-      // Trimmed deliberately: hash/oid/tid/cloid are wallet-identifying internals
-      // the UI never renders, so they are not echoed back to the browser.
+      // Trimmed deliberately, but not indiscriminately: hash/tid/cloid stay behind
+      // as internals the UI never renders. `oid` and `twapId` do ride along — they
+      // identify an ORDER, not a wallet (the wallet is already the URL), and they are
+      // what lets the tape say "one order" truthfully: the 7d #1 address's hundred
+      // most recent fills carry 73 distinct oids, which the time heuristic that stood
+      // in for them collapsed into ten rows.
       fills: parsedFills,
       fetchedAt: Date.now(),
     },
