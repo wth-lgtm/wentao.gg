@@ -27,11 +27,14 @@ const safeStorage = {
       return null;
     }
   },
-  set(key: string, value: string) {
+  // Reports whether the value actually landed, so the caller knows if it needs the
+  // in-memory fallback.
+  set(key: string, value: string): boolean {
     try {
       localStorage.setItem(key, value);
+      return true;
     } catch {
-      // Storage blocked — the choice still holds for this session via memoryTheme below.
+      return false;
     }
   },
 };
@@ -40,12 +43,15 @@ function isTheme(value: string | null): value is Theme {
   return value === "dark" || value === "light" || value === "system";
 }
 
-// The preference is an EXTERNAL store, not React state. Reading it in an effect and calling
-// setState (react-hooks/set-state-in-effect) meant every render before that effect resolved
-// to "dark", so light-theme visitors got a Moon→Sun icon flip and MatrixRain — keyed on
-// `light` — initialised twice.
+// The preference is an EXTERNAL store, not React state: reading it in an effect and calling
+// setState is the react-hooks/set-state-in-effect error this file used to carry. It does NOT
+// remove the dark-first first render — React must use the SERVER snapshot on the hydration
+// commit, so resolvedTheme is still "dark" there and a light-system visitor still gets one
+// Moon→Sun icon flip and one MatrixRain re-init. layout.tsx's anti-flash script is what
+// keeps the first PAINT correct and is still required.
 const listeners = new Set<() => void>();
-// Holds the choice when the write above was swallowed, so the toggle still works.
+// ONLY set when the write above was swallowed. Anything else and this would permanently
+// shadow localStorage, so a `storage` event from another tab could never change the theme.
 let memoryTheme: Theme | null = null;
 
 function subscribeTheme(onStoreChange: () => void) {
@@ -59,9 +65,11 @@ function subscribeTheme(onStoreChange: () => void) {
 }
 
 function getThemeSnapshot(): Theme {
-  if (memoryTheme) return memoryTheme;
+  // Storage first: once it is readable again its value is the truth, including whatever
+  // another tab just wrote.
   const stored = safeStorage.get(STORAGE_KEY);
-  return isTheme(stored) ? stored : "system";
+  if (isTheme(stored)) return stored;
+  return memoryTheme ?? "system";
 }
 
 function getServerThemeSnapshot(): Theme {
@@ -103,8 +111,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   }, [resolvedTheme]);
 
   const setTheme = useCallback((newTheme: Theme) => {
-    memoryTheme = newTheme;
-    safeStorage.set(STORAGE_KEY, newTheme);
+    // Clearing on success matters as much as setting on failure: a stale memoryTheme would
+    // outrank localStorage forever after.
+    memoryTheme = safeStorage.set(STORAGE_KEY, newTheme) ? null : newTheme;
     listeners.forEach((listener) => listener());
   }, []);
 

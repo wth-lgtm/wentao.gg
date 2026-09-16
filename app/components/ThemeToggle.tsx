@@ -5,11 +5,22 @@ import { useTheme } from "./ThemeProvider";
 import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
+const options = [
+  { value: "light" as const, label: "Light", icon: Sun },
+  { value: "dark" as const, label: "Dark", icon: Moon },
+  { value: "system" as const, label: "System", icon: Monitor },
+];
+
 export default function ThemeToggle() {
   const { theme, setTheme, resolvedTheme } = useTheme();
   const [isOpen, setIsOpen] = useState(false);
+  // Roving tabindex: one item is tabbable at a time and the arrows move it. role="menu"
+  // promises this keyboard model, so the roles and the behaviour ship together.
+  const [activeIndex, setActiveIndex] = useState(0);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
+  const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -21,30 +32,67 @@ export default function ThemeToggle() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Outside-mousedown was the only way out, so a keyboard user who opened the menu was
-  // stuck in it. Escape closes and hands focus back to the button that opened it.
+  // Focus follows the roving index — on open it lands on the checked option, after that on
+  // whatever the arrows picked.
   useEffect(() => {
     if (!isOpen) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      setIsOpen(false);
-      buttonRef.current?.focus();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [isOpen]);
+    itemRefs.current[activeIndex]?.focus();
+  }, [isOpen, activeIndex]);
 
-  const options = [
-    { value: "light" as const, label: "Light", icon: Sun },
-    { value: "dark" as const, label: "Dark", icon: Moon },
-    { value: "system" as const, label: "System", icon: Monitor },
-  ];
+  const closeMenu = (restoreFocus: boolean) => {
+    setIsOpen(false);
+    if (restoreFocus) buttonRef.current?.focus();
+  };
+
+  const openMenu = () => {
+    const checked = options.findIndex((o) => o.value === theme);
+    setActiveIndex(checked === -1 ? 0 : checked);
+    setIsOpen(true);
+  };
+
+  const onKeyDown = (event: React.KeyboardEvent) => {
+    if (!isOpen) return;
+    const last = options.length - 1;
+    switch (event.key) {
+      case "ArrowDown":
+        event.preventDefault();
+        setActiveIndex((i) => (i >= last ? 0 : i + 1));
+        break;
+      case "ArrowUp":
+        event.preventDefault();
+        setActiveIndex((i) => (i <= 0 ? last : i - 1));
+        break;
+      case "Home":
+        event.preventDefault();
+        setActiveIndex(0);
+        break;
+      case "End":
+        event.preventDefault();
+        setActiveIndex(last);
+        break;
+      case "Escape":
+        event.preventDefault();
+        closeMenu(true);
+        break;
+      // Tab is deliberately NOT handled here: unmounting the focused item inside the
+      // keydown would strip the browser of its starting point and drop focus on <body>.
+      // The focusout below closes the menu once the browser has already moved focus on.
+    }
+  };
+
+  // Focus leaving the popup — by Tab, Shift+Tab or anything else — closes it, so the menu
+  // can never keep floating with aria-expanded="true" behind a focus ring somewhere else.
+  const onFocusOut = (event: React.FocusEvent) => {
+    const next = event.relatedTarget as Node | null;
+    if (next && menuRef.current?.contains(next)) return;
+    setIsOpen(false);
+  };
 
   return (
-    <div ref={dropdownRef} className="relative">
+    <div ref={dropdownRef} className="relative" onKeyDown={onKeyDown}>
       <button
         ref={buttonRef}
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={() => (isOpen ? closeMenu(false) : openMenu())}
         className="p-2 text-muted hover:text-foreground transition-colors rounded-lg hover:bg-card"
         aria-label="Toggle theme"
         aria-haspopup="menu"
@@ -62,15 +110,19 @@ export default function ThemeToggle() {
             transition={{ duration: 0.15 }}
             className="absolute right-0 top-full mt-2 w-36 bg-card border border-border rounded-xl shadow-lg overflow-hidden z-50"
           >
-            <div className="p-1" role="menu" aria-label="Theme">
-              {options.map((option) => (
+            <div ref={menuRef} className="p-1" role="menu" aria-label="Theme" onBlur={onFocusOut}>
+              {options.map((option, index) => (
                 <button
                   key={option.value}
+                  ref={(el) => {
+                    itemRefs.current[index] = el;
+                  }}
                   role="menuitemradio"
                   aria-checked={theme === option.value}
+                  tabIndex={index === activeIndex ? 0 : -1}
                   onClick={() => {
                     setTheme(option.value);
-                    setIsOpen(false);
+                    closeMenu(true);
                   }}
                   className={`w-full flex items-center gap-2 px-3 py-2 text-sm rounded-lg transition-colors ${
                     theme === option.value
