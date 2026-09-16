@@ -341,15 +341,23 @@ export default function LeaderboardTable({
                 positions held, not traded", cut to what a 112px column holds; the
                 sentence below carries the whole of it. */}
             <div
-              // Re-keyed on a PERIOD commit so the plate re-stamps. .hl-block's entrance
-              // is `animation: hlBlockStamp` (globals.css), which runs on mount — and a
+              // Keyed on the WINDOW so the plate re-stamps. .hl-block's entrance is
+              // `animation: hlBlockStamp` (globals.css), which runs on mount — and a
               // period switch keeps the same element while its rows dissolve, travel and
               // seat underneath it, so the plate slid to a new height and a new count
               // without a stamp, the one still thing in a commit that is all motion.
-              // Only `period`: a sort-field commit that keeps the block at all is a
-              // re-sort WITHIN the volume sort, where the plate is describing the same
-              // rows it already described, and a refresh is not a commit.
-              key={change.kind === "period" ? `block-${change.seq}` : "block"}
+              //
+              // The window, not `change`: keying on `change.kind === "period" ? seq :
+              // "block"` flipped between two NAMESPACES, so the first sort or direction
+              // toggle after a period commit moved the key from "block-7" back to
+              // "block" and re-stamped the plate on exactly the commits the paragraph
+              // below says must not re-stamp it. `timePeriod` changes once per window
+              // switch and never otherwise, which is the whole rule in one value.
+              //
+              // A sort-field commit that keeps the block at all is a re-sort WITHIN the
+              // volume sort, where the plate is describing the same rows it already
+              // described, and a refresh is not a commit.
+              key={`block-${timePeriod}`}
               className="hl-block hidden lg:flex flex-col items-end justify-start"
               aria-hidden
               style={{ bottom: block.below * ROW_H, height: block.count * ROW_H }}

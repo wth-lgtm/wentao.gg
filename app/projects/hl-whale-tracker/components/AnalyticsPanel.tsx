@@ -503,12 +503,20 @@ export default function AnalyticsPanel({
                   <dt>
                     {/* An actual line, not a coloured block: the swatch has to carry
                         the same dash pattern as the curve it names, and the only way
-                        to guarantee that is to draw it the same way — which now
-                        includes wearing the curve's own class, so the two cannot be
-                        given different strokes. It restated `var(--accent)` /
-                        `var(--legend)` inline, one copy of the focus colour per
-                        swatch. Only the WIDTH is overridden: .hl-curve-line's 1px is
-                        a hairline the chart wants and a 16×4 swatch cannot show. */}
+                        to guarantee that is to draw it the same way — which includes
+                        wearing the curve's own class, so the two cannot be given
+                        different strokes. It restated `var(--accent)` / `var(--legend)`
+                        inline, one copy of the focus colour per swatch.
+
+                        The width and the opacity are overridden through `style`, not
+                        through the SVG presentation attributes they were written as.
+                        A presentation attribute sits at the very bottom of the author
+                        cascade — below every stylesheet rule — so `strokeWidth={2}`
+                        lost to .hl-curve-line's `stroke-width: 1` and the swatch
+                        rendered as exactly the hairline this comment said it avoided
+                        (measured: attribute 2, computed 1px; focused attribute 3,
+                        computed 2px). An inline style wins, which is also how the
+                        chart's own <path> sets its opacity a few lines up. */}
                     <svg
                       className="mr-1.5 inline-block align-middle"
                       width="16"
@@ -523,9 +531,13 @@ export default function AnalyticsPanel({
                         y2="2"
                         className="hl-curve-line"
                         data-focus={isFocus}
-                        strokeWidth={isFocus ? 3 : 2}
                         strokeDasharray={WINDOW_DASH[w]}
-                        opacity={isFocus ? 1 : UNFOCUSED_OPACITY}
+                        style={{
+                          // 3px and 2px, not the chart's 1px and 2px: a hairline is
+                          // right in a 100x40 chart and invisible in a 16x4 box.
+                          strokeWidth: isFocus ? 3 : 2,
+                          opacity: isFocus ? 1 : UNFOCUSED_OPACITY,
+                        }}
                       />
                     </svg>
                     <span className="font-mono text-[10px] tracking-[0.12em] text-[var(--legend)]">

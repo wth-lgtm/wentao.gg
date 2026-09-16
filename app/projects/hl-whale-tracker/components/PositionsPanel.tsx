@@ -196,8 +196,13 @@ function Coverage({
       {/* A SIBLING of the legend, the way every other sr-only sentence on this panel
           is written. Nested inside it, the sentence inherited `uppercase` — and a
           screen reader handed an all-caps sentence may spell it out letter by letter
-          rather than read it, which is the one thing this sentence must not do. */}
-      <span className="sr-only">
+          rather than read it, which is the one thing this sentence must not do.
+          `normal-case tracking-normal` because being a sibling is not enough: the spot
+          roll-up renders this whole component INSIDE its "Total ≈ …" Legend, so the
+          span inherited `uppercase` (measured) from two levels up while the three perp
+          sites were clean. Undoing it on the span itself is the only version no host
+          can break — the same defence, for the same reason, as AddressLegend's hex. */}
+      <span className="sr-only normal-case tracking-normal">
         {` ${unit}: upstream reported no ${what} for the other ${agg.of - agg.seen}, so this total is not the whole book`}
       </span>
     </>

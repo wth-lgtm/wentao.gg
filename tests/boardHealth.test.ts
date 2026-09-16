@@ -117,7 +117,10 @@ test("isUnreadableWindow: the window on screen, not the whole board", () => {
   // here, and it must not be read as "0 dropped" — the window is simply unexplained.
   assert.equal(isUnreadableWindow([], null), false);
   assert.equal(isUnreadableWindow([], undefined), false);
-  // No window at all, for the same reason: this says nothing about dropped rows.
+  // No window ARRAY at all reads the same as an empty one: "the body carried no rows
+  // for this window" is the same fact either way, and what makes it a failure rather
+  // than an absence is the dropped count beside it. So the pair below splits on the
+  // count, not on the rows.
   assert.equal(isUnreadableWindow(undefined, 5), true);
   assert.equal(isUnreadableWindow(undefined, undefined), false);
 });

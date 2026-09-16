@@ -73,19 +73,32 @@ export default function TraderCard({
       className={CARD}
     >
       {/* Line 1: rank plate, address, figure, explorer, inspect. Every width on it is
-          spent, so the numbers are worth keeping: at 390px the card's content box is
-          332px, the plate is 40, the six-and-six address needs 122.41 (JetBrains Mono at
-          12px), the widest compact figure measured 92.73, and the two 40px controls give
-          back 12px (the inspect box's -mr-3, into the card's own padding) and 8px (the
-          explorer's -mx-1).
+          spent, so the arithmetic is worth writing down. At 390px the card's content box
+          is 332px; the plate is 40; the six-and-six address needs 122.41 (JetBrains Mono
+          at 12px); the two 40px controls give back 12px (the inspect box's -mr-3, into
+          the card's own padding) and 8px (the explorer's -mx-1); four gaps take 16. That
+          leaves 216 minus the figure for the address.
+
+          The FIGURE's ceiling is nine tabular glyphs — "+$999.99B", since formatCurrency
+          compacts at two decimals and the mantissa can never reach 1000 — plus the sign
+          triangle at 0.7em and its 4px margin. Measured through this odometer: 99.06px.
+          The widest figure the live board actually produces is 92.73px, which leaves the
+          address 123.27 against the 122.41 it needs: 0.86px of slack.
+
+          So the line fits today and it does NOT fit its own ceiling: at 99.06px the
+          address box drops to 116.95 and the ellipsis takes about three quarters of a
+          hex character. That is the designed direction of failure, not an oversight — a
+          truncated address is already a truncation and degrades to 6+5, while a figure
+          giving up a digit would be a wrong number. Nothing else moves: the card does
+          not overflow the page at the ceiling.
 
           The gaps are 4px, not the 6px they were. Promoting the explorer from an inline
           10px glyph to a real 40px control (see below) cost line one 18px, and measured
-          across the live 30-day board that pushed 4 of the 50 cards past their budget:
-          their address box came back 115.27px against the 122.41px the string needs, so
-          the ellipsis ate a hex character — the exact defect the 6px gaps were chosen to
-          avoid. Four gaps at 2px less is the 8px that buys it back, and it is the only
-          slack on the line that is not a touch target or a numeral. */}
+          across the live 30-day board that pushed 4 of the 50 cards past their budget —
+          address box 115.27 against 122.41, one hex character eaten, the exact defect the
+          6px gaps were chosen to avoid. Four gaps at 2px less is the 8px that buys it
+          back, and it is the only slack on the line that is not a touch target or a
+          numeral. */}
       <div className={LINE_1}>
         <Plate rank={rank} className="shrink-0" />
 

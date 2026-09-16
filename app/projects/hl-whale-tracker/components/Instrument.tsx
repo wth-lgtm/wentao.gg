@@ -124,12 +124,15 @@ export function Unavailable({
 }
 
 /**
+ * Not exported: `Unavailable` above is the only thing that renders it, and a retry
+ * button with no failure beside it is not a state any panel should be able to compose.
+ *
  * Re-asks for THIS address through useTrader's reload, so the tab, the selection and
  * the rest of the snapshot all survive the retry. Disabled while a request is in
  * flight because a partial 200 leaves `data` populated, so nothing else on screen
  * changes to say the click landed.
  */
-export function ReRead({ onRetry, busy }: { onRetry: () => void; busy: boolean }) {
+function ReRead({ onRetry, busy }: { onRetry: () => void; busy: boolean }) {
   return (
     <button
       type="button"
