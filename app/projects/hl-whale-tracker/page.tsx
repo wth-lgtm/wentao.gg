@@ -203,7 +203,13 @@ function WhaleTracker() {
     },
     [selectTrader]
   );
-  const panelArming = trader.positions.loading;
+  // "Arming" is no reading and no failure yet — NOT useTrader's busy flag. On the first
+  // commit after the URL lands the slice is still IDLE, because the hook sets `loading`
+  // inside an effect of that same commit; read here, the flag said "not arming" while
+  // the panel rendered nothing at all, the scroll fired into a document shorter than the
+  // viewport and the browser clamped it to 0 (measured: one scrollTo to 260px, scrollY
+  // 0 after). A failed load ends the arming too, so the intent cannot outlive it.
+  const panelArming = trader.positions.data === null && trader.positions.error === null;
   useEffect(() => {
     if (!scrollToStripRef.current) return;
     if (focused === null || !TRADER_TABS.includes(activeTab)) return;
@@ -217,13 +223,14 @@ function WhaleTracker() {
       parseFloat(getComputedStyle(strip).getPropertyValue("--hl-header-h")) || 0;
     const top = strip.getBoundingClientRect().top + window.scrollY - headerH;
     // A scroll can only go as far as the document allows, and at the commit the strip
-    // appears the panel below it is a three-bar skeleton: measured at 390x844 the whole
-    // page was then shorter than the viewport, so the browser had already clamped to 0
-    // and a scrollTo here had nowhere to go — the strip sat 321px down once the reading
-    // landed. So while the panel is still arming and the target is out of reach the
-    // intent is kept, and this effect runs again when the reading lands (`panelArming`).
-    // A loaded panel that is STILL shorter than the viewport — a flat address with two
-    // spot rows — fits the viewport whole with the strip in view, and the intent ends.
+    // appears the panel below it is empty, then a three-bar skeleton: measured at
+    // 390x844 the whole page was then shorter than the viewport, so the browser had
+    // already clamped to 0 and a scrollTo here had nowhere to go — the strip sat 306px
+    // down once the reading landed. So while the panel is still arming and the target is
+    // out of reach the intent is kept, and this effect runs again when the reading lands
+    // (`panelArming`). A loaded panel that is STILL shorter than the viewport — a flat
+    // address with two spot rows — fits the viewport whole with the strip in view, and
+    // the intent ends.
     const reachable = document.documentElement.scrollHeight - window.innerHeight >= top;
     if (!reachable && panelArming) return;
     scrollToStripRef.current = false;
@@ -349,9 +356,11 @@ function WhaleTracker() {
     // is Web Animations and CSS by design. `.animate-fade-in-up` is the same gesture
     // from globals.css, it runs on the compositor, and the global reduced-motion block
     // already collapses it to a designed still rather than a slowdown. The header's
-    // ThemeToggle (mounted since, the site's shared control) brings the framer runtime
-    // back onto this route for its menu; that is the toggle's cost and it is reported
-    // where it was measured, not a reason to put the entrance back on it.
+    // ThemeToggle (mounted since) animates its menu with framer — MotionConfig is on
+    // every route through the root layout's MotionProvider regardless — and the route's
+    // client JS measured 853,103 bytes uncompressed with it against 864,736 before
+    // (same headless load, both builds), so the mount did not grow the route; the
+    // entrance stays CSS on its own merits.
     <div className="animate-fade-in-up">
       {/* The page's ONLY live region (plan of record: exactly one). It is a sibling of
           the panels rather than a child of any of them — a region inside a container
