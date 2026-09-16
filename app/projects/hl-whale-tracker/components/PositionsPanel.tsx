@@ -1,6 +1,7 @@
 "use client";
 
 import { formatAddress, formatCurrency, toneClass } from "../lib/formatters";
+import { formatPrice, formatSize } from "../lib/fills";
 import { PerpPosition, SpotBalance, TraderSnapshot } from "../lib/trader";
 
 // The Positions tab: what one whale is actually holding right now.
@@ -63,21 +64,24 @@ function PositionCard({ p }: { p: PerpPosition }) {
       </div>
       <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3 lg:grid-cols-6">
         <Metric label="Size">
-          {p.szi === null ? dash : Math.abs(p.szi).toLocaleString("en-US", { maximumFractionDigits: 4 })}
+          {p.szi === null ? dash : formatSize(Math.abs(p.szi))}
         </Metric>
-        <Metric label="Entry">{money(p.entryPx, 2)}</Metric>
+        <Metric label="Entry">{formatPrice(p.entryPx)}</Metric>
         <Metric label="Value">{money(p.positionValue)}</Metric>
         <Metric label="ROE">
           {p.roe === null ? dash : (
             <span className={toneClass(p.roe)}>{(p.roe * 100).toFixed(2)}%</span>
           )}
         </Metric>
-        <Metric label="Liq. price">{money(p.liquidationPx, 2)}</Metric>
-        <Metric label="Funding (open)">
+        <Metric label="Liq. price">{formatPrice(p.liquidationPx)}</Metric>
+        <Metric label="Funding since open">
           {p.fundingSinceOpen === null ? dash : (
-            // Upstream reports funding PAID as negative; keep the sign as given.
+            // Already in the trader's P&L sign (see PerpPosition.fundingSinceOpen).
             <span className={toneClass(p.fundingSinceOpen)}>
               {formatCurrency(p.fundingSinceOpen, { showSign: true, compact: true })}
+              <span className="sr-only">
+                {p.fundingSinceOpen > 0 ? " received" : p.fundingSinceOpen < 0 ? " paid" : ""}
+              </span>
             </span>
           )}
         </Metric>
