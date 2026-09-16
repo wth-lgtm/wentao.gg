@@ -550,14 +550,6 @@ main:focus {
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
 }
 
-.dark .footer-shadow {
-  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.3);
-}
-
-.light .footer-shadow {
-  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.06);
-}
-
 /* Hide number input spinners */
 input[type="number"]::-webkit-outer-spin-button,
 input[type="number"]::-webkit-inner-spin-button {

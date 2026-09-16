@@ -54,6 +54,7 @@ export default function Hero() {
         >
           <a
             href="#experience"
+            aria-label="Scroll to experience"
             className="text-muted hover:text-foreground transition-colors inline-block"
           >
             <ArrowDown size={24} className="animate-bounce" />
