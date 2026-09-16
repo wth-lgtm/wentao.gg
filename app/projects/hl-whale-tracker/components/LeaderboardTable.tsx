@@ -75,7 +75,10 @@ function ArmingRows({ deltaColumn }: { deltaColumn: boolean }) {
   return (
     <>
       {BERTHS.map((rank) => (
-        <tr key={rank} data-arming="true">
+        // aria-hidden: aria-busy is largely ignored by screen readers, and fifty rows of
+        // "01" … "50" with empty cells is a frame to look at, not content to read; the
+        // caption says the board is loading instead.
+        <tr key={rank} data-arming="true" aria-hidden>
           <td className="px-3 sm:px-4">{plate(rank)}</td>
           {deltaColumn && <td />}
           <td />
@@ -104,7 +107,7 @@ function ArmingCards() {
   return (
     <>
       {BERTHS.map((rank) => (
-        <div key={rank} className="hl-berth-card px-3 py-2.5" data-arming="true">
+        <div key={rank} className="hl-berth-card px-3 py-2.5" data-arming="true" aria-hidden>
           <div className="flex items-center gap-1.5">{plate(rank)}</div>
           <div className="mt-1.5 flex items-baseline gap-4 pl-[2.875rem]">
             <div className="flex items-baseline gap-1.5">
@@ -166,19 +169,17 @@ export default function LeaderboardTable({
   const columns = deltaColumn ? 7 : 6;
 
   return (
-    <>
+    // data-surface is the structural gate for the board's motion, on the one element
+    // that holds both the table and the phone's card stack: below `commit` no odometer
+    // under it rolls (CSS) and the rows are not registered for travel (below). A first
+    // cut wrote it on the <table>, and the phone's odometers rolled at `seat`.
+    <div data-surface={tier}>
       {/* Desktop Table. No overflow-x-auto on this wrapper: it made the wrapper a scroll
           container, which is exactly what a sticky <thead> sticks to instead of the
           viewport — and table-fixed with the colgroup below already prevents overflow. */}
       <div className="hidden sm:block">
-        {/* data-surface is the structural gate for the board's motion: below `commit` the
-            odometer strips do not roll (CSS) and the rows are not registered for travel
-            (below). aria-busy while arming: fifty empty berths are a frame, not content. */}
-        <table
-          className="hl-board"
-          data-surface={tier}
-          aria-busy={loading ? true : undefined}
-        >
+        {/* aria-busy while arming: fifty empty berths are a frame, not content. */}
+        <table className="hl-board" aria-busy={loading ? true : undefined}>
           {/* Locked geometry: widths never shift between the arming frame, the data, a
               sort or a period switch, which is what lets the re-seat compute travel as
               arithmetic instead of measuring the DOM. Rank is 72, not 68: the plate is
@@ -194,7 +195,9 @@ export default function LeaderboardTable({
             <col className="w-9" />
           </colgroup>
           <caption className="sr-only">
-            Hyperliquid top traders, ranked. Sorted by {sortField === "winRate" ? "ROI" : sortField}, {sortDirection === "desc" ? "descending" : "ascending"}.
+            {loading
+              ? "Hyperliquid top traders. Loading the board."
+              : `Hyperliquid top traders, ranked. Sorted by ${sortField === "winRate" ? "ROI" : sortField}, ${sortDirection === "desc" ? "descending" : "ascending"}.`}
           </caption>
           <thead>
             <tr>
@@ -318,6 +321,6 @@ export default function LeaderboardTable({
           ))
         )}
       </div>
-    </>
+    </div>
   );
 }

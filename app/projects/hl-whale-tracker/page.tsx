@@ -371,13 +371,19 @@ function WhaleTracker() {
 }
 
 export default function HLWhaleTracker() {
+  // --hl-header-h is the header below as rendered: py-3 (24) + the 28px title line + the
+  // 1px border = 46.59px, rounded down so the board's sticky thead tucks under the header
+  // by a sub-pixel instead of opening a gap. It lives on <main> because a custom property
+  // only inherits downward and the thead is the header's cousin, not its child.
+  // Re-measure when the header's padding, type size or border change.
   return (
-    <main className="min-h-screen bg-background">
-      {/* Header. No backdrop-blur: a full-width backdrop-filter re-rasterises on
-          every scroll frame, and later phases put a live canvas underneath it.
+    <main className="min-h-screen bg-background [--hl-header-h:46px]">
+      {/* Header. Opaque, and no backdrop-blur: the board's rows now scroll under it and
+          a 95% fill let them ghost through; a full-width backdrop-filter re-rasterises
+          on every scroll frame, and later phases put a live canvas underneath it.
           Three-column grid so the title is optically centred at every width
           rather than balanced against a fixed-width spacer. */}
-      <header className="sticky top-0 z-50 border-b border-border bg-background/95">
+      <header className="sticky top-0 z-50 border-b border-border bg-background">
         <div className="max-w-4xl mx-auto px-4 py-3 grid grid-cols-[1fr_auto_1fr] items-center">
           <Link
             href="/#projects"

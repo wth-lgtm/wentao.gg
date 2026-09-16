@@ -890,20 +890,29 @@ input:focus {
    All three now clip or are gone, so the header answers to the viewport. */
 .hl-board thead th {
   position: sticky;
-  top: 46px;
+  /* Set on the page's <main> (page.tsx) next to the header it measures. No fallback on
+     purpose: an unset token makes `top` invalid, and sticky with top: auto simply does
+     not stick — better than a guessed number that hides the header under the real one. */
+  top: var(--hl-header-h);
   z-index: 1;
   background: var(--card);
   border-bottom: 1px solid var(--engrave-lo);
 }
 
-/* THE STRUCTURAL GATE. hooks/useSurfaceTier.ts writes the tier onto the table, and
-   below `commit` the board is the designed still: the odometer strips print at their
+/* THE STRUCTURAL GATE. hooks/useSurfaceTier.ts writes the tier onto the hull wrapper
+   that holds BOTH the table and the phone's card stack (a first cut wrote it on the
+   <table> alone, and the phone's odometers rolled at `seat` exactly as at `commit`).
+   Below `commit` the board is the designed still: the odometer strips print at their
    final digit with no roll and no travel between values. This is the half CSS can
    carry, which is why it is right on the very first paint; the other half — rows not
    registered for the re-seat — is the table's. Independent of the reduced-motion media
    rule further down, which covers only the visitor who asked: this also covers the
-   tablet, which has the width for the table and no pointer to hover it with. */
-.hl-board:not([data-surface="commit"]) .hl-odo-strip {
+   tablet, which has the width for the table and no pointer to hover it with.
+
+   Specificity is load-bearing: the entrance rule `.hl-odo-track[data-enter="true"]
+   .hl-odo-strip` is (0,3,0) and declared later, so a (0,3,0) gate lost to it and the
+   roll still ran at `seat`. `.hl-odo-track` in the chain makes this (0,4,0). */
+[data-surface]:not([data-surface="commit"]) .hl-odo-track .hl-odo-strip {
   animation: none;
   transition: none;
 }
