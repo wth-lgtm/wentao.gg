@@ -1105,6 +1105,33 @@ input:focus {
   box-shadow: inset 0 0 0 1px var(--engrave-lo), inset 0 1px 0 var(--engrave-hi);
 }
 
+/* A horizontal scroller that says so.
+   The correlation table's fourth column sat entirely off-canvas at 390px with no cue
+   of any kind: iOS draws no overlay scrollbar until a drag begins, and the site's
+   ::-webkit-scrollbar rule only sets a width, which is a vertical property.
+
+   The technique is two pairs of background layers. The SHADOWS are painted with
+   `scroll` attachment, so they stay pinned to the box edges; the COVERS are painted
+   in --card with `local` attachment, so they travel with the content and sit exactly
+   over a shadow while there is nothing to scroll that way. A static mask-image fade
+   was the alternative and is worse: it dims the header rule, the focused row's plate
+   and a fully-visible right edge regardless of scroll position. Zero JS, no
+   scroll-driven animation, and none of the banned techniques (no backdrop-filter, no
+   filter, no animated colour). */
+.hl-scroll-x {
+  --hl-scroll-shadow: color-mix(in srgb, var(--foreground) 16%, transparent);
+  /* Layer order: left cover, right cover, left shadow, right shadow. */
+  background-image: linear-gradient(var(--card), var(--card)),
+    linear-gradient(var(--card), var(--card)),
+    linear-gradient(to right, var(--hl-scroll-shadow), transparent),
+    linear-gradient(to left, var(--hl-scroll-shadow), transparent);
+  background-position: left center, right center, left center, right center;
+  /* Each cover is wider than the shadow it hides, so nothing leaks at rest. */
+  background-size: 20px 100%, 20px 100%, 16px 100%, 16px 100%;
+  background-repeat: no-repeat;
+  background-attachment: local, local, scroll, scroll;
+}
+
 /* Correlation strip. The focused window is seated, not coloured, so the emphasis
    survives greyscale and colour-blindness alike. */
 .hl-corr {
@@ -1130,6 +1157,16 @@ input:focus {
 }
 .hl-corr tbody tr[data-focus="true"] td:first-child {
   box-shadow: inset 2px 0 0 var(--accent);
+}
+/* Below sm the headers may wrap, which buys back roughly 50px of scroll distance.
+   The BODY cells keep `nowrap` deliberately: each holds a numeral and the word that
+   qualifies it ("-0.15 within noise"), and splitting those across two lines is how a
+   reader ends up with the number and not the caveat. */
+@media (max-width: 639px) {
+  .hl-corr thead th {
+    white-space: normal;
+    max-width: 6.5rem;
+  }
 }
 
 /* Concentration curves. Four windows overlaid: the shape difference between them IS

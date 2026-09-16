@@ -2,13 +2,14 @@
 // the leaderboard hook already downloads all four windows in one call and this works
 // over what is already in memory.
 //
-// What makes this tab worth building is that the four measurements below all point
-// the same way, and it is not the way the leaderboard reads. A board sorted by PnL
-// looks like a ranking of skill. Measured against the same payload it is closer to a
-// ranking of capital: the address at #1 by PnL sits at #50 of 50 by return in three
-// of the four windows, and rho(PnL, ROI) is NEGATIVE while rho(PnL, capital) is
-// +0.73. So the honest job of this panel is to say what the board is actually
-// sorting, not to decorate it.
+// What makes this tab worth building is that a board sorted by PnL reads as a ranking
+// of skill, and measuring the same payload says it is closer to a ranking of capital:
+// rho(PnL, capital) clears the noise floor in every window while rho(PnL, return)
+// mostly does not, and the address at #1 by PnL is rarely near the top by return.
+// (Measured 2026-09-16: capital +0.74 / +0.75 / +0.67 / +0.35, return -0.31 / -0.15 /
+// -0.23 / -0.01, leader's return rank #21 / #26 / #50 / #1.) Those figures move every
+// refresh, which is why nothing in the panel hard-codes one of them any more — the
+// honest job here is to say what the board is sorting TODAY, not to decorate it.
 //
 // Nothing here fabricates a series. There is no time dimension in the payload — one
 // snapshot per window, no history — so there are no sparklines and no trends. The
@@ -49,11 +50,26 @@ export interface Concentration {
   curve: number[];
 }
 
+/**
+ * How much of a window's profit sits in how few addresses.
+ *
+ * Shares are only computed when every row is a gain. A cumulative share of a NET
+ * total is not a share: [100, 50, -30, -20] nets to 100, so the running curve read
+ * 1, 1.5, 1.3, 1 — clamped flat along the top of the chart — and topShare printed
+ * "100%" for an address holding more than the whole board's profit. No live top-fifty
+ * row is negative today (checked in all four windows), so rather than silently
+ * redefine the denominator this returns nothing and the panel prints its em dash,
+ * which is the same thing it already does for a zero total.
+ */
 export function concentration(rows: TraderMetrics[]): Concentration {
   // Sorted on a COPY: these arrays come straight out of the hook's state, and
   // sorting in place would reorder the leaderboard's own render as a side effect.
   const pnls = rows.map((r) => r.pnl).sort((a, b) => b - a);
   const total = pnls.reduce((s, v) => s + v, 0);
+
+  if (pnls.some((v) => v < 0)) {
+    return { total, topShare: null, top5Share: null, curve: [] };
+  }
 
   const curve: number[] = [];
   let running = 0;
@@ -147,14 +163,16 @@ function rankBy(
 export interface Divergence {
   window: TimePeriod;
   count: number;
-  /** rho between PnL and return. Measured negative in three of four windows. */
+  /** rho between PnL and return. Negative in most windows, rarely by enough to say so. */
   pnlVsRoi: number | null;
   /** rho between PnL and account size. */
   pnlVsCapital: number | null;
   pnlLeader: TraderMetrics | null;
   roiLeader: TraderMetrics | null;
-  /** Where the PnL leader places when the same fifty are ranked by return. */
+  /** Where the PnL leader places when the same rows are ranked by return. */
   pnlLeaderRoiRank: number | null;
+  /** Where the return leader places when the same rows are ranked by PnL. */
+  roiLeaderPnlRank: number | null;
 }
 
 export function divergence(window: TimePeriod, rows: TraderMetrics[]): Divergence {
@@ -167,6 +185,7 @@ export function divergence(window: TimePeriod, rows: TraderMetrics[]): Divergenc
       pnlLeader: null,
       roiLeader: null,
       pnlLeaderRoiRank: null,
+      roiLeaderPnlRank: null,
     };
   }
 
@@ -176,6 +195,9 @@ export function divergence(window: TimePeriod, rows: TraderMetrics[]): Divergenc
   const roi = rows.map((r) => r.winRate);
   const capital = rows.map((r) => r.accountValue);
 
+  // Two independent reduces over the same rows, so nothing stops them landing on one
+  // address — in the live all-time window they do (0x4ec8fe22, #1 by both). The panel
+  // needs the return leader's PnL rank to tell the two cases apart without guessing.
   const pnlLeader = rows.reduce((a, b) => (b.pnl > a.pnl ? b : a));
   const roiLeader = rows.reduce((a, b) => (b.winRate > a.winRate ? b : a));
 
@@ -187,6 +209,7 @@ export function divergence(window: TimePeriod, rows: TraderMetrics[]): Divergenc
     pnlLeader,
     roiLeader,
     pnlLeaderRoiRank: rankBy(rows, pnlLeader.address, (r) => r.winRate),
+    roiLeaderPnlRank: rankBy(rows, roiLeader.address, (r) => r.pnl),
   };
 }
 
@@ -204,9 +227,10 @@ export const overlapKey = (a: TimePeriod, b: TimePeriod) => `${a}|${b}`;
 /**
  * How much the top fifty is the same fifty across windows.
  *
- * Measured: only 3 of 50 addresses appear in all four, and the 30d and allTime sets
- * share just 5. The leaderboard's own UI cannot show this — it renders one window at
- * a time — so the churn is invisible exactly where it matters most.
+ * The overlap is small and it moves (measured 2026-09-16: 1 address in all four
+ * windows, 18 shared between 30d and allTime). The leaderboard's own UI cannot show
+ * this — it renders one window at a time — so the churn is invisible exactly where it
+ * matters most, and the panel must read the counts off this rather than repeat them.
  */
 export function churnMatrix(periods: Periods): Churn {
   const present = WINDOWS.filter((w) => (periods[w]?.length ?? 0) > 0);
@@ -244,13 +268,22 @@ export interface Cohort {
 }
 
 /**
- * The addresses reporting exactly zero volume.
+ * The addresses with exactly zero perpetuals volume.
  *
- * They carry 74% of all PnL in the 7d and 30d windows, which is the most striking
- * number on this page — and the one most easily overstated. A zero here plausibly
- * means "upstream did not report volume for this address" rather than "this address
- * did not trade", so every label for it says REPORTED volume and the panel never
- * claims they profited without trading.
+ * This is the most striking number on the page (measured 2026-09-16: 40 of the 50
+ * 30-day rows, carrying 94% of that window's profit) and the one that was most
+ * overstated. The panel used to hedge that a zero was "as likely" to mean upstream
+ * published no figure — it is not: `vlm` is present on every window entry of the raw
+ * leaderboard (0 missing across 180,340 entries) and mapRow in hyperliquid.ts now
+ * DROPS a row whose vlm cannot be read rather than zero-filling it, so a zero that
+ * reaches here was published as a zero.
+ *
+ * What the zeroes are is spot holders. `vlm` is perpetuals volume while PnL and
+ * accountValue mark spot holdings to market, so an address can post a large PnL in a
+ * window without a perp trade. Probed 2026-09-16 via /api/hl-trader: 0x0d446c33 (capital
+ * $68.7M) has 0 perp positions, 0 fills, vlm 0.0 in every window and 99,000,088 TREND
+ * in spot; 0xa822a9ce (30-day PnL +$812M, capital $14.8B) has 0 fills and 499M USOL
+ * plus 894M UFART in spot.
  */
 export function zeroVolumeCohort(rows: TraderMetrics[]): Cohort {
   const total = rows.reduce((s, r) => s + r.pnl, 0);
@@ -268,18 +301,53 @@ export function median(values: number[]): number | null {
 }
 
 /**
+ * The |rho| below which a sample of n ranks says nothing about direction.
+ *
+ * 2/sqrt(n) is the standard approximation of the 95% critical value: 0.283 at n = 50
+ * against an exact 0.279, which is close enough that no t-table is needed. Below
+ * n = 5 it exceeds 1, and that is the honest answer — four ranks can produce any
+ * correlation at all, ±1 included.
+ *
+ * Infinity rather than 1, because the floor is tested with `<`: pinning it at 1 left
+ * |rho| = 1 ABOVE the floor and labelled "strong", and ±1 is the only value n = 2 can
+ * produce — the exact case the pin exists for.
+ */
+export function rhoNoiseFloor(n: number): number {
+  return n > 4 ? 2 / Math.sqrt(n) : Number.POSITIVE_INFINITY;
+}
+
+/**
  * A correlation's strength in words, so the number is never the only carrier.
  *
  * Bands are Cohen's conventional ones FOR CORRELATION — 0.1 small, 0.3 medium,
- * 0.5 large. An earlier cut used 0.2/0.4/0.7, which called the measured
- * rho(PnL, ROI) of -0.35 "weak" and materially understated the finding.
+ * 0.5 large. An earlier cut used 0.2/0.4/0.7, which called a measured rho of -0.35
+ * "weak" and materially understated the finding.
+ *
+ * The bands only apply ABOVE the noise floor, which is why n is a parameter. Without
+ * it this printed "weak negative" for the live -0.15 and -0.23 at n = 50, where fifty
+ * ranks produce |rho| up to 0.28 by chance — a sign the sample cannot support, on the
+ * one panel built to stop the board overclaiming. The wording is "within noise" and
+ * not "indistinguishable from zero" because these cells are white-space: nowrap and
+ * the table already overflows a 390px phone; and not "not significant" because the
+ * fifty rows are selected on PnL out of 45,000, so a formal p-value would itself
+ * overclaim.
  */
-export function rhoLabel(rho: number | null): string {
+export function rhoLabel(rho: number | null, n: number): string {
   if (rho === null) return "—";
   const a = Math.abs(rho);
-  if (a < 0.1) return "no relationship";
+  if (a < rhoNoiseFloor(n)) return "within noise";
   const strength = a >= 0.5 ? "strong" : a >= 0.3 ? "moderate" : "weak";
   return `${strength} ${rho > 0 ? "positive" : "negative"}`;
+}
+
+/**
+ * A count with the noun that agrees with it.
+ *
+ * The churn panel read "Only 1 addresses hold a place in every window" on the live
+ * board, because the count is derived and the noun was not.
+ */
+export function plural(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
 }
 
 /**
@@ -303,15 +371,22 @@ export function formatShare(share: number | null, decimals = 0): string {
 /**
  * Build an SVG polyline for the concentration curve.
  *
+ * The series is prepended with the origin. `curve[i]` is the share held after i+1
+ * addresses, so plotting curve[0] at x = 0 started the line at (0, topShare) and left
+ * out (0, 0) — on five equal PnLs the path began 1/n up the box while the equality
+ * diagonal it is read against began at the floor. Roughly 1/n of the gap the copy
+ * calls "the concentration" was an artefact of the missing point.
+ *
  * Coordinates are clamped and non-finite values dropped, so a malformed row cannot
  * put arbitrary text into a `d` attribute.
  */
 export function curvePath(curve: number[], width: number, height: number): string {
   if (curve.length === 0) return "";
   const pts: string[] = [];
-  for (let i = 0; i < curve.length; i++) {
-    const x = ratio(i, curve.length - 1 || 1);
-    const y = curve[i];
+  const series = [0, ...curve];
+  for (let i = 0; i < series.length; i++) {
+    const x = ratio(i, series.length - 1 || 1);
+    const y = series[i];
     if (x === null || !Number.isFinite(y)) continue;
     const px = clamp(x, 0, 1) * width;
     const py = height - clamp(y, 0, 1) * height;
