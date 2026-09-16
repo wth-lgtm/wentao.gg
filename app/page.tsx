@@ -43,7 +43,7 @@ export default function Home() {
       <InteractiveEffects />
       <Navigation />
       <HeroMeta />
-      <main id="main" tabIndex={-1} className="relative pb-20 overflow-x-clip">
+      <main id="main" tabIndex={-1} className="relative overflow-x-clip">
         <Hero />
         <Experience />
         <Education />
