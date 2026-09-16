@@ -801,8 +801,10 @@ input:focus {
   box-shadow: inset 0 1px 0 var(--engrave-hi), inset 0 -1px 0 var(--engrave-lo);
 }
 
-/* The lit plate slides between tabs rather than each tab toggling a background —
-   one moving part reads as a mechanism. */
+/* The lit plate seats at the selected tab. It does NOT travel between them — it
+   unmounts with the old tab and plays this once at the new one; the comment that used
+   to sit here claimed a journey the DOM never makes. 0.3s, not the 0.34s it was: a
+   discrete state change lands on an N x 100ms beat. */
 .hl-tab-plate {
   position: absolute;
   inset: 0;
@@ -810,7 +812,7 @@ input:focus {
   border-radius: 0.5rem;
   background: var(--accent);
   box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 26%, transparent);
-  animation: hlPlateSeat 0.34s var(--ease-entrance) both;
+  animation: hlPlateSeat 0.3s var(--ease-entrance) both;
 }
 @keyframes hlPlateSeat {
   from {
@@ -821,6 +823,35 @@ input:focus {
     opacity: 1;
     transform: scaleX(1);
   }
+}
+
+/* The sounding rail's seam, drawn INSIDE the field it precedes. As standalone
+   siblings the dividers could not know that SCANNED, TTL and SRC are display:none
+   below their breakpoints, so the phone rail rendered orphan pairs with nothing
+   between them. A pseudo-element cannot outlive its own host, so this is structurally
+   incapable of leaving one — and it takes a bare <span> out of the <dl>, whose content
+   model permits only div/dt/dd.
+
+   Still a 1px element and not a middot character, which was the old Divider's reason
+   for being: a middot inherits the text baseline and sits at a different optical height
+   at every font size on the rail.
+
+   The field's own flex gap is 0.375rem, so the seam carries the other 0.375rem as
+   margin: 0.375 + 0.375 = the 0.75rem the dl already puts between fields, which is
+   what keeps the hairline optically centred in the gap rather than crowding the
+   label it belongs to. */
+.hl-rail-field::before {
+  content: "";
+  flex: none;
+  align-self: center;
+  width: 1px;
+  height: 0.75rem;
+  margin-right: 0.375rem;
+  background: var(--border);
+}
+/* STATE is always visible, so the first field is always the one suppressed. */
+.hl-rail-field:first-child::before {
+  display: none;
 }
 
 /* Locked berth geometry. table-fixed + an explicit colgroup means column widths
@@ -896,6 +927,32 @@ input:focus {
 .hl-plate[data-tier="2"] { font-weight: 600; }
 .hl-plate[data-tier="3"] { font-weight: 500; }
 .hl-plate[data-tier="4"] { font-weight: 400; color: var(--legend); }
+
+/* The same berth, folded for a phone. Below sm the board is a stack of these instead
+   of a table, and the card used to be its own visual language: `bg-card rounded-xl
+   border` per card, `bg-background rounded-lg` per stat tile — three nested surfaces
+   inside a hull that is already bg-card. It is now the tape's engraved seam and
+   nothing else, so the stack reads as one machined face with cuts in it.
+
+   The margin reset is deliberate: LeaderboardTable spaces the stack with Tailwind's
+   `space-y-3`, which compiles to `margin-block-end` on every card but the last, and a
+   12px gap turns each seam into a rule floating under a card instead of the shared
+   edge between two berths. These declarations are unlayered while the utility sits in
+   @layer utilities, so they win the cascade on layer order and need no !important. */
+.hl-berth-card {
+  cursor: pointer;
+  margin-block: 0;
+  border-bottom: 1px solid var(--engrave-lo);
+  box-shadow: inset 0 1px 0 var(--engrave-hi);
+}
+/* Selected: the accent bar cut into the leading edge, exactly as .hl-berth does it on
+   the desktop row — the state has to survive being scrolled past, so it is not carried
+   by fill alone. No transition on the fill: an animated background-color on a row is
+   on the plan's banned list, and a touch surface has no hover to ease out of. */
+.hl-berth-card[data-selected="true"] {
+  background: var(--card-hover);
+  box-shadow: inset 3px 0 0 var(--accent), inset 0 1px 0 var(--engrave-hi);
+}
 
 /* ── The tape (Trades) ────────────────────────────────────────────────────────
    Same engraved language as the board, but the tape is a FEED, not a ranking: rows

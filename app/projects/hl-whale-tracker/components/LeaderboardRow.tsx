@@ -10,6 +10,7 @@ import {
   signGlyph,
   toneClass,
 } from "../lib/formatters";
+import { tierOf } from "../lib/tier";
 
 interface LeaderboardRowProps {
   trader: TraderMetrics;
@@ -18,10 +19,6 @@ interface LeaderboardRowProps {
   onSelect?: (address: string) => void;
   registerRow?: (key: string, el: HTMLElement | null) => void;
 }
-
-// Tier is static WEIGHT on the berth plate, not a medal colour. The old
-// gold/silver/bronze was colour-only and measured poorly in light mode.
-const tierOf = (rank: number) => (rank <= 3 ? String(rank) : "4");
 
 export default function LeaderboardRow({
   trader,

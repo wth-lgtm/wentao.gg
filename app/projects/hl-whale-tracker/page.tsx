@@ -124,7 +124,7 @@ export default function HLWhaleTracker() {
           )}
 
           {activeTab === "leaderboard" && (
-            <>
+            <div role="tabpanel" id="hl-panel-leaderboard" aria-labelledby="hl-tab-leaderboard">
               <div className="flex items-center justify-between mb-4">
                 <TimeFilter value={timePeriod} onChange={setTimePeriod} />
                 <RefreshButton onRefresh={refresh} refreshing={refreshing} />
@@ -149,36 +149,42 @@ export default function HLWhaleTracker() {
                   registerRow={registerRow}
                 />
               </div>
-            </>
+            </div>
           )}
 
           {activeTab === "positions" && (
-            <PositionsPanel
-              address={focused}
-              data={trader.data}
-              loading={trader.loading}
-              error={trader.error}
-              onRetry={trader.reload}
-            />
+            <div role="tabpanel" id="hl-panel-positions" aria-labelledby="hl-tab-positions">
+              <PositionsPanel
+                address={focused}
+                data={trader.data}
+                loading={trader.loading}
+                error={trader.error}
+                onRetry={trader.reload}
+              />
+            </div>
           )}
 
           {activeTab === "trades" && (
-            <TradesPanel
-              address={focused}
-              data={trader.data}
-              loading={trader.loading}
-              error={trader.error}
-              onRetry={trader.reload}
-            />
+            <div role="tabpanel" id="hl-panel-trades" aria-labelledby="hl-tab-trades">
+              <TradesPanel
+                address={focused}
+                data={trader.data}
+                loading={trader.loading}
+                error={trader.error}
+                onRetry={trader.reload}
+              />
+            </div>
           )}
 
           {activeTab === "analytics" && (
-            <AnalyticsPanel
-              periods={periods}
-              timePeriod={timePeriod}
-              loading={loading}
-              error={error}
-            />
+            <div role="tabpanel" id="hl-panel-analytics" aria-labelledby="hl-tab-analytics">
+              <AnalyticsPanel
+                periods={periods}
+                timePeriod={timePeriod}
+                loading={loading}
+                error={error}
+              />
+            </div>
           )}
 
           <p className="mt-4 flex items-center justify-center gap-1 flex-wrap text-center text-xs text-muted">
