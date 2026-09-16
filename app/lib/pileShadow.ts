@@ -20,8 +20,9 @@ export interface Aabb {
  *  right face and reversed the board's FACE_LIT / FACE_SHADE order. */
 export const KEY_POSITION: Vec = [6, 8, 2.5];
 
-/** Everything that casts or receives: the tray with its lips, the heap, and the mouth the
- *  trains fall from (a train above the frame still throws a shadow into it). */
+/** Everything that casts or receives: the tray with its lips and the heap plus ~2 u of fall
+ *  above it — a piece still higher than that throws its shadow outside the floor (the mouth
+ *  itself sits at 4.1–5.4, off-frame). */
 export const SHADOW_AABB: Aabb = {
   min: [-(WORLD.W / 2 + WORLD.LIP), -WORLD.SLAB_T, -(WORLD.D / 2 + WORLD.LIP)],
   max: [WORLD.W / 2 + WORLD.LIP, 2.9, WORLD.D / 2 + WORLD.LIP],

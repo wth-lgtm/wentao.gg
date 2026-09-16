@@ -20,7 +20,8 @@ export const WORLD = {
   BACK_H: 0.45,
   /** floor slab thickness (its top is y = 0) */
   SLAB_T: 0.12,
-  /** where a two-layer heap crests (coverage 1.8 of the floor, see trayFit) */
+  /** where the heap crests at the measured coverage 1.3 (TRAY.coverage); the camera budget
+   *  and the shove caps are solved for this height */
   CREST: 0.9,
   /** the three pour lanes in z, back to front, and the jitter around each */
   LANES: [-0.8, 0, 0.8] as const,
@@ -179,8 +180,9 @@ function solve(pred: (d: number) => boolean): number {
  * Fit the camera two ways and keep the farther: `dWidth` makes the tray's outer width span
  * WIDTH_FILL of the canvas; `dHeight` keeps every scene vertex, at every drift pose, under
  * the legend reserve at the top and above the breath at the bottom. At the live 1440 px
- * card (691 × 273, aspect 2.53) the width rule binds at d ≈ 16.6 u (≈ 72 px/u), set by the
- * slab's FRONT-bottom corners, which sit ~0.9 u nearer the camera than the look-at plane
+ * card (691 × 273, aspect 2.53) the width rule binds at d 16.65 u (71.9 px/u), set by the
+ * front lip's TOP-outer corners (±3.75, 0.28, 1.55), which sit 1.17 u nearer the camera
+ * than the look-at plane (the slab's bottom corners are 0.92 u nearer and project narrower)
  * and so project wider than the tray's nominal 7.5 u would at that plane. The design
  * expected ≈ 91 px/u from d ≈ 12.7 — a distance at which its own budget put the back crest
  * 12 px from the top edge, under the legend.

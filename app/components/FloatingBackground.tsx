@@ -38,9 +38,12 @@ const TH = 0.6; // collider half-thickness (floor and walls)
 // train lost 1–2 of 200 pieces per pour when a dense train pushed its top sideways.
 const WALL_TOP = 14;
 // Parked (fixed) bodies wait here; the frame's top edge over the front lip is under 6 u at
-// every fit, so the park is never drawn in it.
+// every fit that mounts (4.8 at aspect 1.6), so the park is never drawn in it.
 const PARK_Y = 20;
 const TRAY_R = 0.04;
+// Where two rim parts overlap, the buried one is inset by this much so no two faces are
+// coplanar (a 24-bit depth buffer over near 4 / far 40 resolves it; 0.3 px at 72 px/u).
+const SEAM = 0.004;
 
 let trayGeometry: THREE.BufferGeometry | null = null;
 function getTrayGeometry(): THREE.BufferGeometry {
@@ -48,12 +51,19 @@ function getTrayGeometry(): THREE.BufferGeometry {
   const hx = WORLD.W / 2 + WORLD.LIP;
   const hz = WORLD.D / 2 + WORLD.LIP;
   const part = (w: number, h: number, d: number, x: number, y: number, z: number) => new RoundedBoxGeometry(w, h, d, 2, TRAY_R).translate(x, y, z);
+  // Every rounded END is buried inside a neighbour: five RoundedBoxes butted end-to-face left
+  // an r 0.04 groove at each rim corner where a rounded end met a flat face. The back lip is
+  // full width (its rounded ends ARE the back corners); the side lips run from the front
+  // corners into the back lip; the front lip runs into the side lips. Buried ends stop
+  // TRAY_R short of the outer face they hide behind.
+  const bury = WORLD.LIP - TRAY_R;
+  const sideLen = hz + WORLD.D / 2 + bury; // front corner → into the back lip
   const parts = [
     part(2 * hx, WORLD.SLAB_T, 2 * hz, 0, -WORLD.SLAB_T / 2, 0),
-    part(WORLD.LIP, WORLD.LIP_H, 2 * hz, -(WORLD.W / 2 + WORLD.LIP / 2), WORLD.LIP_H / 2, 0),
-    part(WORLD.LIP, WORLD.LIP_H, 2 * hz, WORLD.W / 2 + WORLD.LIP / 2, WORLD.LIP_H / 2, 0),
-    part(WORLD.W, WORLD.LIP_H, WORLD.LIP, 0, WORLD.LIP_H / 2, WORLD.D / 2 + WORLD.LIP / 2),
-    part(WORLD.W, WORLD.BACK_H, WORLD.LIP, 0, WORLD.BACK_H / 2, -(WORLD.D / 2 + WORLD.LIP / 2)),
+    part(2 * hx, WORLD.BACK_H, WORLD.LIP, 0, WORLD.BACK_H / 2, -(WORLD.D / 2 + WORLD.LIP / 2)),
+    part(WORLD.LIP - SEAM, WORLD.LIP_H, sideLen, -(WORLD.W / 2 + WORLD.LIP / 2), WORLD.LIP_H / 2, hz - sideLen / 2),
+    part(WORLD.LIP - SEAM, WORLD.LIP_H, sideLen, WORLD.W / 2 + WORLD.LIP / 2, WORLD.LIP_H / 2, hz - sideLen / 2),
+    part(WORLD.W + 2 * bury, WORLD.LIP_H - SEAM, WORLD.LIP - SEAM, 0, (WORLD.LIP_H - SEAM) / 2, WORLD.D / 2 + WORLD.LIP / 2 - SEAM / 2),
   ];
   const merged = mergeGeometries(parts, false)!;
   parts.forEach((g) => g.dispose());
@@ -121,12 +131,15 @@ function getHalo(): THREE.CanvasTexture {
   canvas.width = 256;
   canvas.height = 128;
   const ctx = canvas.getContext("2d")!;
-  const g = ctx.createRadialGradient(128, 64, 0, 128, 64, 128);
+  // elliptical: a circular gradient on the 2 : 1 canvas still had ~0.66 alpha at the plane's
+  // front and back edges, a hard step 0.2 u in front of the slab
+  ctx.scale(1, 0.5);
+  const g = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
   g.addColorStop(0, "#fff");
   g.addColorStop(0.55, "#999");
   g.addColorStop(1, "#000");
   ctx.fillStyle = g;
-  ctx.fillRect(0, 0, 256, 128);
+  ctx.fillRect(0, 0, 256, 256);
   haloTex = new THREE.CanvasTexture(canvas);
   return haloTex;
 }
@@ -260,10 +273,12 @@ const FRICTION = 0.7;
 
 // Unit geometries. The box is baked per LEVEL at the mean width sizeOf draws, so the
 // per-instance scale stays within ±15% of uniform and the bevel with it; a unit cube scaled
-// 1 : 4 gave a 4 : 1 bevel. Bevels as fractions of the smallest edge: brick 0.03, die 0.09
-// (real dice), domino 0.15 of its thickness.
+// 1 : 4 gave a 4 : 1 bevel. Bevels as fractions of the smallest edge: brick 0.08 (the
+// design's 0.03 was 0.6 px at 72 px/u — the bricks read as sharp blocks beside rounded
+// dice; 0.08 is ~1.5 px and catches the rim light), die 0.09 (real dice), domino 0.15 of its
+// thickness. The RoundCuboidCollider radius follows the same number.
 const BOX_W = 0.49;
-const BEVEL = { box: 0.03, die: 0.09, domino: 0.15 };
+const BEVEL = { box: 0.08, die: 0.09, domino: 0.15 };
 const DOMINO = { w: 0.5, t: 0.175, l: 1.0 };
 const PUCK = { r: 0.32, h: 0.14 };
 const CAPSULE = { r: 0.16, len: 0.3 };
@@ -366,10 +381,13 @@ const POINTER_IDLE_MS = 1200;
 // met the vertical z = 0 plane and pushed in x/y from the cursor point: under a camera
 // looking down 40° a cursor on the front rim landed the field centre under the floor and
 // hoisted the front pieces straight up — a geyser on hover.
-// F_BASE is solved so a slow hover (presence floor only) slides a 0.3 u piece about one width:
-// at d = 0.3 the smoothstep gives 0.66, × FLOOR 0.3 = 0.2, and a 0.03-mass piece needs
-// F·0.2/0.03 > μg = 42 to move at all → F ≈ 7. F_SWIPE brings a full-speed swipe to about
-// the speed cap in a tenth of a second on the same mass.
+// F_BASE is solved so a slow hover (presence floor only) NUDGES a piece rather than lifting
+// or launching it: at d = 0.3 the smoothstep is 0.74 (w = 0.667), × FLOOR 0.3 = 0.22, and on
+// a 0.03-mass piece F 7 gives 52 u/s² against friction μg = 42 — it slides, but the field
+// beats friction only while s(d) > 0.6, i.e. d < 0.39, so a piece that starts at 0.3 u gains
+// speed for 0.09 u and coasts to a stop: 0.1–0.3 u of travel, a nudge. Displacing a piece a
+// full width is the swipe's job: F_SWIPE brings a full-speed swipe to about the speed cap in
+// a tenth of a second on the same mass.
 const HIT_Y = 0.35;
 const R = 0.9;
 const F_BASE = 7;
@@ -449,14 +467,16 @@ function Pile({ pieces, accent, card, light, visible, pour, rig, contact, onDegr
   // The camera is fitted to the world-fixed tray whenever the canvas changes size; nothing
   // about the pile moves with it. The fit also carries the mouth height, the idle speed and
   // the shove caps, all read live by the loop.
-  const fitRef = useRef<CameraFit>(fitCamera(size.width / size.height, size.height));
+  // Memoised on `size`: the fit is two 48-step bisections, and this component re-renders on
+  // every CommitHeatmap render.
+  const fit = useMemo(() => fitCamera(size.width / size.height, size.height), [size]);
+  const fitRef = useRef<CameraFit>(fit);
   useEffect(() => {
-    const fit = fitCamera(size.width / size.height, size.height);
     fitRef.current = fit;
     camera.position.set(fit.position.x, fit.position.y, fit.position.z);
     camera.lookAt(LOOK);
     invalidate();
-  }, [size, camera, invalidate]);
+  }, [fit, camera, invalidate]);
 
   // drei's Environment applies environmentIntensity only when its children change, so the
   // theme knob is set here (applyProps, as drei itself does) and a frame asked for.
@@ -749,8 +769,9 @@ function Pile({ pieces, accent, card, light, visible, pour, rig, contact, onDegr
 
     // Frame budget during the pour: if twenty consecutive frames average over 20 ms the
     // canvas steps down (DPR 2 → 1, then no ContactShadows). Only continuous frames count —
-    // the first frame after an idle carries the idle as its delta.
-    if (nextBeat.current > 0 && !captured.current && delta < 0.25) {
+    // the first frame after an idle carries the idle as its delta, and the first frames of
+    // the pour compile shaders (~150 ms each), which is not the GPU's steady state.
+    if (nextBeat.current > 0 && !captured.current && delta < 0.1) {
       const p = perf.current;
       p.n++;
       p.sum += delta;
@@ -958,10 +979,13 @@ function Pile({ pieces, accent, card, light, visible, pour, rig, contact, onDegr
             linearDamping={mat.linearDamping}
             angularDamping={mat.angularDamping}
             // contactSkin 0.015 held resting bodies 0.015 u apart — 0.45 px at 30 px/u, a
-            // hairline at 72. Soft CCD covers the fall instead: a train from the mouth lands
-            // at ~22 u/s, 0.37 u per step against 0.2 u pieces.
+            // hairline at 72. Soft CCD covers the fall instead: the bottom rung lands from
+            // the 4.1 u mouth at ~22 u/s (0.37 u per step against 0.2 u pieces), and on the
+            // narrowest tray that mounts a five-rung train's top rung starts near 8.2 u and
+            // arrives at ~32 u/s = 0.53 u/step, so the prediction sits above that with a
+            // margin (asserted in tests/pile-scene.test.ts).
             contactSkin={0.004}
-            softCcdPrediction={0.5}
+            softCcdPrediction={0.6}
           >
             <instancedMesh
               ref={meshHolders[gi]}

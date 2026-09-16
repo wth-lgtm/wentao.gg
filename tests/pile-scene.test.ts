@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
+import { coverageScale } from "../app/lib/commitPile";
 import {
   CAMERA,
   WORLD,
@@ -85,5 +86,26 @@ test("capsFor: a capped hop from the crest at the back wall stays under the fram
     assert.ok(WORLD.CREST + (vCap * vCap) / (2 * WORLD.G) <= top + 1e-9, `aspect ${aspect}: rise ${rise} vs headroom ${top - WORLD.CREST}`);
     assert.ok(Math.abs(wCap - vCap / (1.035 * 0.55)) < 1e-9);
     assert.ok(vCap > 4 && vCap < 20, `vCap ${vCap}`);
+  }
+});
+
+// The component's tunnelling margins, restated here so the numbers they protect are tested:
+// wall/floor collider half-thickness 0.6, contactSkin 0.004, softCcdPrediction 0.6, SLOT
+// 2.2 k, release speed V0 3, up to POUR.trainMax = 5 rungs (FloatingBackground.tsx).
+const LIVE_K = coverageScale(Array.from({ length: 192 }, () => ({ level: 4 })));
+
+test("a capped shove travels less per step than a wall collider's half-thickness", () => {
+  for (const aspect of ASPECTS) {
+    const fit = fitCamera(aspect, 273);
+    assert.ok(capsFor(fit, LIVE_K).vCap / 60 + 0.004 < 0.6, `aspect ${aspect}: shove step vs wall half-thickness`);
+  }
+});
+
+test("a five-rung train's top rung arrives slower per step than the soft CCD prediction", () => {
+  for (const aspect of ASPECTS) {
+    const fit = fitCamera(aspect, 273);
+    const topRung = mouthFor(fit, LIVE_K) + 4 * 2.2 * LIVE_K;
+    const arrival = Math.sqrt(3 * 3 + 2 * WORLD.G * topRung);
+    assert.ok(arrival / 60 < 0.6, `aspect ${aspect}: top rung arrives at ${arrival.toFixed(1)} u/s = ${(arrival / 60).toFixed(3)} u/step`);
   }
 });
