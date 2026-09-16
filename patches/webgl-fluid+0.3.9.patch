@@ -1,0 +1,86 @@
+diff --git a/node_modules/webgl-fluid/dist/webgl-fluid.mjs b/node_modules/webgl-fluid/dist/webgl-fluid.mjs
+index 5b24431..43132c8 100644
+--- a/node_modules/webgl-fluid/dist/webgl-fluid.mjs
++++ b/node_modules/webgl-fluid/dist/webgl-fluid.mjs
+@@ -964,6 +964,7 @@
+ });
+ function ft(V, _) {
+   const D = V;
++  let alive = true;
+   g(), _ = {
+     IMMEDIATE: !0,
+     TRIGGER: "hover",
+@@ -1581,14 +1582,18 @@ function ft(V, _) {
+   }
+   t(), C(), _.IMMEDIATE && je(_.SPLAT_COUNT);
+   function i() {
++    if (!alive)
++      return;
+     _.AUTO && _.INTERVAL && !_.PAUSED && me.push(_.SPLAT_COUNT), setTimeout(i, _.INTERVAL);
+   }
+   setTimeout(i, _.INTERVAL);
+   let r = Date.now(), u = 0;
+   c();
+   function c() {
++    if (!alive)
++      return;
+     const o = h();
+-    g() && C(), b(o), v(), _.PAUSED || S(o), T(null), requestAnimationFrame(c);
++    g() && C(), b(o), v(), _.PAUSED || (S(o), T(null)), requestAnimationFrame(c);
+   }
+   function h() {
+     const o = Date.now();
+@@ -1692,9 +1697,7 @@ function ft(V, _) {
+       const s = $(o.offsetX), a = $(o.offsetY);
+       ot(U[0], s, a);
+     });
+-  }, 500), window.addEventListener("mouseup", () => {
+-    nt(U[0]);
+-  }), D.addEventListener("touchstart", (o) => {
++  }, 500), window.addEventListener("mouseup", onUp), D.addEventListener("touchstart", (o) => {
+     o.preventDefault();
+     const s = o.targetTouches;
+     for (; s.length >= U.length; )
+@@ -1710,15 +1713,20 @@ function ft(V, _) {
+       const f = $(s[a].pageX), p = $(s[a].pageY);
+       ot(U[a + 1], f, p);
+     }
+-  }, !1), window.addEventListener("touchend", (o) => {
++  }, !1), window.addEventListener("touchend", onTouchEnd), window.addEventListener("keydown", onKey);
++  function onUp() {
++    nt(U[0]);
++  }
++  function onTouchEnd(o) {
+     const s = o.changedTouches;
+     for (let a = 0; a < s.length; a++) {
+       const f = U.find((p) => p.id === s[a].identifier);
+       nt(f);
+     }
+-  }), window.addEventListener("keydown", (o) => {
++  }
++  function onKey(o) {
+     o.code === "KeyP" && (_.PAUSED = !_.PAUSED), o.key === " " && me.push(Number.parseInt(Math.random() * 20) + 5);
+-  });
++  }
+   function it(o, s, a, f) {
+     o.id = s, o.down = !0, o.moved = !1, o.texcoordX = a / D.width, o.texcoordY = 1 - f / D.height, o.prevTexcoordX = o.texcoordX, o.prevTexcoordY = o.texcoordY, o.deltaX = 0, o.deltaY = 0, o.color = tt();
+   }
+@@ -1804,6 +1812,18 @@ function ft(V, _) {
+       s = (s << 5) - s + o.charCodeAt(a), s |= 0;
+     return s;
+   }
++  return {
++    destroy() {
++      if (!alive)
++        return;
++      alive = false, window.removeEventListener("mouseup", onUp), window.removeEventListener("touchend", onTouchEnd), window.removeEventListener("keydown", onKey);
++      const o = n.getExtension("WEBGL_lose_context");
++      o && o.loseContext();
++    },
++    pause(o) {
++      _.PAUSED = o;
++    }
++  };
+ }
+ export {
+   ft as default
