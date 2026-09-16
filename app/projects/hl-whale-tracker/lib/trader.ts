@@ -108,6 +108,9 @@ export interface TraderPositions {
   positions: PerpPosition[] | null;
   spot: SpotBalance[] | null;
   fetchedAt: number;
+  /** How old the body already was when the handler sent it, on the SERVER clock. Read
+   * beside the CDN `age` header through lib/servedAge, never subtracted from ours. */
+  servedAgeMs: number;
 }
 
 /** `/api/hl-trader/[address]/fills` — what the Trades tab reads. */
@@ -117,6 +120,8 @@ export interface TraderFills {
    * The panel's "a real state, not an error" copy is only ever correct for []. */
   fills: Fill[] | null;
   fetchedAt: number;
+  /** As on TraderPositions: server-clock age at send time, for lib/servedAge. */
+  servedAgeMs: number;
 }
 
 /** null when upstream did not answer; [] when it answered with no open positions. */

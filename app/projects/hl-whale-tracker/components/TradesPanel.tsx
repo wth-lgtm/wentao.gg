@@ -1,9 +1,10 @@
 "use client";
 
 import { Fragment, useMemo, useState } from "react";
-import { AddressLegend, Legend, Unavailable, dash } from "./Instrument";
+import { AddressLegend, AsOf, Legend, Unavailable, dash } from "./Instrument";
 import { formatCurrency, toneClass } from "../lib/formatters";
 import { FILL_LIMIT, TraderFills } from "../lib/trader";
+import type { ReceiptAge } from "../lib/servedAge";
 import {
   DirFacets,
   LabelledFill,
@@ -166,12 +167,15 @@ function TimeCell({ order }: { order: Order }) {
 export default function TradesPanel({
   address,
   data,
+  receipt,
   loading,
   error,
   onRetry,
 }: {
   address: string | null;
   data: TraderFills | null;
+  /** When `data` landed and how old it already was (lib/servedAge); null with `data`. */
+  receipt: ReceiptAge | null;
   loading: boolean;
   error: string | null;
   /** Re-reads this trader, both slices (useTrader's reload). */
@@ -214,19 +218,40 @@ export default function TradesPanel({
     );
   }
 
-  if (error) {
-    return (
+  // Only a tape that never ARRIVED is replaced by the failure. This branch used to come
+  // before the data branches, so a re-read that 429'd replaced a hundred fills with
+  // "Could not read"; a failed re-read over a tape is `reread` below, and the tape stays.
+  if (!data) {
+    if (error) {
+      return (
+        <Panel>
+          <AddressLegend prefix="Could not read " address={address} />
+          {/* The only recovery here used to be Clear → leaderboard → reselect, because
+              useTrader refetches on a CHANGE of address and re-clicking the same row
+              changes nothing. */}
+          <Unavailable reason={error} onRetry={onRetry} busy={loading} />
+        </Panel>
+      );
+    }
+    return null;
+  }
+
+  // The failure voice over a tape that is still on screen, dated so the reader knows how
+  // old what it stands over is. Not rendered over the absent branch below: a failed
+  // re-read of a tape upstream never sent is one failure, and that branch already says
+  // it, with the same Re-read.
+  const reread =
+    error === null ? null : (
       <Panel>
-        <AddressLegend prefix="Could not read " address={address} />
-        {/* The only recovery here used to be Clear → leaderboard → reselect, because
-            useTrader refetches on a CHANGE of address and re-clicking the same row
-            changes nothing. */}
+        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+          <AddressLegend prefix="Re-read failed · " address={address} />
+          {receipt !== null && (
+            <AsOf receipt={receipt} prefix="Showing the tape from" of="these fills" />
+          )}
+        </div>
         <Unavailable reason={error} onRetry={onRetry} busy={loading} />
       </Panel>
     );
-  }
-
-  if (!data) return null;
 
   // Absent before empty. The copy below asserts "that is a real state, not an error",
   // which is a literal falsehood over a call that never answered — it is only ever
@@ -250,16 +275,19 @@ export default function TradesPanel({
 
   if (fills.length === 0) {
     return (
-      <Panel>
-        <AddressLegend prefix="No recent fills · " address={address} />
-        {/* One sentence, about THIS trader. The previous copy spent three on the
-            fourteen addresses sampled while the panel was built — a fact about the
-            author, not about the address on screen. */}
-        <p className="mt-2 text-sm text-muted">
-          Upstream answered and reported no fills for this address — a real state, not
-          an error.
-        </p>
-      </Panel>
+      <div className="space-y-4">
+        {reread}
+        <Panel>
+          <AddressLegend prefix="No recent fills · " address={address} />
+          {/* One sentence, about THIS trader. The previous copy spent three on the
+              fourteen addresses sampled while the panel was built — a fact about the
+              author, not about the address on screen. */}
+          <p className="mt-2 text-sm text-muted">
+            Upstream answered and reported no fills for this address — a real state, not
+            an error.
+          </p>
+        </Panel>
+      </div>
     );
   }
 
@@ -326,6 +354,7 @@ export default function TradesPanel({
 
   return (
     <div className="space-y-4">
+      {reread}
       <Panel>
         <div className="mb-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
           <AddressLegend prefix="Recent tape · " address={address} />

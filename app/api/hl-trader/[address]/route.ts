@@ -139,6 +139,13 @@ export async function GET(
       // entries and the mids another 1,079 keys, for eleven rows on screen.
       spot: priceSpot(parseSpot(spotState), pricing.spotMeta, pricing.allMids),
       fetchedAt: Date.now(),
+      // Zero by construction: this body is built in the handler that sends it, so it has
+      // no server-side age of its own — the edge's `age` header carries the only hold.
+      // The field is here so the client reads one shape for both trader routes and the
+      // leaderboard (lib/servedAge), and so the panel's "As of" never again subtracts
+      // this server's `fetchedAt` from the visitor's clock — a visitor running behind
+      // saw 00:00 over a two-minute-old edge HIT.
+      servedAgeMs: 0,
     },
     {
       headers: {

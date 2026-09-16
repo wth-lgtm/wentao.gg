@@ -127,6 +127,10 @@ export async function GET(
       // SAMPLE in lib/fills.ts).
       fills: parsed ?? null,
       fetchedAt: Date.now(),
+      // Zero by construction, as in the sibling route: built in the handler that sends
+      // it, so only the edge's `age` header can age it. Same shape for every reading
+      // the client dates (lib/servedAge).
+      servedAgeMs: 0,
     },
     {
       headers: {

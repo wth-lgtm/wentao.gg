@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { AddressLegend, Legend, Unavailable, dash } from "./Instrument";
+import { useMemo } from "react";
+import { AddressLegend, AsOf, Legend, Unavailable, dash } from "./Instrument";
 import { formatCurrency, formatPercent, toneClass } from "../lib/formatters";
 import { formatPrice, formatSize } from "../lib/fills";
+import type { ReceiptAge } from "../lib/servedAge";
 import {
   Aggregate,
   DUST_USD,
@@ -72,54 +73,9 @@ function SideBadge({ side }: { side: PerpPosition["side"] }) {
   );
 }
 
-/**
- * Age of THIS address's snapshot.
- *
- * The route caches at the edge (`s-maxage=30, stale-while-revalidate=120`) and two
- * consecutive live GETs came back MISS then HIT with an identical fetchedAt, so what
- * is on screen can be two minutes old with nothing saying so. The rail above the tabs
- * ages the LEADERBOARD, which is different data on a different schedule — hence a
- * second, local reading in the rail's own MM:SS language.
- *
- * Deliberately not a live region (`aria-live="off"`, matching the rail): a clock
- * inside one would interrupt a screen reader every second, forever.
- */
-function AsOf({ since }: { since: number }) {
-  // Elapsed SECONDS in state, label is pure formatting — and the first sample is
-  // deferred a frame rather than taken in the effect body, so nothing reads
-  // Date.now() during render and no setState cascades a second render.
-  const [seconds, setSeconds] = useState<number | null>(null);
-
-  useEffect(() => {
-    const sample = () => setSeconds(Math.max(0, Math.floor((Date.now() - since) / 1000)));
-    const frame = requestAnimationFrame(sample);
-    const id = setInterval(sample, 1000);
-    return () => {
-      cancelAnimationFrame(frame);
-      clearInterval(id);
-    };
-  }, [since]);
-
-  const label =
-    seconds === null
-      ? "--:--"
-      : `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
-
-  return (
-    <Legend>
-      As of{" "}
-      <span aria-live="off" className="tabular-nums text-foreground">
-        {label}
-      </span>{" "}
-      ago
-      <span className="sr-only">
-        {" "}
-        — how long since these perp and spot figures were read; the snapshot age on the
-        rail above belongs to the leaderboard
-      </span>
-    </Legend>
-  );
-}
+// The "As of" clock moved to Instrument.tsx as AsOf: the Trades tab's failed-re-read
+// voice needs to date the tape it stands over, and one clock per panel is how the two
+// ended up subtracting the server's stamp from the visitor's clock (lib/servedAge).
 
 // ── Position ordering and the dust gate ───────────────────────────────────────
 //
@@ -623,6 +579,7 @@ function SpotDustBlock({ rows, total }: { rows: SpotBalance[]; total: number }) 
 export default function PositionsPanel({
   address,
   data,
+  receipt,
   loading,
   error,
   leaderboardAccountValue,
@@ -632,6 +589,8 @@ export default function PositionsPanel({
   /** The positions slice only. Fills live in their own route and their own slice, so
    * this panel no longer waits on a 1.16-1.38s userFills call it never reads. */
   data: TraderPositions | null;
+  /** When `data` landed and how old it already was (lib/servedAge); null with `data`. */
+  receipt: ReceiptAge | null;
   loading: boolean;
   error: string | null;
   /** This address's equity as the LEADERBOARD measures it, from the row that is
@@ -676,18 +635,21 @@ export default function PositionsPanel({
     );
   }
 
-  if (error) {
-    return (
-      <Panel>
-        <AddressLegend prefix="Could not read " address={address} />
-        <p className="mt-2 font-mono text-xs uppercase tracking-[0.16em] text-[var(--loss)]">
-          {error}
-        </p>
-      </Panel>
-    );
+  // Only a reading that never ARRIVED is replaced by the failure. This branch used to
+  // come before the data branches, so a re-read that 429'd replaced twelve live
+  // positions with "Could not read" — the visitor pressed Re-read for a fresher reading
+  // and lost the one they had. A failed re-read over a reading is `reread` below.
+  if (!data) {
+    if (error) {
+      return (
+        <Panel>
+          <AddressLegend prefix="Could not read " address={address} />
+          <Unavailable reason={error} onRetry={onRetry} busy={loading} />
+        </Panel>
+      );
+    }
+    return null;
   }
-
-  if (!data) return null;
 
   const { margin, positions, spot } = data;
 
@@ -701,7 +663,29 @@ export default function PositionsPanel({
     positions !== null && positions.length === 0 && spot !== null && spot.length > 0;
   // Both slices absent is one upstream refusal, not two — see the spot notice below.
   const bothAbsent = positions === null && spot === null;
-  const asOf = <AsOf since={data.fetchedAt} />;
+  const asOf =
+    receipt === null ? null : <AsOf receipt={receipt} of="these perp and spot figures" />;
+
+  // The failure voice over a reading that is still on screen. The reading is still the
+  // most recent thing upstream said about this address, so it stays, and the failure
+  // says how old what it is standing over is. `loading` here is a further re-read in
+  // flight over both.
+  const reread =
+    error === null ? null : (
+      <Panel key="reread">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+          <AddressLegend prefix="Re-read failed · " address={address} />
+          {receipt !== null && (
+            <AsOf
+              receipt={receipt}
+              prefix="Showing the reading from"
+              of="the perp and spot figures below"
+            />
+          )}
+        </div>
+        <Unavailable reason={error} onRetry={onRetry} busy={loading} />
+      </Panel>
+    );
 
   // Both figures or neither, and both above zero. A ratio needs a positive denominator
   // to be a ratio at all, and it needs a positive NUMERATOR to be worth printing:
@@ -900,6 +884,7 @@ export default function PositionsPanel({
 
   return (
     <div className="space-y-4">
+      {reread}
       {spotFirst
         ? [spotBalances, perpAccount, perpPositions]
         : [perpAccount, perpPositions, spotBalances]}

@@ -1,4 +1,6 @@
-import { formatAddress, signGlyph, toneClass } from "../lib/formatters";
+import { useEffect, useState } from "react";
+import { formatAddress, formatAge, signGlyph, toneClass } from "../lib/formatters";
+import { elapsedMs, type ReceiptAge } from "../lib/servedAge";
 import { tierOf } from "../lib/tier";
 
 // The panels' shared etched-instrument primitives.
@@ -142,6 +144,63 @@ function ReRead({ onRetry, busy }: { onRetry: () => void; busy: boolean }) {
     >
       {busy ? "Re-reading" : "Re-read"}
     </button>
+  );
+}
+
+/**
+ * Age of THIS panel's reading, in the rail's own MM:SS language.
+ *
+ * The trader routes cache at the edge (`s-maxage=30, stale-while-revalidate=120`) and
+ * two consecutive live GETs came back MISS then HIT with an identical fetchedAt, so what
+ * is on screen can be two minutes old with nothing saying so. The rail above the tabs
+ * ages the LEADERBOARD, which is different data on a different schedule — hence a
+ * second, local reading. It is one clock per subtraction (lib/servedAge): this used to be
+ * `Date.now() - data.fetchedAt`, the server's stamp against the visitor's clock, and a
+ * visitor running behind saw 00:00 over a two-minute-old snapshot.
+ *
+ * Shared by Positions and Trades because the failed-re-read voice on both needs to date
+ * the reading it is standing over. Deliberately not a live region (`aria-live="off"`,
+ * matching the rail): a clock inside one would interrupt a screen reader every second,
+ * forever. `of` names the figures for the sr-only gloss, since "As of" alone does not say
+ * which of the page's two ages this is.
+ */
+export function AsOf({
+  receipt,
+  prefix = "As of",
+  of,
+}: {
+  receipt: ReceiptAge;
+  /** The words before the clock; the failure voice uses "Showing the reading from". */
+  prefix?: string;
+  /** What was read, e.g. "these perp and spot figures". */
+  of: string;
+}) {
+  // Elapsed SECONDS in state, label is pure formatting — and the first sample is
+  // deferred a frame rather than taken in the effect body, so nothing reads Date.now()
+  // during render and no setState cascades a second render.
+  const [seconds, setSeconds] = useState<number | null>(null);
+
+  useEffect(() => {
+    const sample = () => setSeconds(Math.floor(elapsedMs(receipt, Date.now()) / 1000));
+    const frame = requestAnimationFrame(sample);
+    const id = setInterval(sample, 1000);
+    return () => {
+      cancelAnimationFrame(frame);
+      clearInterval(id);
+    };
+  }, [receipt]);
+
+  return (
+    <Legend>
+      {prefix}{" "}
+      <span aria-live="off" className="tabular-nums text-foreground">
+        {seconds === null ? "--:--" : formatAge(seconds)}
+      </span>{" "}
+      ago
+      <span className="sr-only normal-case tracking-normal">
+        {` — how long since ${of} were read; the snapshot age on the rail above belongs to the leaderboard`}
+      </span>
+    </Legend>
   );
 }
 

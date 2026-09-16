@@ -379,6 +379,7 @@ function WhaleTracker() {
           <PositionsPanel
             address={focused}
             data={trader.positions.data}
+            receipt={trader.positions.receipt}
             loading={trader.positions.loading}
             error={trader.positions.error}
             leaderboardAccountValue={focusedEquity}
@@ -392,6 +393,7 @@ function WhaleTracker() {
           <TradesPanel
             address={focused}
             data={trader.fills.data}
+            receipt={trader.fills.receipt}
             loading={trader.fills.loading}
             error={trader.fills.error}
             onRetry={trader.reload}
