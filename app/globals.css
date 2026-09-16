@@ -55,7 +55,11 @@
 .light {
   --background: #ffffff;
   --foreground: #0a0a0b;
-  --muted: #6b7280;
+  /* 4.70:1 on --card and 5.17:1 on --background. It was #6b7280, which measured 4.40:1
+     on the card — under AA for every 11-16px text-muted run on the whale page's cards
+     (fifty board addresses, the volumes, the tape's clocks, the Positions dashes) and
+     the home page's glass. One step darker along the same slate; --legend is untouched. */
+  --muted: #646e7c;
   --accent: #2563eb;
   --accent-hover: #1d4ed8;
   --card: #f4f4f5;
@@ -837,13 +841,18 @@ input:focus {
    switching tabs unmounts a plate and mounts another, and this animation is a plate
    ARRIVING, not one sliding across the rack. A scaleX settle is the honest read of
    that: it grows into its own berth from its own centre. 0.3s, because a discrete
-   state change lands on an N x 100ms beat. */
+   state change lands on an N x 100ms beat.
+
+   Filled with --foreground, under a text-background label (TabNavigation.tsx). It was
+   --accent under white, which measures 3.68:1 on the dark theme; the page colour pair is
+   16.09:1 dark and 19.79:1 light, the same treatment TimeFilter and the phone's sort
+   segments use. */
 .hl-tab-plate {
   position: absolute;
   inset: 0;
   z-index: 0;
   border-radius: 0.5rem;
-  background: var(--accent);
+  background: var(--foreground);
   box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 26%, transparent);
   animation: hlPlateSeat 0.3s var(--ease-entrance) both;
 }

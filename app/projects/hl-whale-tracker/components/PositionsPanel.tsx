@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { AddressLegend, AsOf, Legend, Unavailable, dash } from "./Instrument";
+import { AddressLegend, AsOf, BoardWord, Legend, Unavailable, dash } from "./Instrument";
 import { formatCurrency, formatPercent, toneClass } from "../lib/formatters";
 import { formatPrice, formatSize } from "../lib/fills";
 import type { ReceiptAge } from "../lib/servedAge";
@@ -584,6 +584,7 @@ export default function PositionsPanel({
   error,
   leaderboardAccountValue,
   onRetry,
+  onBoard,
 }: {
   address: string | null;
   /** The positions slice only. Fills live in their own route and their own slice, so
@@ -600,6 +601,8 @@ export default function PositionsPanel({
   leaderboardAccountValue: number | null;
   /** Re-reads this trader, both slices (useTrader's reload). */
   onRetry?: () => void;
+  /** Switches to the board tab through the page's tab-change path (see BoardWord). */
+  onBoard?: () => void;
 }) {
   // Derived before the early returns, because hooks cannot live behind a branch. Each
   // one is keyed on the snapshot object, so a re-render that does not change the data
@@ -616,7 +619,8 @@ export default function PositionsPanel({
       <Panel>
         <Legend>No trader selected</Legend>
         <p className="mt-2 text-sm text-muted">
-          Pick a row on the leaderboard to inspect what that address is holding.
+          Pick a trader on <BoardWord onBoard={onBoard} /> to inspect what that address is
+          holding.
         </p>
       </Panel>
     );

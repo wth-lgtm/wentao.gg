@@ -204,6 +204,29 @@ export function AsOf({
   );
 }
 
+/**
+ * "the board", as the control it names.
+ *
+ * Both trader panels open on "Pick a trader on the board" when nothing is selected. That
+ * used to read "Pick a row on the leaderboard", which is false below sm — the board is a
+ * card stack there, a tab away, with no row in sight — and a sentence that names a place
+ * the visitor cannot see should take them there. Routed through the caller's tab-change
+ * path so it is the same history push a tap on the BOARD tab makes; plain words when no
+ * path is wired, so the sentence still reads.
+ */
+export function BoardWord({ onBoard }: { onBoard?: () => void }) {
+  if (!onBoard) return <>the board</>;
+  return (
+    <button
+      type="button"
+      onClick={onBoard}
+      className="underline decoration-[var(--legend)] underline-offset-2 hover:text-foreground"
+    >
+      the board
+    </button>
+  );
+}
+
 /** A legend whose tail is an address: the label is etched, the hex is not touched. */
 export function AddressLegend({
   prefix,

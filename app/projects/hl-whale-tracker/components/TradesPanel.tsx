@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useMemo, useState } from "react";
-import { AddressLegend, AsOf, Legend, Unavailable, dash } from "./Instrument";
+import { AddressLegend, AsOf, BoardWord, Legend, Unavailable, dash } from "./Instrument";
 import { formatCurrency, toneClass } from "../lib/formatters";
 import { FILL_LIMIT, TraderFills } from "../lib/trader";
 import type { ReceiptAge } from "../lib/servedAge";
@@ -171,6 +171,7 @@ export default function TradesPanel({
   loading,
   error,
   onRetry,
+  onBoard,
 }: {
   address: string | null;
   data: TraderFills | null;
@@ -180,6 +181,8 @@ export default function TradesPanel({
   error: string | null;
   /** Re-reads this trader, both slices (useTrader's reload). */
   onRetry?: () => void;
+  /** Switches to the board tab through the page's tab-change path (see BoardWord). */
+  onBoard?: () => void;
 }) {
   const [grouped, setGrouped] = useState(true);
 
@@ -199,7 +202,8 @@ export default function TradesPanel({
       <Panel>
         <Legend>No trader selected</Legend>
         <p className="mt-2 text-sm text-muted">
-          Pick a row on the leaderboard to read that address&rsquo;s recent fills.
+          Pick a trader on <BoardWord onBoard={onBoard} /> to read that address&rsquo;s
+          recent fills.
         </p>
       </Panel>
     );

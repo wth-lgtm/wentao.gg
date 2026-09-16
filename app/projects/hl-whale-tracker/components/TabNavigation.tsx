@@ -110,8 +110,13 @@ export default function TabNavigation({
             tabIndex={active ? 0 : -1}
             onClick={() => onChange(tab.id, "pointer")}
             onKeyDown={(event) => onKeyDown(event, index)}
+            // text-background over the plate's bg-foreground fill (globals.css
+            // .hl-tab-plate) — the label and the plate are SIBLINGS, the label above it
+            // at z-10, so the two are changed together: white on the dark theme's
+            // --accent measured 3.68:1, and foreground on background is 16.09:1 dark,
+            // 19.79:1 light. Accent stays for focus rings.
             className={`hl-tab relative flex min-w-0 items-center justify-center gap-1.5 overflow-hidden rounded-lg py-2.5 font-mono text-[11px] uppercase tracking-[0.16em] whitespace-nowrap transition-colors ${
-              active ? "text-white" : "text-[var(--legend)] hover:text-foreground"
+              active ? "text-background" : "text-[var(--legend)] hover:text-foreground"
             }`}
           >
             {/* Exactly one lit plate exists at a time, and it belongs to the selected
