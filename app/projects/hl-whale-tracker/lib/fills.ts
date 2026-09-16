@@ -8,9 +8,8 @@
 //     most recent fills were THREE actual orders sliced into pieces — 58 consecutive
 //     ETH shorts of 0.0157 each. Rendering raw fills there means printing one
 //     near-identical row fifty-eight times. Compression measured 5x to 33x. WHICH
-//     fills were one order is a fact upstream ships as `oid`, not something to infer:
-//     the 7d #1 address's hundred fills carry 73 distinct oids, and the time
-//     heuristic that used to stand in for them printed ten rows saying "one order".
+//     fills were one order is a fact upstream ships as `oid`, not something to infer
+//     (see THE OID SAMPLE below for the reading that settled it).
 //  2. `dir` is a structured pair, not a label. The observed values decompose cleanly
 //     into an action and a side, which lets the UI carry direction with glyph + word
 //     instead of a string nobody can scan. The vocabulary is Hyperliquid's and it
@@ -21,6 +20,28 @@
 //     A single summed fee number would add unlike units and state a false total.
 
 import { Fill, num } from "./trader";
+
+// ── THE OID SAMPLE ────────────────────────────────────────────────────────────
+/*
+ * The ONE place the oid reading is written down, because it was asserted in four
+ * files and the four had already drifted apart.
+ *
+ * Re-probed on the dates below against the live 7d #1 address's 100 most recent
+ * `userFills`, and the count MOVES — it is a property of how that address happened to
+ * be trading that hour, not a constant:
+ *
+ *   2026-09-15   73 distinct oids   (the reading the spec was written on)
+ *   2026-09-15   76 oids / 75 orders   (a same-day re-run, hours later)
+ *   2026-09-16   57 oids / 57 orders   (0x5b5d5120…f298c060, this file's re-probe)
+ *
+ * So the durable fact is the ORDER OF MAGNITUDE and never the exact figure: a hundred
+ * fills from an address like this are dozens of separate orders, and the time
+ * heuristic this replaced collapsed them into ten rows while telling the visitor each
+ * row was "one order". Any file that needs the number cites this constant rather than
+ * restating it, which is what stops the next re-probe leaving three stale copies.
+ * Referred to elsewhere as "THE OID SAMPLE"; a constant would only be an export
+ * nothing imports.
+ */
 
 // How far apart two fills can be and still belong to the same order, for the fills
 // that arrive with no order id — see groupFills, where this is the fallback and not
@@ -93,6 +114,12 @@ export interface DirFacets {
 // 2, Auto-Deleveraging 1. One address on the board (0xbdfa4f44…) held ten Settlement
 // fills summing to -$14,018.65, so its Realised stat read -$23.4K over "4 closes"
 // where the truth was -$37.4K over 14.
+// Frozen, and frozen per ROW rather than only at the top level: dirFacets returns the
+// row itself (one object per dir, shared by every caller), so an unfrozen row let any
+// consumer rewrite what "Close Long" realises for the rest of the process — including
+// realisedTotal's own reads a few lines below. Object.freeze rather than a defensive
+// clone because this is read on every fill of every row and a copy per read is 100
+// allocations per tape for a mutation nobody wants to make.
 const DIR_TABLE: Record<string, DirFacets> = {
   "Open Long": { action: "OPEN", side: "LONG", realises: false },
   "Open Short": { action: "OPEN", side: "SHORT", realises: false },
@@ -106,6 +133,13 @@ const DIR_TABLE: Record<string, DirFacets> = {
   // A forced close is still a close, and it realises. The dir does NOT say whose
   // liquidation it was — 951 of 956 fills carrying a `liquidation` object have a
   // plain Close/Open dir — so these facets claim only what the string itself says.
+  //
+  // Badging those 951 is therefore NOT a display-layer change, contrary to what an
+  // earlier write-up of this decision claimed: parseFills (trader.ts) builds its Fill
+  // field by field and never copies `liquidation`, and the route trims the payload on
+  // the way out, so the object does not reach the client at all. The field would have
+  // to be added to Fill, to parseFills and to the route's response before a badge
+  // could read it.
   "Liquidated Isolated Long": { action: "CLOSE", side: "LONG", realises: true, word: "LIQ" },
   "Liquidated Isolated Short": { action: "CLOSE", side: "SHORT", realises: true, word: "LIQ" },
   // Auto-deleveraging closes a position the exchange chose, and the string carries no
@@ -118,6 +152,7 @@ const DIR_TABLE: Record<string, DirFacets> = {
   // that is not realised perp PnL, so it stays out of the total like Buy and Sell.
   "Spot Dust Conversion": { action: "SPOT", side: "NONE", realises: false, word: "DUST" },
 };
+for (const facets of Object.values(DIR_TABLE)) Object.freeze(facets);
 
 // The cross-margin siblings of the two isolated liquidation dirs, matched by SHAPE
 // because their exact wording has not been observed and the cost of missing one is a
@@ -162,6 +197,14 @@ export interface Order {
    * settled in one block share a `time` (43 adjacent same-millisecond pairs in the
    * live hundred), so a basket close across markets produced two identical
    * time+coin+dir keys and React reused the wrong row.
+   *
+   * Unique, but deliberately NOT stable across snapshots, and the tape lives with
+   * that. The index is positional, so one new fill at the head shifts every key below
+   * it and React remounts the whole tbody on a refetch. The alternative — dropping
+   * the index — is the identical-key collision above, which shows the WRONG row's
+   * figures; a remount only replays the arrival stagger. Nothing on a tape row holds
+   * state that a remount would lose (no inputs, no open drawer, no odometer), which is
+   * why this is the cheap side of the trade.
    */
   key: string;
   coin: string;
@@ -202,7 +245,8 @@ export type LabelledFill = Fill & { label?: string };
  * The key is the ORDER ID upstream ships — `twapId` first, so a TWAP's many child
  * oids read as the single intent they were, then `oid`. This replaced a time
  * heuristic, and the difference is not academic: on the 7d #1 address the heuristic
- * drew 10 rows over 43 real orders and told the visitor each row was "one order"
+ * drew 10 rows over 43 real orders (2026-09-15; the count is a property of the hour,
+ * see THE OID SAMPLE above) and told the visitor each row was "one order"
  * (one ×24 row was 5 oids, one ×11 row was 10 separate ETH orders in 27 s); another
  * board address rendered all 100 fills — 51 orders over 9.4 minutes — as a single
  * "×100" line with one clock time.
@@ -399,6 +443,14 @@ export function dayKey(ms: number | null): string | null {
 // before the month but renders September as "Sept" — the one four-letter month, which
 // breaks a mono column — while en-US renders "Sep 15". Every en-US short month is
 // three letters, so the parts come from en-US and the order is imposed here.
+//
+// The formatter is constructed per call and stays that way. Hoisting it to module
+// scope would save an Intl construction per row, but an Intl.DateTimeFormat resolves
+// its time zone ONCE, at construction: this file is evaluated at import, which in ESM
+// is before any statement in the importing module runs, so a hoisted formatter would
+// capture the zone that was live before tests/fills.test.ts sets process.env.TZ — and
+// every viewer-local string in this file would then be pinned to the wrong clock. The
+// cost being avoided is a few hundred microseconds per tape.
 function dateParts(ms: number): { weekday: string; day: string; month: string } {
   const parts = new Intl.DateTimeFormat("en-US", {
     weekday: "short",
@@ -437,10 +489,22 @@ export function formatZone(ms: number): string {
   return parts.find((p) => p.type === "timeZoneName")?.value ?? "";
 }
 
-/** Coin-unit size: large counts need no decimals, fractional ones need four. */
+/** The finest count this column resolves — four decimals, so anything under half of
+ * the last place rounds away. */
+const SIZE_FLOOR = 0.00005;
+
+/**
+ * Coin-unit size: large counts need no decimals, fractional ones need four.
+ *
+ * Below the column's resolution it states the bound instead of rounding to "0".
+ * parseSpot drops only EXACT zeros — correctly, since 1e-6 of a token is still a
+ * holding the account owns — so a bare "0" here was a confident zero printed over
+ * something real, which is the one thing this panel's dash convention exists to stop.
+ */
 export function formatSize(v: number | null): string {
   if (v === null) return "—";
   const abs = Math.abs(v);
+  if (abs > 0 && abs < SIZE_FLOOR) return v < 0 ? ">-0.0001" : "<0.0001";
   const digits = abs >= 1_000 ? 0 : abs >= 1 ? 2 : 4;
   return v.toLocaleString("en-US", { maximumFractionDigits: digits });
 }
@@ -467,10 +531,14 @@ const FEE_DIGITS = 3;
  * column, where the decimal points did not line up and every row asserted a different
  * resolution. Below the column's resolution the value says so rather than rounding to
  * a bare "0.000", which would read as free.
+ *
+ * The bound TURNS ROUND for a rebate. "-<0.001" read as a minus sign glued to a
+ * less-than, and it also said the wrong thing: a rebate of a ten-thousandth is
+ * greater than -0.001, not less than it.
  */
 export function formatFee(amount: number, token: string): string {
   const abs = Math.abs(amount);
-  if (abs > 0 && abs < 0.0005) return `${amount < 0 ? "-" : ""}<0.001 ${token}`;
+  if (abs > 0 && abs < 0.0005) return `${amount < 0 ? ">-" : "<"}0.001 ${token}`;
   return `${amount.toLocaleString("en-US", {
     minimumFractionDigits: FEE_DIGITS,
     maximumFractionDigits: FEE_DIGITS,

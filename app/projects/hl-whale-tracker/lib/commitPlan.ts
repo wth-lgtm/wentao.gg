@@ -97,9 +97,19 @@ export function arrivalDelayMs(rank: number): number {
   return ARRIVAL_BASE_MS + Math.min(rank * ARRIVAL_STEP_MS, ARRIVAL_STAGGER_CAP_MS);
 }
 
+// Three of the fields below are the PLAN's vocabulary rather than the engine's input:
+// `HeldRow.to`, `ArrivedRow.to` and `DepartedRow.from` are computed and no consumer reads
+// them. They are kept, and said so here, because the plan is a value the tests assert
+// whole (tests/commitPlan.test.ts) — a berth pair reads as a move, where `dy` alone reads
+// as a number — and because dropping a field from a tested pure module to save three
+// integers per row is not a trade worth making. What was wrong was the DOC: it named a
+// consumer for one of them that has never existed.
 export interface HeldRow {
   key: string;
+  /** The berth it held in the OLD order. The one index the engine does read: the ghost
+   * sheet hides these rows in the clone, because a held row travels as itself. */
   from: number;
+  /** Its berth in the NEW order. Descriptive — the array is already in that order. */
   to: number;
   /** travelPx(from, to). Zero for a row that did not move; the engine skips it, the
    * ghost still hides it. */
@@ -108,12 +118,15 @@ export interface HeldRow {
 
 export interface DepartedRow {
   key: string;
-  /** The berth it leaves from — where the ghost sheet keeps it visible. */
+  /** The berth it leaves from. Descriptive: the ghost sheet keeps a departure visible by
+   * NOT hiding it — it hides the held rows by index and leaves the rest alone — so
+   * nothing reads this. The doc used to claim the sheet used it. */
   from: number;
 }
 
 export interface ArrivedRow {
   key: string;
+  /** Its berth in the NEW order. Descriptive; `delayMs` is what the engine uses. */
   to: number;
   delayMs: number;
 }

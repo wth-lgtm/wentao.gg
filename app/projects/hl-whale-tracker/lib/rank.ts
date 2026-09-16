@@ -45,9 +45,22 @@ function pnlOrder<T extends TraderMetrics>(rows: readonly T[]): T[] {
   return [...rows].sort((a, b) => b.pnl - a.pnl);
 }
 
-/** address → rank in this window's PnL order. The lookup the delta plate uses. */
+/**
+ * address → rank in this window's PnL order. The lookup the delta plate uses.
+ *
+ * A duplicated address keeps its BEST berth. `new Map(entries)` kept whichever berth
+ * was written last — the worse one — for no stated reason, while withCanonicalRank
+ * below goes out of its way to give two such rows two distinct ranks: one file, two
+ * postures on the same payload defect. This lookup answers "where is this address on
+ * the board", so the answer is its highest berth, and it is now a decision rather than
+ * a property of Map's insertion order.
+ */
 export function rankByPnl(rows: readonly TraderMetrics[]): Map<string, number> {
-  return new Map(pnlOrder(rows).map((row, i) => [row.address, i + 1]));
+  const ranks = new Map<string, number>();
+  pnlOrder(rows).forEach((row, i) => {
+    if (!ranks.has(row.address)) ranks.set(row.address, i + 1);
+  });
+  return ranks;
 }
 
 /**
