@@ -72,15 +72,23 @@ export interface MarginSummary {
 
 export interface TraderSnapshot {
   address: string;
+  /** null when the perp call failed: a live clearinghouseState always carries a
+   * marginSummary, even for an address that has never traded. */
   margin: MarginSummary | null;
-  positions: PerpPosition[];
-  spot: SpotBalance[];
-  fills: Fill[];
-  /** True when upstream answered but held nothing — a real fact, not a failure. */
+  // null is "upstream did not answer", [] is "upstream answered and held nothing".
+  // The three calls are independent, so one can be absent while the others are real —
+  // and the route only 502s when all three fail. Flattening the absent one into []
+  // is what let the panels print "currently flat" and "no fill history … a real
+  // state, not an error" over a call that never came back.
+  positions: PerpPosition[] | null;
+  spot: SpotBalance[] | null;
+  fills: Fill[] | null;
   fetchedAt: number;
 }
 
-export function parsePositions(raw: unknown): PerpPosition[] {
+/** null when upstream did not answer; [] when it answered with no open positions. */
+export function parsePositions(raw: unknown): PerpPosition[] | null {
+  if (raw == null) return null;
   const list = (raw as { assetPositions?: unknown })?.assetPositions;
   if (!Array.isArray(list)) return [];
   const out: PerpPosition[] = [];
@@ -113,7 +121,9 @@ export function parsePositions(raw: unknown): PerpPosition[] {
   return out;
 }
 
-export function parseSpot(raw: unknown): SpotBalance[] {
+/** null when upstream did not answer; [] when it answered with no non-zero balance. */
+export function parseSpot(raw: unknown): SpotBalance[] | null {
+  if (raw == null) return null;
   const list = (raw as { balances?: unknown })?.balances;
   if (!Array.isArray(list)) return [];
   return list
@@ -124,7 +134,11 @@ export function parseSpot(raw: unknown): SpotBalance[] {
     .filter((b) => b.coin && b.total !== null && b.total !== 0);
 }
 
-export function parseFills(raw: unknown, limit = 100): Fill[] {
+/** null when upstream did not answer; [] when it answered with an empty tape. */
+export function parseFills(raw: unknown, limit = 100): Fill[] | null {
+  if (raw == null) return null;
+  // A 200 whose body is not a list is a shape problem, not a failed call, so it keeps
+  // the empty answer: the absent signal is reserved for the null info() returns.
   if (!Array.isArray(raw)) return [];
   const out: Fill[] = [];
   for (const f of raw) {

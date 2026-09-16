@@ -122,16 +122,22 @@ export default function TradesPanel({
   data,
   loading,
   error,
+  onRetry,
 }: {
   address: string | null;
   data: TraderSnapshot | null;
   loading: boolean;
   error: string | null;
+  /** Re-runs the snapshot fetch for this address (useTrader's reload). */
+  onRetry?: () => void;
 }) {
   const [grouped, setGrouped] = useState(true);
 
   // Memoised so the `?? []` fallback is not a fresh array on every render, which
-  // would re-run every derivation below for nothing.
+  // would re-run every derivation below for nothing. The fallback is reached only
+  // before a snapshot arrives and on the absent branch below, which returns before
+  // any of these derivations is rendered — `fills: null` means upstream did not
+  // answer, and every stat under it would be a figure about nothing.
   const fills = useMemo(() => (data?.fills ?? []) as LabelledFill[], [data]);
   const orders = useMemo(() => groupFills(fills), [fills]);
   const fees = useMemo(() => feeTotals(fills), [fills]);
@@ -174,6 +180,35 @@ export default function TradesPanel({
   }
 
   if (!data) return null;
+
+  // Absent before empty. The route answers 200 with `fills: null` when the userFills
+  // call alone fails, and the copy below asserts "that is a real state, not an error"
+  // — a literal falsehood over a call that never answered. It is only ever correct
+  // for a genuine [].
+  if (data.fills === null) {
+    return (
+      <Panel>
+        <AddressLegend prefix="Tape unavailable · " address={address} />
+        <p className="mt-2 font-mono text-xs uppercase tracking-[0.16em] text-[var(--loss)]">
+          Upstream did not answer for this address
+        </p>
+        {/* Re-asks for this address through useTrader's reload: the tab, the
+            selection and the rest of the snapshot survive the retry. Disabled while
+            a request is in flight, since a partial 200 leaves `data` populated and
+            nothing else on screen would say the click landed. */}
+        {onRetry && (
+          <button
+            type="button"
+            onClick={onRetry}
+            disabled={loading}
+            className="mt-3 rounded border border-border px-2 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--legend)] transition-colors hover:text-foreground disabled:opacity-50"
+          >
+            {loading ? "Re-reading" : "Re-read"}
+          </button>
+        )}
+      </Panel>
+    );
+  }
 
   if (fills.length === 0) {
     return (
