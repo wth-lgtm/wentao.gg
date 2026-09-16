@@ -1,10 +1,12 @@
 "use client";
 
-import { useMemo } from "react";
+import { Component, useMemo, useRef, type ReactNode } from "react";
 import { TraderMetrics, SortField, SortDirection, TimePeriod } from "../lib/types";
 import { PREVIOUS_WINDOW, rankByPnl, rankDelta, type RankedTrader } from "../lib/rank";
+import { NO_CHANGE, ROW_H, zeroBlock, type BoardChange } from "../lib/commitPlan";
 import { tierOf } from "../lib/tier";
 import { useSurfaceTier } from "../hooks/useSurfaceTier";
+import { useCommit } from "../hooks/useCommit";
 import { Legend } from "./Instrument";
 import SortHeader from "./SortHeader";
 import LeaderboardRow from "./LeaderboardRow";
@@ -23,8 +25,13 @@ interface LeaderboardTableProps {
   error?: string | null;
   /** Address currently focused for the Positions / Trades tabs. */
   selectedAddress?: string | null;
-  registerRow?: (key: string, el: HTMLElement | null) => void;
   onSelect?: (address: string) => void;
+  /**
+   * What the last control change was, and its sequence — the commit engine picks the
+   * moment by kind (useCommit.ts). Defaults to "no change yet", under which nothing
+   * ever travels.
+   */
+  change?: BoardChange;
   /**
    * All four windows, for the delta plate: each row's rank here against its rank in the
    * next-shorter window. Both optional so a caller that has not wired them gets the
@@ -52,6 +59,37 @@ const WINDOW_LABEL: Record<TimePeriod, string> = {
 };
 
 const legend = "font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--legend)]";
+
+interface OutgoingBoardProps {
+  seq: number;
+  /** Only the period commit needs the outgoing board, and only at the commit tier. */
+  armed: boolean;
+  onBeforeCommit: () => void;
+  children: ReactNode;
+}
+
+/**
+ * The one hook React does not have. The period commit dissolves the DEPARTING rows as a
+ * ghost sheet, which means it needs the outgoing tbody — and every function-component
+ * hook (useLayoutEffect included) runs after React has already replaced the rows, when
+ * the departures are gone. getSnapshotBeforeUpdate is the API React provides for
+ * reading the DOM before an update mutates it, and it exists only on classes; so this
+ * is a class, with the one method, wrapping the table. It renders nothing of its own.
+ */
+class OutgoingBoard extends Component<OutgoingBoardProps> {
+  getSnapshotBeforeUpdate(prev: Readonly<OutgoingBoardProps>): null {
+    if (this.props.armed && prev.seq !== this.props.seq) this.props.onBeforeCommit();
+    return null;
+  }
+
+  // React requires the pair. The snapshot is consumed by useCommit's layout effect, which
+  // runs in the same commit; there is nothing left to do here.
+  componentDidUpdate() {}
+
+  render() {
+    return this.props.children;
+  }
+}
 
 function plate(rank: number) {
   return (
@@ -133,8 +171,8 @@ export default function LeaderboardTable({
   loading,
   error = null,
   selectedAddress = null,
-  registerRow,
   onSelect,
+  change = NO_CHANGE,
   periods,
   timePeriod,
 }: LeaderboardTableProps) {
@@ -149,6 +187,22 @@ export default function LeaderboardTable({
   const isEmpty = noRows && error === null;
 
   const tier = useSurfaceTier();
+
+  // The commit engine. The wrapper below is the ghost sheet's host and the table is what
+  // the ghost is cloned from; the rows register themselves at the commit tier only.
+  const hostRef = useRef<HTMLDivElement>(null);
+  const tableRef = useRef<HTMLTableElement>(null);
+  const orderKey = traders.map((t) => t.address).join("|");
+  const { registerRow, snapshotOutgoing } = useCommit(orderKey, change, tier, {
+    host: hostRef,
+    table: tableRef,
+  });
+
+  // The rows that traded exactly nothing, as one block, when the volume sort has put
+  // them together. Rendered as an overlay over the volume column — an absolutely
+  // positioned plate that is not a row, so the tbody stays fifty <tr>s of fifty traders
+  // and the travel arithmetic stays exact — with one sentence for a screen reader.
+  const block = loading ? null : zeroBlock(traders, sortField);
 
   // The delta plate's reference window. `deltaColumn` is whether the caller wired the
   // windows at all; `reference` is which one this window compares against (24H: none).
@@ -176,10 +230,18 @@ export default function LeaderboardTable({
     <div data-surface={tier}>
       {/* Desktop Table. No overflow-x-auto on this wrapper: it made the wrapper a scroll
           container, which is exactly what a sticky <thead> sticks to instead of the
-          viewport — and table-fixed with the colgroup below already prevents overflow. */}
-      <div className="hidden sm:block">
+          viewport — and table-fixed with the colgroup below already prevents overflow.
+          `relative isolate`: the ghost sheet and the zero-volume block position against
+          the table's own box, and the isolation lets the ghost sit at z-index -1 UNDER
+          the live rows without falling behind the card's fill. */}
+      <div ref={hostRef} className="hidden sm:block relative isolate">
+        <OutgoingBoard
+          seq={change.seq}
+          armed={tier === "commit" && change.kind === "period"}
+          onBeforeCommit={snapshotOutgoing}
+        >
         {/* aria-busy while arming: fifty empty berths are a frame, not content. */}
-        <table className="hl-board" aria-busy={loading ? true : undefined}>
+        <table ref={tableRef} className="hl-board" aria-busy={loading ? true : undefined}>
           {/* Locked geometry: widths never shift between the arming frame, the data, a
               sort or a period switch, which is what lets the re-seat compute travel as
               arithmetic instead of measuring the DOM. Rank is 72, not 68: the plate is
@@ -288,13 +350,37 @@ export default function LeaderboardTable({
                   selected={trader.address === selectedAddress}
                   onSelect={onSelect}
                   // Only the commit tier travels. Unregistered rows are simply not found
-                  // by useReSeat, so the still needs no second flag there.
+                  // by useCommit, so the still needs no second flag there.
                   registerRow={tier === "commit" ? registerRow : undefined}
                 />
               ))
             )}
           </tbody>
         </table>
+        </OutgoingBoard>
+
+        {block && (
+          <>
+            {/* Anchored to the table's BOTTOM edge — the tbody ends where the table does,
+                so the plate lands on its rows without anyone measuring the header — and
+                only where the volume column exists (lg). pointer-events: none; the rows
+                beneath still select. The words are the plan's "N rows · vlm 0.00 ·
+                positions held, not traded", cut to what a 112px column holds; the
+                sentence below carries the whole of it. */}
+            <div
+              className="hl-block hidden lg:flex flex-col items-end justify-start"
+              aria-hidden
+              style={{ bottom: block.below * ROW_H, height: block.count * ROW_H }}
+            >
+              <span>{block.count} rows</span>
+              <span>vlm 0.00</span>
+              <span>untraded</span>
+            </div>
+            <p className="sr-only">
+              {`${block.count} of ${traders.length} rows show a volume of 0.00: positions held, not traded in this window.`}
+            </p>
+          </>
+        )}
       </div>
 
       {/* Mobile Cards */}

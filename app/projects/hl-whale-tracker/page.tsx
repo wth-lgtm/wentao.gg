@@ -16,7 +16,6 @@ import AnalyticsPanel from "./components/AnalyticsPanel";
 import { useLeaderboard } from "./hooks/useLeaderboard";
 import { useTableControls } from "./hooks/useTableControls";
 import { useTrader } from "./hooks/useTrader";
-import { useReSeat } from "./hooks/useReSeat";
 import { useTabpanelFocus } from "./hooks/useTabpanelFocus";
 import { formatAddress } from "./lib/formatters";
 import type { SortDirection, SortField, TimePeriod } from "./lib/types";
@@ -134,6 +133,7 @@ function WhaleTracker() {
     timePeriod,
     sortField,
     sortDirection,
+    change,
     setTimePeriod,
     handleSort,
     selectTab,
@@ -161,9 +161,6 @@ function WhaleTracker() {
   // One sort site. This used to be re-implemented inline here, unmemoized, while
   // the hook's own memoized sort ran against a permanently-empty array.
   const displayTraders = sortRows(traders);
-  // The re-seat animates rows to new berths whenever the sorted ORDER changes.
-  const order = displayTraders.map((t) => t.address);
-  const registerRow = useReSeat(order.join("|"), order);
   // Whether the open panel needs its own tab stop depends on what it currently holds,
   // so it is measured after render rather than declared per panel. See the hook.
   const tabpanelRef = useTabpanelFocus();
@@ -323,7 +320,7 @@ function WhaleTracker() {
               error={error}
               selectedAddress={focused}
               onSelect={selectTrader}
-              registerRow={registerRow}
+              change={change}
               periods={periods}
               timePeriod={timePeriod}
             />
