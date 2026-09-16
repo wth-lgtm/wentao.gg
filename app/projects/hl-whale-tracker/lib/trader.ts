@@ -31,6 +31,10 @@ export interface PerpPosition {
   leverage: number | null;
   leverageType: string;
   maxLeverage: number | null;
+  /** Funding since open from the TRADER's view: positive = received, negative = paid.
+   * Upstream cumFunding is cumulative funding PAID (verified: hourly userFunding.usdc
+   * receipts since the last size change sum to exactly -cumFunding.sinceChange), so
+   * it is negated here. */
   fundingSinceOpen: number | null;
 }
 
@@ -88,6 +92,7 @@ export function parsePositions(raw: unknown): PerpPosition[] {
     const szi = num(p.szi);
     const lev = p.leverage as { type?: unknown; value?: unknown } | undefined;
     const funding = p.cumFunding as { sinceOpen?: unknown } | undefined;
+    const paid = num(funding?.sinceOpen);
     out.push({
       coin,
       szi,
@@ -102,7 +107,7 @@ export function parsePositions(raw: unknown): PerpPosition[] {
       leverage: num(lev?.value),
       leverageType: str(lev?.type),
       maxLeverage: num(p.maxLeverage),
-      fundingSinceOpen: num(funding?.sinceOpen),
+      fundingSinceOpen: paid === null ? null : -paid,
     });
   }
   return out;
