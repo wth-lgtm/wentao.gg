@@ -5,19 +5,17 @@ import dynamic from "next/dynamic";
 import { motion, useMotionValue, useSpring, useTransform, useReducedMotion } from "framer-motion";
 import { GitCommit, Code, Github, Flame, Zap } from "lucide-react";
 import { useTheme } from "./ThemeProvider";
+import { buildDayWindow, currentStreak, type CommitDay } from "../lib/githubStats";
 
 // Interactive floating-sphere background — client-only, lazy (three.js off the initial bundle).
 const FloatingBackground = dynamic(() => import("./FloatingBackground"), { ssr: false });
-
-interface CommitDay {
-  date: string;
-  count: number;
-}
 
 interface RepoStats {
   commits: number;
   linesOfCode: number;
   languages: { name: string; percentage: number }[];
+  /** The route reached its page cap or lost a page: older days are unknown, not zero. */
+  truncated: boolean;
 }
 
 function getIntensity(count: number): string {
@@ -78,7 +76,12 @@ const BASE_ROT_Y = -26; // horizontal turn — staggers columns so fewer bars hi
 
 export default function SiteStats() {
   const [commitData, setCommitData] = useState<Map<string, number>>(new Map());
-  const [stats, setStats] = useState<RepoStats>({ commits: 0, linesOfCode: 0, languages: [] });
+  const [stats, setStats] = useState<RepoStats>({
+    commits: 0,
+    linesOfCode: 0,
+    languages: [],
+    truncated: false,
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -144,6 +147,7 @@ export default function SiteStats() {
           commits: data.commits ?? 0,
           linesOfCode: data.linesOfCode ?? 0,
           languages: data.languages ?? [],
+          truncated: data.truncated === true,
         });
       } catch (err) {
         console.error("Error fetching data:", err);
@@ -159,34 +163,29 @@ export default function SiteStats() {
   const use3D = mounted && !isMobile && finePointer && !reduceMotion;
 
   const weeksToShow = isMobile ? 8 : 12;
-  const today = new Date();
-  const daysToShow = weeksToShow * 7;
-  const days: CommitDay[] = [];
-  for (let i = daysToShow - 1; i >= 0; i--) {
-    const date = new Date(today);
-    date.setDate(date.getDate() - i);
-    const dateStr = date.toISOString().split("T")[0];
-    days.push({ date: dateStr, count: commitData.get(dateStr) || 0 });
-  }
+  const days = buildDayWindow(new Date(), weeksToShow, commitData);
   const weeks: CommitDay[][] = [];
   for (let i = 0; i < days.length; i += 7) weeks.push(days.slice(i, i + 7));
 
-  let streak = 0;
-  for (let k = days.length - 1; k >= 0; k--) {
-    if (days[k].count > 0) streak++;
-    else break;
-  }
+  // Streak (GitHub's convention: the run ending today, or yesterday before today's first
+  // push), best day and the board's own total all come from the window the board draws, so
+  // the label can never claim more than the cells behind it.
+  const streak = currentStreak(days);
   const bestDay = days.reduce((m, d) => Math.max(m, d.count), 0);
+  const windowCommits = days.reduce((n, d) => n + d.count, 0);
+  // Dark cells mean UNKNOWN when the fetch failed or the route returned a cut-off window
+  // with nothing in it; a streak and a best day derived from that are not zeros.
+  const windowKnown = !unavailable && !(stats.truncated && windowCommits === 0);
 
-  const view = {
-    commits: unavailable ? 0 : stats.commits,
-    languages: unavailable ? [] : stats.languages,
-  };
+  // The route already drops sub-1% shares, but the CDN serves this payload for up to ~15
+  // minutes (s-maxage=300, stale-while-revalidate=600), so a stale "JavaScript 0%" chip
+  // can still arrive after a deploy.
+  const languages = unavailable ? [] : stats.languages.filter((l) => l.percentage >= 1);
   const statTiles = [
     { icon: GitCommit, value: unavailable ? "—" : `${stats.commits}`, label: "Commits" },
     { icon: Code, value: unavailable ? "—" : `~${formatNumber(stats.linesOfCode)}`, label: "Lines of code" },
-    { icon: Flame, value: unavailable ? "—" : `${streak}`, label: "Day streak" },
-    { icon: Zap, value: unavailable ? "—" : `${bestDay}`, label: "Best day" },
+    { icon: Flame, value: windowKnown ? `${streak}` : "—", label: "Day streak" },
+    { icon: Zap, value: windowKnown ? `${bestDay}` : "—", label: "Best day" },
   ];
 
   const boardW = weeksToShow * STEP - GAP;
@@ -201,10 +200,24 @@ export default function SiteStats() {
     py.set(0);
   };
   const dayTitle = (day: CommitDay) =>
-    `${day.date}: ${day.count} commit${day.count !== 1 ? "s" : ""}`;
+    `${day.date} (UTC): ${day.count} commit${day.count !== 1 ? "s" : ""}`;
+  // Counted over the window, not all time: "12 weeks — 194 commits" read as a claim about
+  // the window while the board could only ever show the days of the newest 100 commits.
+  // When the route says `truncated` the older cells are dark because they are UNKNOWN, so
+  // the label may not claim the full window (and "Best day" below it is then a floor over
+  // the newest days, which is what "older days not shown" tells the reader).
+  const plural = windowCommits !== 1 ? "s" : "";
+  const boardLabel = !windowKnown
+    ? "Commit activity unavailable"
+    : stats.truncated
+      ? `Commit activity (UTC days) — most recent ${windowCommits} commit${plural}; older days not shown`
+      : `Commit activity for the last ${weeksToShow} weeks (UTC days) — ${windowCommits} commit${plural}`;
 
   return (
     <section aria-label="GitHub activity" className="py-20 md:py-24 px-6 relative z-20 pointer-events-none">
+      {/* The card's visible header is the repo name, so the document outline jumped from
+          "Projects" straight to "Let's Connect" over a whole landmark. */}
+      <h2 className="sr-only">GitHub activity</h2>
       <div className="max-w-5xl mx-auto">
         <motion.div
           initial={{ opacity: 0 }}
@@ -274,7 +287,7 @@ export default function SiteStats() {
 
                 {/* Languages */}
                 <div className="flex items-center gap-2 flex-wrap mb-6">
-                  {view.languages.map((lang) => (
+                  {languages.map((lang) => (
                     <span key={lang.name} className="text-xs px-2 py-1 bg-background/70 rounded-full text-muted">
                       {lang.name} {lang.percentage}%
                     </span>
@@ -293,7 +306,7 @@ export default function SiteStats() {
                         onPointerMove={onBoardMove}
                         onPointerLeave={resetTilt}
                         role="img"
-                        aria-label={`Commit activity for the last ${weeksToShow} weeks — ${view.commits} commits`}
+                        aria-label={boardLabel}
                       >
                         <motion.div
                           style={{ width: boardW, height: boardH, position: "relative", transformStyle: "preserve-3d", rotateX, rotateY }}
@@ -306,7 +319,7 @@ export default function SiteStats() {
                                   key={day.date}
                                   aria-hidden
                                   title={dayTitle(day)}
-                                  className="absolute cursor-pointer"
+                                  className="absolute cursor-default"
                                   style={{ left: weekIndex * STEP, top: dayIndex * STEP, width: CELL, height: CELL, transformStyle: "preserve-3d", opacity: 0.82 }}
                                   initial={{ z: -26 }}
                                   whileInView={{ z: 0 }}
@@ -328,11 +341,11 @@ export default function SiteStats() {
                     </div>
                   ) : (
                     <div className="flex justify-center sm:justify-start">
-                      <div className="flex gap-[3px]">
+                      <div className="flex gap-[3px]" role="img" aria-label={boardLabel}>
                         {weeks.map((week, weekIndex) => (
                           <div key={weekIndex} className="flex flex-col gap-[3px]">
                             {week.map((day) => (
-                              <div key={day.date} className={`w-3 h-3 sm:w-[14px] sm:h-[14px] rounded-[3px] ${getIntensity(day.count)}`} title={dayTitle(day)} />
+                              <div key={day.date} aria-hidden className={`w-3 h-3 sm:w-[14px] sm:h-[14px] rounded-[3px] ${getIntensity(day.count)}`} title={dayTitle(day)} />
                             ))}
                           </div>
                         ))}
