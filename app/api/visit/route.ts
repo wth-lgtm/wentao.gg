@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 // PAGE VISIT counter — visits, not unique people. Coming back tomorrow counts again, and
 // so does a second look ten minutes later. Runs server-side with the service_role key
@@ -8,7 +8,11 @@ import { createClient } from "@supabase/supabase-js";
 // Every request — counted or not — returns the LIVE total.
 //
 // Requires NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY + supabase/visitors.sql.
-// Degrades to { count: null } (UI renders nothing) if anything is missing.
+// Degrades to { count: null } (UI renders nothing) if anything is missing. A total is only
+// ever a number Supabase actually handed back: when the increment fails (Supabase paused,
+// key rejected, schema cache stale, network) the route falls back to READING the total, and
+// when that fails too it says null — never a coerced 0. `Number(null) === 0`, so the old
+// `Number(data)` shortcut rendered every Supabase failure as "0 peeks", which is a lie.
 //
 // ── Why counting visits needs more care than counting devices ──────────────────────────
 // Three layers stand between "every visit counts" and "anyone can run the number up":
@@ -83,9 +87,32 @@ function clientIp(req: Request): string {
   return "";
 }
 
+// Only a real number, or a non-empty numeric string (PostgREST may serialise a huge bigint
+// that way), is a count. null / undefined / "" / booleans are "no total" — NOT zero.
 function toCount(v: unknown): number | null {
-  const n = Number(v);
+  const n =
+    typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" ? Number(v) : NaN;
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : null;
+}
+
+// Logs carry the PostgREST code + message only — never the key, never the visitor.
+function describe(error: { code?: string; message?: string } | null | undefined): string {
+  if (!error) return "no error object";
+  return [error.code, error.message].filter(Boolean).join(" ") || "unknown error";
+}
+
+// The live total, read directly. null when the row or the table can't be read.
+async function readTotal(supabase: SupabaseClient): Promise<number | null> {
+  const { data, error } = await supabase
+    .from("site_stats")
+    .select("value")
+    .eq("key", "unique_visitors")
+    .single();
+  if (error) {
+    console.warn(`[api/visit] site_stats read failed: ${describe(error)}`);
+    return null;
+  }
+  return toCount(data?.value);
 }
 
 // The cookie alone is not a gate — the caller decides whether to send it. Without an
@@ -127,23 +154,30 @@ export async function POST(req: Request) {
 
     const mayCount = settled && isSameOrigin(req) && !ipThrottled(clientIp(req), now);
 
-    let count: number | null;
+    let count: number | null = null;
+    let counted = false;
     if (mayCount) {
-      const { data } = await supabase.rpc("increment_visitors");
-      count = toCount(data);
-    } else {
-      const { data } = await supabase
-        .from("site_stats")
-        .select("value")
-        .eq("key", "unique_visitors")
-        .single();
-      count = toCount(data?.value);
+      const { data, error } = await supabase.rpc("increment_visitors");
+      // The function returns the NEW total. An error (paused project, rejected key, stale
+      // schema cache) or a SQL NULL (no matching row) both mean "nothing was counted".
+      count = error ? null : toCount(data);
+      counted = count !== null;
+      if (!counted) {
+        console.warn(
+          `[api/visit] increment_visitors returned no total: ${
+            error ? describe(error) : `data=${JSON.stringify(data)}`
+          }`,
+        );
+      }
     }
+    // Not counted (throttled, cross-site, or the increment failed) → still return the live
+    // total if it can be read. If Supabase is down entirely this is null and the UI hides.
+    if (!counted) count = await readTotal(supabase);
 
     const res = NextResponse.json({ count });
-    // Stamp only when an increment actually happened, so a blocked request never pushes a
-    // real visitor's window forward.
-    if (mayCount) {
+    // Stamp only when an increment actually happened, so neither a blocked request nor a
+    // failed one pushes a real visitor's window forward.
+    if (counted) {
       res.cookies.set(COOKIE, String(now), {
         httpOnly: true,
         sameSite: "lax",
@@ -153,7 +187,8 @@ export async function POST(req: Request) {
       });
     }
     return res;
-  } catch {
+  } catch (err) {
+    console.warn(`[api/visit] failed: ${err instanceof Error ? err.message : String(err)}`);
     return NextResponse.json({ count: null });
   }
 }
