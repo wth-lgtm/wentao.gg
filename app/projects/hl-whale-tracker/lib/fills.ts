@@ -133,13 +133,8 @@ const DIR_TABLE: Record<string, DirFacets> = {
   // A forced close is still a close, and it realises. The dir does NOT say whose
   // liquidation it was — 951 of 956 fills carrying a `liquidation` object have a
   // plain Close/Open dir — so these facets claim only what the string itself says.
-  //
-  // Badging those 951 is therefore NOT a display-layer change, contrary to what an
-  // earlier write-up of this decision claimed: parseFills (trader.ts) builds its Fill
-  // field by field and never copies `liquidation`, and the route trims the payload on
-  // the way out, so the object does not reach the client at all. The field would have
-  // to be added to Fill, to parseFills and to the route's response before a badge
-  // could read it.
+  // Whose it was is `liquidatedUser`, which parseFills now carries through and
+  // liquidationPath below reads first; these two dirs are its fallback.
   "Liquidated Isolated Long": { action: "CLOSE", side: "LONG", realises: true, word: "LIQ" },
   "Liquidated Isolated Short": { action: "CLOSE", side: "SHORT", realises: true, word: "LIQ" },
   // Auto-deleveraging closes a position the exchange chose, and the string carries no
@@ -191,6 +186,33 @@ export function dirFacets(dir: string, closedPnl: number | null = null): DirFace
   };
 }
 
+/**
+ * Which reading said a fill was THIS trader's liquidation.
+ *
+ *   liquidatedUser  upstream's `liquidation.liquidatedUser` is the trader's own address.
+ *                   The fact, and the common shape: 951 of 956 live liquidation fills
+ *                   carry a plain Close/Open dir and only this field says what happened.
+ *   dir             the dir string itself names a forced close ("Liquidated Isolated
+ *                   Long", the cross-margin siblings by shape). The fallback, for the
+ *                   five, and for a payload that stops carrying the object.
+ *
+ * Someone ELSE's address is nothing: the trader was the counterparty whose fill closed
+ * against a liquidated user, and badging that would call a voluntary close a forced one.
+ * Both readings are kept so the row can say which one fired (TradesPanel's title).
+ */
+export type LiquidationPath = "liquidatedUser" | "dir";
+
+export function liquidationPath(
+  fill: Pick<Fill, "dir" | "liquidatedUser">,
+  trader: string
+): LiquidationPath | null {
+  if (fill.liquidatedUser !== null && fill.liquidatedUser === trader.toLowerCase()) {
+    return "liquidatedUser";
+  }
+  if (dirFacets(fill.dir).word === "LIQ") return "dir";
+  return null;
+}
+
 export interface Order {
   /**
    * Unique within one snapshot. The group INDEX is what makes it unique: fills
@@ -234,6 +256,9 @@ export interface Order {
   /** Newest and oldest fill timestamps in the group. */
   latest: number | null;
   earliest: number | null;
+  /** This trader's liquidation, and which reading said so; null when it was not, or
+   * when groupFills was given no trader to compare against. */
+  liquidated: LiquidationPath | null;
 }
 
 /** A fill carrying the server's resolved spot-pair name, when it found one. */
@@ -260,18 +285,25 @@ export type LabelledFill = Fill & { label?: string };
  * now measured from the group's NEWEST fill rather than the preceding one. Against the
  * preceding fill the window slid: twenty fills 50 s apart merged into one order
  * spanning 950 s, under a rule the panel described as "within a minute".
+ *
+ * `trader` is the address the tape is showing, for liquidationPath: a liquidation never
+ * merges with a voluntary close of the same market, side and id, because the two are
+ * different decisions — one of them not the trader's — and a merged row would badge
+ * both or neither. Without it nothing is claimed about liquidation.
  */
-export function groupFills(fills: LabelledFill[]): Order[] {
+export function groupFills(fills: LabelledFill[], trader?: string): Order[] {
   const out: Order[] = [];
 
   for (const f of fills) {
     const prev = out[out.length - 1];
     const t = f.time;
     const id = f.twapId ?? f.oid;
+    const liquidated = trader === undefined ? null : liquidationPath(f, trader);
     const contiguous =
       prev !== undefined &&
       prev.coin === f.coin &&
       prev.dir === f.dir &&
+      prev.liquidated === liquidated &&
       (prev.orderId !== null || id !== null
         ? // An id on either side settles it. An identified fill is never absorbed into
           // an unidentified group, which would claim an order upstream did not report.
@@ -300,6 +332,7 @@ export function groupFills(fills: LabelledFill[]): Order[] {
         fees: feeEntry({}, f),
         latest: t,
         earliest: t,
+        liquidated,
       });
       continue;
     }

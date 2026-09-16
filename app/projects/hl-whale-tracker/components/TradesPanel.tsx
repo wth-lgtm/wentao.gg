@@ -25,8 +25,10 @@ import {
   formatZone,
   groupFills,
   isRebate,
+  liquidationPath,
   realisedTotal,
   venueOf,
+  type LiquidationPath,
 } from "../lib/fills";
 
 // The Trades tab.
@@ -86,7 +88,22 @@ function DirCell({ facets, dir }: { facets: DirFacets; dir: string }) {
   );
 }
 
-function VenueTag({ venue, label }: { venue: Venue; label: string }) {
+// Which reading badged the row, for the title: the address on the fill is the fact, the
+// dir string is the fallback for the five fills in 956 that name it themselves.
+const LIQ_TITLE: Record<LiquidationPath, string> = {
+  liquidatedUser: "Liquidated — this address is the liquidated party on the fill",
+  dir: "Liquidated — the fill's own type says so",
+};
+
+function VenueTag({
+  venue,
+  label,
+  liquidated,
+}: {
+  venue: Venue;
+  label: string;
+  liquidated: LiquidationPath | null;
+}) {
   return (
     <span className="flex min-w-0 items-baseline gap-1.5">
       <span className="truncate font-medium text-foreground">{label}</span>
@@ -95,6 +112,15 @@ function VenueTag({ venue, label }: { venue: Venue; label: string }) {
       {venue !== "PERP" && (
         <span className="hl-venue" data-venue={venue}>
           {VENUE_TAG[venue]}
+        </span>
+      )}
+      {/* A forced close, whoever's dir it wears. Beside the market rather than in the
+          Action cell, whose word is already LIQ for the five fills the dir names — the
+          same word twice in one cell would read as a stutter. */}
+      {liquidated !== null && (
+        <span className="hl-liq" title={LIQ_TITLE[liquidated]}>
+          <span aria-hidden>LIQ</span>
+          <span className="sr-only">liquidated</span>
         </span>
       )}
     </span>
@@ -192,7 +218,9 @@ export default function TradesPanel({
   // any of these derivations is rendered — `fills: null` means upstream did not
   // answer, and every stat under it would be a figure about nothing.
   const fills = useMemo(() => (data?.fills ?? []) as LabelledFill[], [data]);
-  const orders = useMemo(() => groupFills(fills), [fills]);
+  // The address is what liquidationPath compares against; null before a selection,
+  // where the fallback array above is empty anyway.
+  const orders = useMemo(() => groupFills(fills, address ?? undefined), [fills, address]);
   const fees = useMemo(() => feeTotals(fills), [fills]);
   const realised = useMemo(() => realisedTotal(fills), [fills]);
   const span = useMemo(() => fillSpan(fills), [fills]);
@@ -320,6 +348,7 @@ export default function TradesPanel({
           fees: f.fee !== null && f.fee !== 0 ? { [f.feeToken || "USDC"]: f.fee } : {},
           latest: f.time,
           earliest: f.time,
+          liquidated: liquidationPath(f, address),
         };
       });
 
@@ -343,6 +372,11 @@ export default function TradesPanel({
   const zoneFrom = span === null ? "" : formatZone(span.from);
   const zoneTo = span === null ? "" : formatZone(span.to);
   const zoneLegend = zoneFrom === zoneTo ? zoneTo : `${zoneFrom} → ${zoneTo}`;
+  // The route says when the pair-name lookup did not happen; the footnote is shown only
+  // when a row on THIS tape is wearing its index for it — a flag over a tape with no spot
+  // fill would be a sentence about nothing on screen.
+  const unlabelledSpot =
+    data.pairNamesPartial && fills.some((f) => venueOf(f.coin) === "SPOT" && !f.label);
   const windowLegend =
     span === null
       ? "window unknown"
@@ -497,7 +531,7 @@ export default function TradesPanel({
                         <TimeCell order={o} />
                       </td>
                       <td className="px-2 sm:px-4">
-                        <VenueTag venue={o.venue} label={o.label} />
+                        <VenueTag venue={o.venue} label={o.label} liquidated={o.liquidated} />
                       </td>
                       <td className="px-2 sm:px-4">
                         <span className="flex items-baseline gap-1.5">
@@ -541,6 +575,17 @@ export default function TradesPanel({
             </tbody>
           </table>
         </div>
+
+        {/* One footnote, in the grouping note's voice. "@107" is upstream's own name for
+            the market and the row is a real trade; what the footnote adds is that the
+            name is an INDEX because the lookup did not answer, not because that is what
+            the market is called. */}
+        {unlabelledSpot && (
+          <p className="border-t border-border px-4 py-2 text-xs text-muted">
+            Some pair names unavailable — Hyperliquid spotMeta did not answer, so those
+            rows show the market&rsquo;s index rather than its pair.
+          </p>
+        )}
       </Panel>
     </div>
   );

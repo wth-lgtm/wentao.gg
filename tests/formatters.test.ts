@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   formatAge,
   formatCurrency,
+  formatDollars,
   formatPercent,
 } from "../app/projects/hl-whale-tracker/lib/formatters";
 
@@ -200,4 +201,31 @@ test("formatAge: a fractional or negative input cannot produce a broken field", 
   assert.equal(formatAge(59.9), "00:59");
   assert.equal(formatAge(-1), "00:00");
   assert.equal(formatAge(NaN), "00:00");
+});
+
+test("formatDollars: one precision for a money column — whole dollars, separators, no unit switch", () => {
+  // The Positions ledger flipped to compact at 10K, so one column read "$4,663.84"
+  // beside "$15.2K": two precisions and two widths for one quantity. Whole dollars is
+  // the tape's Notional rule, and it holds from a residue to the 7d #1's book.
+  assert.equal(formatDollars(4663.84), "$4,664");
+  assert.equal(formatDollars(15_200), "$15,200");
+  assert.equal(formatDollars(576_299_154.24), "$576,299,154");
+  assert.equal(formatDollars(107_374_123.9), "$107,374,124");
+  assert.equal(formatDollars(-1234.5), "-$1,235");
+  // A real zero is a zero.
+  assert.equal(formatDollars(0), "$0");
+});
+
+test("formatDollars: below the column's resolution it states the bound, never a confident $0", () => {
+  // The dust drawer holds $0.35 and $0.01 positions; rounding them to "$0" would be a
+  // zero printed over something the account holds — the exact claim this panel's dash
+  // convention exists to stop. Same rule as formatSize and formatFee.
+  assert.equal(formatDollars(0.35), "<$1");
+  assert.equal(formatDollars(0.01), "<$1");
+  assert.equal(formatDollars(0.49), "<$1");
+  // At half a dollar the whole-dollar rounding is honest on its own.
+  assert.equal(formatDollars(0.5), "$1");
+  assert.equal(formatDollars(0.99), "$1");
+  // The bound turns round with the sign, as formatFee's does.
+  assert.equal(formatDollars(-0.35), ">-$1");
 });

@@ -100,17 +100,17 @@ export async function GET(
   // unresolved fill keeps upstream's own "@107", which is honest — hiding the row would
   // lose a real trade.
   //
-  // KNOWN GAP, recorded rather than fixed. When spotMeta fails outright (`meta === null`
-  // after lib/info's timeout or a 429) pairNames returns an EMPTY map, so every spot fill
-  // falls back to its index — and nothing in this response says the label map is missing.
-  // On screen "@107" then reads as the market's name rather than as a lookup that did not
+  // When spotMeta fails outright (`meta === null` after lib/info's timeout or a 429)
+  // pairNames returns an EMPTY map, so every spot fill falls back to its index — and on
+  // screen "@107" then read as the market's name rather than as a lookup that did not
   // happen, which is the one shape of dishonesty this app spends most of its care on.
-  // It is left as is deliberately: the tape's own contract is that `fills: null` means
-  // upstream did not answer, the fills here are all present and correct, and the fix is a
-  // second signal in the body plus a state in the panel to render it — a change to both
-  // sides of the wire for a field that is cosmetic when it degrades. The short SPOT_TTL_MS
-  // on a failed read (see above) is what stops it lasting an hour.
+  // The body now says so: `pairNamesPartial` is the second signal, and TradesPanel
+  // renders one footnote for it when a spot row on the tape is unlabelled. The tape's
+  // own contract is untouched — `fills: null` still means upstream did not answer, and
+  // the fills here are all present and correct. The short SPOT_TTL_MS on a failed read
+  // (see above) is what keeps the footnote from lasting an hour.
   const names = spotNames(meta);
+  const pairNamesPartial = names.size === 0;
   const parsed = parseFills(fills, FILL_LIMIT)?.map((f) => {
     const label = names.get(f.coin);
     return label ? { ...f, label } : f;
@@ -124,8 +124,11 @@ export async function GET(
       // identify an ORDER, not a wallet (the wallet is already the URL), and they are
       // what lets the tape say "one order" truthfully — the time heuristic that stood
       // in for them collapsed dozens of orders into ten rows (dated readings: THE OID
-      // SAMPLE in lib/fills.ts).
+      // SAMPLE in lib/fills.ts). `liquidatedUser` rides along too, as the one field
+      // that says WHOSE liquidation a fill was (lib/fills liquidationPath); it is an
+      // address that is either this URL's or a counterparty's, never a new wallet.
       fills: parsed ?? null,
+      pairNamesPartial,
       fetchedAt: Date.now(),
       // Zero by construction, as in the sibling route: built in the handler that sends
       // it, so only the edge's `age` header can age it. Same shape for every reading
@@ -135,8 +138,8 @@ export async function GET(
     {
       headers: {
         // An empty pair map is not a partial answer about this trader — the fills are
-        // all here and "@107" is upstream's own label — so unlike the sibling route
-        // there is no no-store branch to take.
+        // all here, "@107" is upstream's own label and the body now says the names are
+        // missing — so unlike the sibling route there is no no-store branch to take.
         "Cache-Control": "public, s-maxage=30, stale-while-revalidate=120",
       },
     }

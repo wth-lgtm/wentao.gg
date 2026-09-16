@@ -75,6 +75,14 @@ export interface Fill {
   oid: number | null;
   /** Parent id of a TWAP: many child oids, one intent, so it groups ahead of oid. */
   twapId: number | null;
+  /**
+   * The address that was liquidated on this fill, lower-cased, from upstream's
+   * `liquidation: { liquidatedUser, markPx, method }`; null when the fill was not a
+   * liquidation or the field was not an address. This is what names WHOSE liquidation
+   * it was — 951 of 956 live liquidation fills carry a plain Close/Open dir, so the dir
+   * alone badged five (lib/fills liquidationPath).
+   */
+  liquidatedUser: string | null;
 }
 
 export interface MarginSummary {
@@ -122,6 +130,10 @@ export interface TraderFills {
   fetchedAt: number;
   /** As on TraderPositions: server-clock age at send time, for lib/servedAge. */
   servedAgeMs: number;
+  /** True when the spot pair names could not be resolved (spotMeta did not answer), so
+   * spot fills carry upstream's "@107" index as their label. The fills themselves are
+   * complete; this is the second signal the tape needs to say the lookup did not happen. */
+  pairNamesPartial: boolean;
 }
 
 /** null when upstream did not answer; [] when it answered with no open positions. */
@@ -347,10 +359,19 @@ export function parseFills(raw: unknown, limit = FILL_LIMIT): Fill[] | null {
       feeToken: str(o.feeToken),
       oid: num(o.oid),
       twapId: num(o.twapId),
+      liquidatedUser: liquidatedUserOf(o.liquidation),
     });
     if (out.length >= limit) break;
   }
   return out;
+}
+
+/** The liquidated party off a fill's `liquidation` object: an address, lower-cased, or
+ * null. Gated on the same 40-hex pattern as every address in this feature, so a shape
+ * change upstream cannot hand the badge a string it might match by accident. */
+function liquidatedUserOf(liquidation: unknown): string | null {
+  const user = (liquidation as { liquidatedUser?: unknown } | null | undefined)?.liquidatedUser;
+  return typeof user === "string" && ADDRESS_RE.test(user) ? user.toLowerCase() : null;
 }
 
 export function parseMargin(raw: unknown): MarginSummary | null {

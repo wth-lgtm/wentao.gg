@@ -1292,6 +1292,23 @@ input:focus {
   background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
+/* Liquidation tag, the venue badge's shape in the loss tone. The dir names a forced
+   close on 5 of 956 live liquidation fills; the other 951 carry a plain Close dir and the
+   trader's own address in `liquidation.liquidatedUser`, which lib/fills liquidationPath
+   reads first. The word carries the meaning, so the badge survives greyscale. */
+.hl-liq {
+  flex-shrink: 0;
+  padding: 0.0625rem 0.25rem;
+  border-radius: 0.1875rem;
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.5625rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--loss);
+  background: color-mix(in srgb, var(--loss) 8%, transparent);
+  box-shadow: inset 0 0 0 1px var(--engrave-lo);
+}
+
 /* How many raw fills a grouped row stands in for. This is the honesty valve on
    grouping, so it is legible rather than decorative. */
 .hl-slice {

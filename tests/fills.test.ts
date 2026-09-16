@@ -36,6 +36,7 @@ import {
   formatSize,
   formatZone,
   groupFills,
+  liquidationPath,
   realisedTotal,
   venueOf,
   type LabelledFill,
@@ -56,6 +57,7 @@ const fill = (over: Partial<LabelledFill> = {}): LabelledFill => ({
   feeToken: "USDC",
   oid: null,
   twapId: null,
+  liquidatedUser: null,
   ...over,
 });
 
@@ -375,4 +377,59 @@ test("formatSize: a non-zero count below the column's resolution says so", () =>
   assert.equal(formatSize(1.5), "1.5");
   assert.equal(formatSize(2_331_863), "2,331,863");
   assert.equal(formatSize(null), "\u2014");
+});
+
+const TRADER = "0x5b5d51203a0f9079f8aeb098a6523a13f298c060";
+const OTHER = "0x4ec8fe22a0e3b4d7b5f8e3a1c2d3e4f5a6b7c8d9";
+
+test("liquidationPath: the liquidated party is the fact, the dir is the fallback", () => {
+  // The common shape — 951 of 956 live liquidation fills: a plain Close dir and the
+  // trader's own address in `liquidation.liquidatedUser`.
+  assert.equal(
+    liquidationPath(fill({ dir: "Close Long", liquidatedUser: TRADER }), TRADER),
+    "liquidatedUser"
+  );
+  // The trader's address as the caller holds it may be checksummed; the match is not.
+  assert.equal(
+    liquidationPath(fill({ dir: "Close Long", liquidatedUser: TRADER }), TRADER.toUpperCase().replace("0X", "0x")),
+    "liquidatedUser"
+  );
+  // The five: a Liquidated dir with no party attached still says what it is.
+  assert.equal(liquidationPath(fill({ dir: "Liquidated Isolated Long" }), TRADER), "dir");
+  assert.equal(liquidationPath(fill({ dir: "Liquidated Cross Short" }), TRADER), "dir");
+  // Both present: the address wins, since it is the one that names whose it was.
+  assert.equal(
+    liquidationPath(fill({ dir: "Liquidated Isolated Short", liquidatedUser: TRADER }), TRADER),
+    "liquidatedUser"
+  );
+});
+
+test("liquidationPath: someone ELSE's liquidation is not a badge on this trader", () => {
+  // The trader was the counterparty: their fill closed against a liquidated user. A
+  // mismatched address with a plain dir is nothing — and with a Liquidated dir the dir
+  // path still fires, because the string itself says so.
+  assert.equal(liquidationPath(fill({ dir: "Close Long", liquidatedUser: OTHER }), TRADER), null);
+  assert.equal(liquidationPath(fill({ dir: "Open Short" }), TRADER), null);
+  assert.equal(liquidationPath(fill({ dir: "Liquidated Isolated Long", liquidatedUser: OTHER }), TRADER), "dir");
+});
+
+test("groupFills: a liquidation is its own row and carries which path read it", () => {
+  const orders = groupFills(
+    [
+      fill({ oid: 1, dir: "Close Long", liquidatedUser: TRADER, time: T0 + 2000 }),
+      fill({ oid: 1, dir: "Close Long", time: T0 + 1000 }),
+      fill({ oid: 2, dir: "Liquidated Isolated Long", time: T0 }),
+      fill({ oid: 3, dir: "Close Long", liquidatedUser: OTHER, time: T0 - 1000 }),
+    ],
+    TRADER
+  );
+  // Same oid and dir, but one was a liquidation and one was not: two decisions, and
+  // merging them would badge a voluntary close.
+  assert.equal(orders.length, 4);
+  assert.equal(orders[0].liquidated, "liquidatedUser");
+  assert.equal(orders[1].liquidated, null);
+  assert.equal(orders[2].liquidated, "dir");
+  assert.equal(orders[3].liquidated, null);
+  // Without a trader to compare against nothing is claimed.
+  assert.ok(groupFills([fill({ liquidatedUser: TRADER })]).every((o) => o.liquidated === null));
 });

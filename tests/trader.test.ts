@@ -183,3 +183,32 @@ test("parseMargin: an absent maintenance figure is null, so the panel prints no 
   assert.ok(m !== null);
   assert.equal(m.crossMaintenanceMarginUsed, null);
 });
+
+test("parseFills: the liquidated party rides along, lower-cased, or is null", () => {
+  // Hyperliquid's userFills carry `liquidation: { liquidatedUser, markPx, method }` on a
+  // fill that was a liquidation, and 951 of 956 such fills have a PLAIN Close/Open dir —
+  // so the dir regex alone badged five of them. The address is the fact; the dir is the
+  // fallback (lib/fills liquidationPath).
+  const [liq] = parseFills([
+    {
+      coin: "ETH",
+      dir: "Close Long",
+      liquidation: {
+        liquidatedUser: "0x5B5D51203A0F9079F8AEB098A6523A13F298C060",
+        markPx: "2296.09",
+        method: "market",
+      },
+    },
+  ]) ?? [];
+  assert.equal(liq.liquidatedUser, "0x5b5d51203a0f9079f8aeb098a6523a13f298c060");
+
+  const [plain] = parseFills([{ coin: "ETH", dir: "Close Long" }]) ?? [];
+  assert.equal(plain.liquidatedUser, null);
+  // Not an address is not a party: null, never a string the badge could match by luck.
+  const [odd] = parseFills([
+    { coin: "ETH", dir: "Close Long", liquidation: { liquidatedUser: 42 } },
+    { coin: "ETH", dir: "Close Long", liquidation: { liquidatedUser: "nobody" } },
+  ]) ?? [];
+  assert.equal(odd.liquidatedUser, null);
+  assert.equal(parseFills([{ coin: "ETH", dir: "Close Long", liquidation: null }])?.[0].liquidatedUser, null);
+});

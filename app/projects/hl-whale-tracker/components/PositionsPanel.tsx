@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { AddressLegend, AsOf, BoardWord, Legend, Unavailable, dash } from "./Instrument";
-import { formatCurrency, formatPercent, toneClass } from "../lib/formatters";
+import { formatCurrency, formatDollars, formatPercent, toneClass } from "../lib/formatters";
 import { formatPrice, formatSize } from "../lib/fills";
 import type { ReceiptAge } from "../lib/servedAge";
 import {
@@ -40,17 +40,15 @@ function Metric({ label, children }: { label: string; children: React.ReactNode 
   );
 }
 
-/**
- * Where a figure on this panel stops being written out in full.
- *
- * One place, because it had two: money() below and spotValue() four hundred lines
- * down both carried `Math.abs(v) >= 10_000`, so the perp ledger and the spot list
- * agreed on the threshold only by coincidence.
- */
-const compactAbove = (v: number) => Math.abs(v) >= 10_000;
-
-const money = (v: number | null, decimals = 2) =>
-  v === null ? dash : formatCurrency(v, { compact: compactAbove(v), decimals });
+// ONE precision per column (whale-plan-7). This panel used to switch to the compact
+// form at 10K — money() and spotValue() both carried `Math.abs(v) >= 10_000` — so one
+// column read "$4,663.84" beside "$15.2K": two precisions and two widths for one
+// quantity. Value and Margin, in their cells, their phone tiles, the account figures and
+// their totals, are whole dollars (formatDollars: the tape's Notional rule, with the
+// sub-dollar bound the dust drawer needs); Funding is two fixed decimals, never compacted
+// (see Funding); the spot column and its total are two fixed decimals, because that
+// drawer names cents. No magnitude switch anywhere on the panel.
+const dollars = (v: number | null) => (v === null ? dash : formatDollars(v));
 
 // formatPrice and formatSize hand back a bare "—" for null, which sits a shade
 // darker than the muted `dash` every other unknown on this panel uses — Entry and
@@ -188,7 +186,7 @@ function TotalsRow({ totals, maintenance }: { totals: PerpTotals; maintenance: n
         ) : (
           <span className="flex flex-wrap items-baseline gap-x-1.5">
             <SideBadge side={netSide} />
-            <span>{money(Math.abs(net))}</span>
+            <span>{dollars(Math.abs(net))}</span>
             <Legend>
               {totals.longs} long · {totals.shorts} short
             </Legend>
@@ -230,9 +228,11 @@ function TotalsRow({ totals, maintenance }: { totals: PerpTotals; maintenance: n
 
 function Funding({ value }: { value: number }) {
   return (
-    // Already in the trader's P&L sign (see PerpPosition.fundingSinceOpen).
+    // Already in the trader's P&L sign (see PerpPosition.fundingSinceOpen). Two fixed
+    // decimals and never compacted: funding is small money that accrues in cents, and
+    // the cell, the phone tile and the Σ all print through this one component.
     <span className={toneClass(value)}>
-      {formatCurrency(value, { showSign: true, compact: true })}
+      {formatCurrency(value, { showSign: true })}
       <span className="sr-only">{value > 0 ? " received" : value < 0 ? " paid" : ""}</span>
     </span>
   );
@@ -347,9 +347,9 @@ function PositionList({ rows, dust = false }: { rows: PerpPosition[]; dust?: boo
                 </td>
                 <Td>{size(p.szi === null ? null : Math.abs(p.szi))}</Td>
                 <Td muted>{price(p.entryPx)}</Td>
-                <Td>{money(p.positionValue)}</Td>
+                <Td>{dollars(p.positionValue)}</Td>
                 <Td muted className="hidden lg:table-cell">
-                  {money(p.marginUsed)}
+                  {dollars(p.marginUsed)}
                 </Td>
                 <Td className="hidden md:table-cell">
                   <Roe p={p} dust={dust} />
@@ -379,8 +379,8 @@ function PositionList({ rows, dust = false }: { rows: PerpPosition[]; dust?: boo
             <div className="grid grid-cols-2 gap-x-4 gap-y-2">
               <Metric label="Size">{size(p.szi === null ? null : Math.abs(p.szi))}</Metric>
               <Metric label="Entry">{price(p.entryPx)}</Metric>
-              <Metric label="Value">{money(p.positionValue)}</Metric>
-              <Metric label="Margin">{money(p.marginUsed)}</Metric>
+              <Metric label="Value">{dollars(p.positionValue)}</Metric>
+              <Metric label="Margin">{dollars(p.marginUsed)}</Metric>
               <Metric label="ROE">
                 <Roe p={p} dust={dust} />
               </Metric>
@@ -474,17 +474,16 @@ const SPOT_DUST_USD = 1;
 /**
  * A holding too small for two decimal places still has to read as a holding.
  *
- * money() prints two decimals, so the long tail of a memecoin wallet rounds to "$0.00"
+ * Two decimals round the long tail of a memecoin wallet to "$0.00"
  * — a confident zero over something the account genuinely owns. Measured on the zero
  * address: 39 of its 63 sub-dollar balances price below a cent (KNTQ at $0.00000064),
  * and "0" is reserved in this panel for a real zero.
  */
 function spotValue(usd: number): string {
   if (usd > 0 && usd < 0.005) return "<$0.01";
-  // Not money() itself, because its null branch hands back a JSX dash and the row
-  // renders the unpriced case for itself — but the same threshold, from the same
-  // constant, so the two columns cannot drift apart.
-  return formatCurrency(usd, { compact: compactAbove(usd), decimals: 2 });
+  // Two fixed decimals for the whole column, so "$5.90" and "$43,250,000.00" share one
+  // resolution and one decimal point; the total below prints through the same call.
+  return formatCurrency(usd, { decimals: 2 });
 }
 
 const isSpotDust = (b: SpotBalance) => b.usdValue !== null && b.usdValue < SPOT_DUST_USD;
@@ -718,10 +717,10 @@ export default function PositionsPanel({
         {spotFirst ? <Legend>Secondary — no open perps</Legend> : asOf}
       </div>
       <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
-        <Metric label="Account value">{money(margin?.accountValue ?? null)}</Metric>
-        <Metric label="Notional open">{money(margin?.totalNtlPos ?? null)}</Metric>
-        <Metric label="Margin used">{money(margin?.totalMarginUsed ?? null)}</Metric>
-        <Metric label="Withdrawable">{money(margin?.withdrawable ?? null)}</Metric>
+        <Metric label="Account value">{dollars(margin?.accountValue ?? null)}</Metric>
+        <Metric label="Notional open">{dollars(margin?.totalNtlPos ?? null)}</Metric>
+        <Metric label="Margin used">{dollars(margin?.totalMarginUsed ?? null)}</Metric>
+        <Metric label="Withdrawable">{dollars(margin?.withdrawable ?? null)}</Metric>
       </div>
       {totals && (
         <>
@@ -757,8 +756,8 @@ export default function PositionsPanel({
       <p className="mt-3 text-xs text-muted">
         {leaderboardEquity !== null && (
           <>
-            Leaderboard equity {money(leaderboardEquity.leaderboard)} · live perp{" "}
-            {money(leaderboardEquity.perp)} — the leaderboard reads{" "}
+            Leaderboard equity {dollars(leaderboardEquity.leaderboard)} · live perp{" "}
+            {dollars(leaderboardEquity.perp)} — the leaderboard reads{" "}
             {leaderboardEquity.ratio.toFixed(2)}× the live perp account.{" "}
           </>
         )}
@@ -831,7 +830,7 @@ export default function PositionsPanel({
           <Legend>
             Total ≈{" "}
             <span className="tabular-nums text-foreground">
-              {money(spotRanked.value.total)}
+              {formatCurrency(spotRanked.value.total, { decimals: 2 })}
             </span>{" "}
             <Coverage agg={spotRanked.value} what="spot mid" unit="balances" />
           </Legend>

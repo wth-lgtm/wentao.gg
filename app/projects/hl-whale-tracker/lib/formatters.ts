@@ -94,6 +94,24 @@ export function formatCurrency(
   return value < 0 ? `-${formatted}` : formatted;
 }
 
+/**
+ * Whole dollars with separators: ONE precision for a money column.
+ *
+ * The Positions ledger switched to the compact form at 10K, so one column read
+ * "$4,663.84" beside "$15.2K" — two precisions and two widths for one quantity, which
+ * inverts the width-as-magnitude cue a tabular column exists for (whale-plan-7, "one
+ * precision per column"). Whole dollars is the tape's Notional rule, and cents on a
+ * whale's book carry nothing. Below half a dollar the value states the bound rather than
+ * rounding to "$0": the dust drawer holds $0.35 and $0.01 positions, and a bare zero
+ * there is a confident zero over something the account holds. formatSize and formatFee
+ * make the same move at their own resolutions, and the bound turns round with the sign.
+ */
+export function formatDollars(value: number): string {
+  const abs = Math.abs(value);
+  if (abs > 0 && abs < 0.5) return value < 0 ? ">-$1" : "<$1";
+  return formatCurrency(value, { decimals: 0 });
+}
+
 // Format percentage
 //
 // `compact` exists because ROI is not a small-range percent here: the all-time window
