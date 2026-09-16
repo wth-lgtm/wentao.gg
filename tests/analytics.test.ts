@@ -57,12 +57,15 @@ test("spearman: fewer than two pairs is not a correlation", () => {
   assert.equal(spearman([1], [2, 3, 4]), null);
 });
 
-test("rhoNoiseFloor: 2/sqrt(n), and a full 1 where n is too small to say anything", () => {
+test("rhoNoiseFloor: 2/sqrt(n), and unreachable where n is too small to say anything", () => {
   assert.equal(rhoNoiseFloor(50).toFixed(4), "0.2828");
   assert.equal(rhoNoiseFloor(10).toFixed(4), "0.6325");
-  // At n <= 4 every |rho| below 1 is reachable by chance, so the floor admits none.
-  assert.equal(rhoNoiseFloor(4), 1);
-  assert.equal(rhoNoiseFloor(0), 1);
+  // At n <= 4 every |rho| INCLUDING 1 is reachable by chance, so the floor admits
+  // none. Pinning it at 1 left |rho| = 1 above the floor on a `<` test, which is the
+  // only value n = 2 can produce — the one case the pin exists for.
+  assert.equal(rhoNoiseFloor(4), Infinity);
+  assert.equal(rhoNoiseFloor(2), Infinity);
+  assert.equal(rhoNoiseFloor(0), Infinity);
 });
 
 test("rhoLabel: at n = 50 the floor is 0.28, so the live -0.15 and -0.23 get no direction", () => {
@@ -87,6 +90,11 @@ test("rhoLabel: the floor scales with n — at n = 10 half a correlation is stil
   assert.equal(rhoLabel(0.7, 10), "strong positive");
   // n = 2 can only ever produce ±1, and that is not a finding either.
   assert.equal(rhoLabel(0.99, 2), "within noise");
+  assert.equal(rhoLabel(1, 2), "within noise");
+  assert.equal(rhoLabel(-1, 2), "within noise");
+  assert.equal(rhoLabel(1, 4), "within noise");
+  // A perfect correlation over fifty ranks is still a finding.
+  assert.equal(rhoLabel(1, 50), "strong positive");
 });
 
 test("rhoLabel: an uncomputable correlation is an em dash, not a zero", () => {

@@ -59,6 +59,20 @@ const WINDOW_DASH: Record<TimePeriod, string | undefined> = {
 // globals.css so the stroke and its swatch cannot be given different values.
 const UNFOCUSED_OPACITY = 0.7;
 
+// The equality diagonal's own pattern, long enough that no window's line can be
+// mistaken for the reference the copy tells the reader to measure against — the ALL
+// curve sits closest to it and is the one that used to be confusable.
+const EQUALITY_DASH = "8 4";
+
+// WINDOW_LABEL is chip text: it belongs in a Legend, a column head, a table cell.
+// Sentences get these instead, because "of the ALL total" is not English.
+const WINDOW_PROSE: Record<TimePeriod, string> = {
+  "1d": "24-hour",
+  "7d": "7-day",
+  "30d": "30-day",
+  allTime: "all-time",
+};
+
 function Panel({
   children,
   title,
@@ -234,12 +248,26 @@ export default function AnalyticsPanel({
     .sort((a, b) => b.share - a.share);
   const shareHi = topShares[0];
   const shareLo = topShares[topShares.length - 1];
+  // Gated on what is PRINTED, not on the windows being different ones: shares render
+  // at 0 decimals, so 14.6% and 15.4% both read "15%" and a sentence claiming
+  // instability would refute itself in its own numbers.
+  const shareSpread =
+    topShares.length > 1 && formatShare(shareHi.share) !== formatShare(shareLo.share);
+  const shareSteady = topShares.length > 1 && !shareSpread;
 
   // The board is fifty rows per window today, but that is upstream's choice, not
   // ours, and the panel used to spell it "fifty" in four places.
   const boardSize = Math.max(
     ...present.map((w) => churn.overlap[overlapKey(w, w)] ?? 0)
   );
+
+  // "about", because the floor is 0.28284 and the sentence prints two decimals. At
+  // n <= 4 the floor is unreachable by construction, and "below Infinity" is not a
+  // sentence, so that case says what it means instead.
+  const noiseFloor = rhoNoiseFloor(focus.count);
+  const noiseNote = Number.isFinite(noiseFloor)
+    ? `At n\u00a0= ${focus.count}, |rho| below about ${noiseFloor.toFixed(2)} is within what that many ranks produce by chance, so nothing under it is given a direction.`
+    : `At n\u00a0= ${focus.count} every correlation is within what that many ranks produce by chance, so no direction is given at all.`;
 
   const monthlyOverlap =
     present.includes("30d") && present.includes("allTime")
@@ -350,7 +378,7 @@ export default function AnalyticsPanel({
         </div>
 
         <p className="mt-3 text-xs text-muted">
-          In the {WINDOW_LABEL[focus.window]} window, among the {focus.count} largest
+          In the {WINDOW_PROSE[focus.window]} window, among the {focus.count} largest
           PnLs, PnL against capital is {rhoLabel(focus.pnlVsCapital, focus.count)} (
           {fmtRho(focus.pnlVsCapital)}) and PnL against return is{" "}
           {rhoLabel(focus.pnlVsRoi, focus.count)} ({fmtRho(focus.pnlVsRoi)})
@@ -372,11 +400,8 @@ export default function AnalyticsPanel({
           of the board, not about the board.
         </p>
         <p className="mt-2 text-xs text-muted">
-          Rank correlation is Spearman&rsquo;s rho over the same rows the table shows. At
-          n&nbsp;={" "}
-          {focus.count}, |rho| below {rhoNoiseFloor(focus.count).toFixed(2)} is within
-          what that many ranks produce by chance, so nothing under it is given a
-          direction.
+          Rank correlation is Spearman&rsquo;s rho over the same rows the table shows.{" "}
+          {noiseNote}
         </p>
       </Panel>
 
@@ -403,20 +428,23 @@ export default function AnalyticsPanel({
             aria-label={`Cumulative share of each window's profit, richest address first. ${present
               .map((w) => {
                 const c = conc.get(w);
-                return `${WINDOW_LABEL[w]}: top address ${formatShare(c?.topShare ?? null)}, top five ${formatShare(c?.top5Share ?? null)}`;
+                return `${WINDOW_PROSE[w]}: top address ${formatShare(c?.topShare ?? null)}, top five ${formatShare(c?.top5Share ?? null)}`;
               })
-              .join("; ")}. The ${WINDOW_LABEL[focus.window]} window is emphasised.`}
+              .join("; ")}. The ${WINDOW_PROSE[focus.window]} window is emphasised.`}
           >
             {/* Perfect-equality diagonal: what the curve would be if every address in
                 the window had earned the same. The gap to it IS the concentration.
                 Drawn in --muted because --engrave-lo measured 1.11:1 on dark, which
-                is not a reference line anyone can see. */}
+                is not a reference line anyone can see, and in a long dash that no
+                window wears, so the ALL curve running closest to it cannot be read as
+                the reference itself. */}
             <line
               x1="0"
               y1={CURVE_H}
               x2={CURVE_W}
               y2="0"
               className="hl-curve-equality"
+              strokeDasharray={EQUALITY_DASH}
               style={{ stroke: "var(--muted)" }}
               vectorEffect="non-scaling-stroke"
             />
@@ -484,14 +512,21 @@ export default function AnalyticsPanel({
         <p className="mt-3 text-xs text-muted">
           Each line is the cumulative share of a window&rsquo;s total profit, richest
           address first; the straight diagonal is what perfect equality would look like.
-          {shareHi && shareLo && shareHi.window !== shareLo.window ? (
+          {shareSpread && (
             <>
               {" "}
               Concentration is not stable across windows: one address holds{" "}
-              {formatShare(shareHi.share)} of the {WINDOW_LABEL[shareHi.window]} total and{" "}
-              {formatShare(shareLo.share)} of the {WINDOW_LABEL[shareLo.window]} total.
+              {formatShare(shareHi.share)} of the {WINDOW_PROSE[shareHi.window]} total and{" "}
+              {formatShare(shareLo.share)} of the {WINDOW_PROSE[shareLo.window]} total.
             </>
-          ) : null}
+          )}
+          {shareSteady && (
+            <>
+              {" "}
+              Concentration is similar across the windows measured: one address holds{" "}
+              {formatShare(shareHi.share)} of the total in each.
+            </>
+          )}
         </p>
       </Panel>
 
@@ -550,7 +585,10 @@ export default function AnalyticsPanel({
           {plural(churn.persistent.length, "address holds", "addresses hold")} a place in
           every window
           {monthlyOverlap !== null && (
-            <>, and the 30-day and all-time boards share {monthlyOverlap}</>
+            <>
+              , and the {WINDOW_PROSE["30d"]} and {WINDOW_PROSE.allTime} boards share{" "}
+              {monthlyOverlap}
+            </>
           )}
           . The leaderboard renders one window at a time, so this churn is invisible in
           the view it belongs to.
@@ -580,7 +618,7 @@ export default function AnalyticsPanel({
           {focusCohort.count > focus.count / 2 && (
             <>
               {" "}
-              In the {WINDOW_LABEL[focus.window]} window that is most of the board:{" "}
+              In the {WINDOW_PROSE[focus.window]} window that is most of the board:{" "}
               {focusCohort.count} of {focus.count}, carrying{" "}
               {formatShare(focusCohort.share)} of the profit.
             </>

@@ -305,11 +305,15 @@ export function median(values: number[]): number | null {
  *
  * 2/sqrt(n) is the standard approximation of the 95% critical value: 0.283 at n = 50
  * against an exact 0.279, which is close enough that no t-table is needed. Below
- * n = 5 it exceeds 1, and that is the honest answer — five ranks can produce any
- * correlation at all — so it is pinned at 1 and no direction is ever earned.
+ * n = 5 it exceeds 1, and that is the honest answer — four ranks can produce any
+ * correlation at all, ±1 included.
+ *
+ * Infinity rather than 1, because the floor is tested with `<`: pinning it at 1 left
+ * |rho| = 1 ABOVE the floor and labelled "strong", and ±1 is the only value n = 2 can
+ * produce — the exact case the pin exists for.
  */
 export function rhoNoiseFloor(n: number): number {
-  return n > 4 ? 2 / Math.sqrt(n) : 1;
+  return n > 4 ? 2 / Math.sqrt(n) : Number.POSITIVE_INFINITY;
 }
 
 /**
