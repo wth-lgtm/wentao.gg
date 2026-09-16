@@ -123,3 +123,54 @@ export function whaleQuery(state: WhaleUrlState): string {
   if (state.dir !== DEFAULT_WHALE_STATE.dir) query.set("dir", state.dir);
   return query.toString();
 }
+
+// ── Writes in flight ──────────────────────────────────────────────────────────
+//
+// useTableControls composes every write from a base, and `useSearchParams` does not
+// report a write back until the router transition lands. The hook used to reset the
+// base to the URL's reading whenever the params changed — including when an EARLIER
+// write's params landed. Three writes in quick succession then went: write1, write2,
+// (write1 lands → base regresses to write1), write3 composed from the stale base — and
+// write2's change was gone from the URL for good. The three functions below are the
+// pure half of the fix, so tests/urlState.test.ts can replay that exact sequence: the
+// hook keeps the queue of states it has WRITTEN and composes from the newest until the
+// URL reflects it.
+
+/** Field-by-field equality of the five controls. */
+export function sameWhaleState(a: WhaleUrlState, b: WhaleUrlState): boolean {
+  return (
+    a.tab === b.tab &&
+    a.trader === b.trader &&
+    a.period === b.period &&
+    a.sort === b.sort &&
+    a.dir === b.dir
+  );
+}
+
+/** A write: the whole state, from a base and the fields the control changed. Every
+ * write has to carry the WHOLE state — a partial one would drop the other controls. */
+export function composeWrite(
+  base: WhaleUrlState,
+  patch: Partial<WhaleUrlState>
+): WhaleUrlState {
+  return { ...base, ...patch };
+}
+
+/**
+ * The queue after the URL reports `landed`.
+ *
+ * A landing that matches a written state settles it and everything written before it
+ * (the router applies writes in order, so an older one cannot still be in flight behind
+ * a newer one that has arrived). A landing that matches NONE of them is a navigation we
+ * did not cause — Back, Forward, a deep link — and the queue is stale: the URL's reading
+ * is then the only honest base, so the queue is cleared.
+ */
+export function settlePending(
+  pending: readonly WhaleUrlState[],
+  landed: WhaleUrlState
+): WhaleUrlState[] {
+  for (let i = pending.length - 1; i >= 0; i--) {
+    if (sameWhaleState(pending[i], landed)) return pending.slice(i + 1);
+  }
+  return [];
+}

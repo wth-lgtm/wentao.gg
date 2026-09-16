@@ -1,6 +1,6 @@
 "use client";
 
-import { Component, useMemo, useRef, type ReactNode } from "react";
+import { Component, useCallback, useMemo, useRef, type ReactNode } from "react";
 import { TraderMetrics, SortField, SortDirection, TimePeriod } from "../lib/types";
 import { PREVIOUS_WINDOW, rankByPnl, rankDelta, type RankedTrader } from "../lib/rank";
 import { NO_CHANGE, ROW_H, zeroBlock, type BoardChange } from "../lib/commitPlan";
@@ -8,8 +8,17 @@ import { useSurfaceTier } from "../hooks/useSurfaceTier";
 import { useCommit } from "../hooks/useCommit";
 import { Legend, Plate } from "./Instrument";
 import SortHeader from "./SortHeader";
+import SortSegments from "./SortSegments";
 import LeaderboardRow from "./LeaderboardRow";
 import TraderCard, { ArmingCard } from "./TraderCard";
+
+/**
+ * Which surface a select came from. The page needs to know because the two surfaces
+ * leave the visitor in different places: a desktop row is selected with the top of the
+ * page in view, while card 40 on a phone is tapped at scrollY ~2700, and the shorter
+ * Positions panel that replaces the stack leaves the Inspecting strip off-screen above.
+ */
+export type SelectSource = "row" | "card";
 
 interface LeaderboardTableProps {
   /** Sorted for display, each row carrying the rank the plate shows (useTableControls.sortRows). */
@@ -24,7 +33,7 @@ interface LeaderboardTableProps {
   error?: string | null;
   /** Address currently focused for the Positions / Trades tabs. */
   selectedAddress?: string | null;
-  onSelect?: (address: string) => void;
+  onSelect?: (address: string, via: SelectSource) => void;
   /**
    * What the last control change was, and its sequence — the commit engine picks the
    * moment by kind (useCommit.ts). Defaults to "no change yet", under which nothing
@@ -195,6 +204,17 @@ export default function LeaderboardTable({
 
   const columns = deltaColumn ? 7 : 6;
 
+  // The row and the card both take a plain `(address) => void`; the source is stamped
+  // here, where the two surfaces are told apart, rather than taught to each of them.
+  const selectFromRow = useCallback(
+    (address: string) => onSelect?.(address, "row"),
+    [onSelect]
+  );
+  const selectFromCard = useCallback(
+    (address: string) => onSelect?.(address, "card"),
+    [onSelect]
+  );
+
   return (
     // data-surface is the structural gate for the board's motion, on the one element
     // that holds both the table and the phone's card stack: below `commit` no odometer
@@ -321,7 +341,7 @@ export default function LeaderboardTable({
                       : rankDelta(currentRanks, referenceRanks, trader.address)
                   }
                   selected={trader.address === selectedAddress}
-                  onSelect={onSelect}
+                  onSelect={selectFromRow}
                   // Only the commit tier travels. Unregistered rows are simply not found
                   // by useCommit, so the still needs no second flag there.
                   registerRow={tier === "commit" ? registerRow : undefined}
@@ -374,7 +394,17 @@ export default function LeaderboardTable({
       </div>
 
       {/* Mobile Cards */}
-      <div className="sm:hidden space-y-3" aria-busy={loading ? true : undefined}>
+      <div className="sm:hidden">
+        {/* The phone's thead: the sort control the table's header row carries above sm.
+            Present in every state, the arming frame included, so the stack's height is
+            settled before the request answers — the sort is knowable before the rows
+            are, exactly as the desktop thead is. Rendered as a band with the tape's
+            engraved rule beneath it, so the first card's lit lip closes the seam. The
+            HullPlaceholder in page.tsx is measured WITH this band. */}
+        <div className="border-b border-[var(--engrave-lo)] px-3 py-2">
+          <SortSegments field={sortField} direction={sortDirection} onSort={onSort} />
+        </div>
+        <div className="space-y-3" aria-busy={loading ? true : undefined}>
         {loading ? (
           <ArmingCards />
         ) : unavailable ? (
@@ -400,10 +430,11 @@ export default function LeaderboardTable({
                   : rankDelta(currentRanks, referenceRanks, trader.address)
               }
               selected={trader.address === selectedAddress}
-              onSelect={onSelect}
+              onSelect={selectFromCard}
             />
           ))
         )}
+        </div>
       </div>
     </div>
   );

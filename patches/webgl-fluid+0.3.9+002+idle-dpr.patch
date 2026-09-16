@@ -1,0 +1,62 @@
+diff --git a/node_modules/webgl-fluid/dist/webgl-fluid.mjs b/node_modules/webgl-fluid/dist/webgl-fluid.mjs
+index 43132c8..e024630 100644
+--- a/node_modules/webgl-fluid/dist/webgl-fluid.mjs
++++ b/node_modules/webgl-fluid/dist/webgl-fluid.mjs
+@@ -1587,13 +1587,26 @@ function ft(V, _) {
+     _.AUTO && _.INTERVAL && !_.PAUSED && me.push(_.SPLAT_COUNT), setTimeout(i, _.INTERVAL);
+   }
+   setTimeout(i, _.INTERVAL);
+-  let r = Date.now(), u = 0;
++  let r = Date.now(), u = 0, looping = false;
+   c();
+   function c() {
+     if (!alive)
+       return;
++    if (_.PAUSED) {
++      looping = false;
++      return;
++    }
++    looping = true;
+     const o = h();
+-    g() && C(), b(o), v(), _.PAUSED || (S(o), T(null)), requestAnimationFrame(c);
++    g() && C(), b(o), v(), S(o), T(null), requestAnimationFrame(c);
++  }
++  function pause(o) {
++    _.PAUSED = o;
++    if (!o && alive && !looping) {
++      looping = true;
++      r = Date.now();
++      requestAnimationFrame(c);
++    }
+   }
+   function h() {
+     const o = Date.now();
+@@ -1725,7 +1738,7 @@ function ft(V, _) {
+     }
+   }
+   function onKey(o) {
+-    o.code === "KeyP" && (_.PAUSED = !_.PAUSED), o.key === " " && me.push(Number.parseInt(Math.random() * 20) + 5);
++    o.code === "KeyP" && pause(!_.PAUSED), o.key === " " && me.push(Number.parseInt(Math.random() * 20) + 5);
+   }
+   function it(o, s, a, f) {
+     o.id = s, o.down = !0, o.moved = !1, o.texcoordX = a / D.width, o.texcoordY = 1 - f / D.height, o.prevTexcoordX = o.texcoordX, o.prevTexcoordY = o.texcoordY, o.deltaX = 0, o.deltaY = 0, o.color = tt();
+@@ -1801,7 +1814,7 @@ function ft(V, _) {
+     };
+   }
+   function $(o) {
+-    const s = window.devicePixelRatio || 1;
++    const s = Math.min(window.devicePixelRatio || 1, 1.5);
+     return Math.floor(o * s);
+   }
+   function dt(o) {
+@@ -1820,9 +1833,7 @@ function ft(V, _) {
+       const o = n.getExtension("WEBGL_lose_context");
+       o && o.loseContext();
+     },
+-    pause(o) {
+-      _.PAUSED = o;
+-    }
++    pause
+   };
+ }
+ export {

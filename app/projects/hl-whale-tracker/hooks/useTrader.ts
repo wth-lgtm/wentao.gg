@@ -9,16 +9,21 @@ import {
   type SetStateAction,
 } from "react";
 import { TraderFills, TraderPositions } from "../lib/trader";
+import { ageAtReceiptMs, type ReceiptAge } from "../lib/servedAge";
 
 /** One upstream's worth of answer. Three states, and `data` with `error` set is a
- * failed RETRY over a reading that is still on screen. */
+ * failed RE-READ over a reading that is still on screen: the panels keep the reading
+ * and put the failure voice above it, because the reading is still the most recent
+ * thing upstream said about this address. `receipt` dates `data` (lib/servedAge) and is
+ * null exactly when `data` is. */
 export interface TraderSlice<T> {
   data: T | null;
   loading: boolean;
   error: string | null;
+  receipt: ReceiptAge | null;
 }
 
-const IDLE = { data: null, loading: false, error: null } as const;
+const IDLE = { data: null, loading: false, error: null, receipt: null } as const;
 
 /**
  * Fetches one trader, as two independent readings.
@@ -61,7 +66,18 @@ export function useTrader(address: string | null) {
         const body = await res.json().catch(() => null);
         if (signal.aborted || run !== runRef.current) return;
         if (!res.ok) throw new Error(body?.error || `Request failed (${res.status})`);
-        set({ data: body as T, loading: false, error: null });
+        // Stamped as the body lands, on OUR clock, beside how old it already was on the
+        // server's and the edge's. The panel's "As of" ages the pair within one clock
+        // (lib/servedAge); it used to subtract the server's `fetchedAt` from Date.now().
+        set({
+          data: body as T,
+          loading: false,
+          error: null,
+          receipt: {
+            receivedAt: Date.now(),
+            ageAtReceipt: ageAtReceiptMs(res.headers.get("age"), body?.servedAgeMs),
+          },
+        });
       } catch (err) {
         if (signal.aborted || run !== runRef.current) return;
         set((s) => ({

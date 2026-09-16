@@ -56,6 +56,12 @@ declare module "webgl-fluid" {
      * removes the three window listeners the library leaks, and calls
      * WEBGL_lose_context. NOT reversible — see the call site's note on re-initialisation. */
     destroy(): void;
+    /** `true` STOPS the rAF loop — the patched loop returns when paused rather than
+     * ticking on and skipping the step — and `false` restarts it (once; a second call
+     * before the next frame is a no-op). The library's own `P` key goes through the
+     * same function. The patch also clamps the DPR the canvas backing store and the
+     * pointer coordinates are scaled by to 1.5, so a 3x phone does not pay for nine
+     * dye texels per CSS pixel. */
     pause(paused: boolean): void;
   }
 

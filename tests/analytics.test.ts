@@ -6,12 +6,14 @@ import {
   concentration,
   curvePath,
   divergence,
+  formatRoi,
   overlapKey,
   plural,
   rhoLabel,
   rhoNoiseFloor,
   spearman,
 } from "../app/projects/hl-whale-tracker/lib/analytics";
+import { formatPercent } from "../app/projects/hl-whale-tracker/lib/formatters";
 import type { TraderMetrics } from "../app/projects/hl-whale-tracker/lib/types";
 
 // The Analytics tab's arithmetic, pinned to the shapes the live board actually
@@ -223,4 +225,23 @@ test("plural: the panel printed 'Only 1 addresses hold a place in every window'"
   assert.equal(plural(1, "address holds", "addresses hold"), "1 address holds");
   assert.equal(plural(0, "address holds", "addresses hold"), "0 addresses hold");
   assert.equal(plural(18, "address holds", "addresses hold"), "18 addresses hold");
+});
+
+test("formatRoi: Analytics prints ROI exactly as the board does", () => {
+  // The two printed one ROI two ways: the board's formatPercent compact gave "43626%"
+  // where this file's own formatter gave "44K%", and "0.45%" against the board's
+  // "0.5%". One formatter now — the exact figure rides in the cell's title.
+  for (const pct of [0.45, 12.3, 999.94, 1000, 43_626.4, 99_999.6, 114_000, 2_641_203.9]) {
+    assert.equal(formatRoi(pct), formatPercent(pct, { compact: true }), `pct ${pct}`);
+  }
+  assert.equal(formatRoi(43_626.4), "43626%");
+  assert.equal(formatRoi(2_641_203.9), "2.64M%");
+  assert.equal(formatRoi(0.45), "0.5%");
+  assert.equal(formatRoi(-12.34), "-12.3%");
+});
+
+test("formatRoi: an absent or unreadable ROI is the em dash, never a number", () => {
+  assert.equal(formatRoi(null), "—");
+  assert.equal(formatRoi(Number.NaN), "—");
+  assert.equal(formatRoi(Number.POSITIVE_INFINITY), "—");
 });

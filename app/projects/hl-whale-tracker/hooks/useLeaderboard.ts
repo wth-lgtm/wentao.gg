@@ -8,6 +8,7 @@ import {
   isUnreadableWindow,
   unreadableBoardMessage,
 } from "../lib/boardHealth";
+import { ageAtReceiptMs, type ReceiptAge } from "../lib/servedAge";
 
 // Fetches /api/hl-leaderboard and keeps all four periods in memory, so changing the
 // time filter is instant and costs no network. Previously this re-downloaded the entire
@@ -18,20 +19,16 @@ type Periods = Partial<Record<TimePeriod, TraderMetrics[]>>;
 
 /**
  * Where the rail's AGE field comes from. Both halves are needed because the two clocks
- * involved are not the same clock: `age` is the CDN's own count of how old the body it
- * just handed us is, and `receivedAt` is our clock at that instant. Age is then
- * `ageAtReceipt + (Date.now() - receivedAt)` — a subtraction within one clock, so a
- * visitor whose system time is wrong no longer sees an inflated age, and (worse) one
- * whose clock runs behind no longer sees a stale snapshot clamped to 00:00. Comparing
- * the server's `updatedAt` against the browser's Date.now(), which is what this used to
- * do, is the only path to a false reading here.
+ * involved are not the same clock: `ageAtReceipt` is how old the body already was when
+ * it landed — the larger of the CDN's `age` header and the body's own `servedAgeMs`, see
+ * lib/servedAge for why neither alone is enough — and `receivedAt` is our clock at that
+ * instant. Age is then `ageAtReceipt + (Date.now() - receivedAt)`, a subtraction within
+ * one clock, so a visitor whose system time is wrong no longer sees an inflated age, and
+ * (worse) one whose clock runs behind no longer sees a stale snapshot clamped to 00:00.
+ * Comparing the server's `updatedAt` against the browser's Date.now(), which is what
+ * this used to do, is the only path to a false reading here.
  */
-export interface LeaderboardSnapshot {
-  /** Our clock when the body landed. A delta base, never printed. */
-  receivedAt: number;
-  /** The `age` response header at that moment, in ms. 0 on a CDN MISS. */
-  ageAtReceipt: number;
-}
+export type LeaderboardSnapshot = ReceiptAge;
 
 /** "initial" is the mount fetch; "refresh" is the button; "wake" is the TTL/visibility refetch. */
 type LoadKind = "initial" | "refresh" | "wake";
@@ -160,11 +157,11 @@ export function useLeaderboard(timePeriod: TimePeriod) {
         throw new Error(body?.error || `Request failed (${res.status})`);
       }
 
-      // Number(null ?? 0) is 0, and a non-numeric header is NaN — either way an absent
-      // or unparseable age means "as fresh as we can tell", which is what a CDN MISS is.
-      const ageHeader = Number(res.headers.get("age") ?? 0);
-      const ageAtReceipt =
-        Number.isFinite(ageHeader) && ageHeader > 0 ? ageHeader * 1000 : 0;
+      // The header alone under-read here: a CDN MISS is answered out of the route's Data
+      // Cache with a body up to TTL_S old and no `age` at all, so AGE showed 00:00 over a
+      // five-minute-old snapshot and STALE and the wake schedule inherited it. The body's
+      // own server-clock age is the other half; lib/servedAge takes the larger.
+      const ageAtReceipt = ageAtReceiptMs(res.headers.get("age"), body.servedAgeMs);
 
       const updatedAt = typeof body.updatedAt === "number" ? body.updatedAt : null;
       const previous = updatedAtRef.current;

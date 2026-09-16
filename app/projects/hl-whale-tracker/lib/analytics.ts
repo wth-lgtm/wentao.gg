@@ -16,6 +16,7 @@
 // concentration curve is a cumulative distribution over the fifty values that are
 // genuinely present, which is a real shape, not an interpolation.
 
+import { formatPercent } from "./formatters";
 import { TimePeriod, TraderMetrics } from "./types";
 
 export const WINDOWS: TimePeriod[] = ["1d", "7d", "30d", "allTime"];
@@ -360,16 +361,15 @@ export function plural(n: number, one: string, many: string): string {
 }
 
 /**
- * ROI as a percent, compacted. All-time returns reach 2,641,257%, which no fixed
- * format renders sanely alongside a 0.45%.
+ * ROI as a percent, in the BOARD's compact form. All-time returns reach 2,641,257%,
+ * which no fixed format renders sanely alongside a 0.45% — and this file used to carry
+ * its own tiers for that, so the same ROI printed "44K%" here and "43626%" on the board
+ * a tab away (whale-plan-2). One formatter now; the caller puts the exact figure in a
+ * `title`, as LeaderboardRow and TraderCard do. Null and non-finite stay the em dash.
  */
 export function formatRoi(pct: number | null): string {
   if (pct === null || !Number.isFinite(pct)) return "—";
-  const a = Math.abs(pct);
-  if (a >= 1_000_000) return `${(pct / 1_000_000).toFixed(1)}M%`;
-  if (a >= 10_000) return `${(pct / 1_000).toFixed(0)}K%`;
-  if (a >= 100) return `${pct.toFixed(0)}%`;
-  return `${pct.toFixed(a >= 10 ? 1 : 2)}%`;
+  return formatPercent(pct, { compact: true });
 }
 
 /** A share (0..1) as a percent, or an em dash when it could not be computed. */

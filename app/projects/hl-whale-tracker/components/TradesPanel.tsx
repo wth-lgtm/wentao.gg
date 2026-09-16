@@ -1,9 +1,10 @@
 "use client";
 
 import { Fragment, useMemo, useState } from "react";
-import { AddressLegend, Legend, Unavailable, dash } from "./Instrument";
+import { AddressLegend, AsOf, BoardWord, Legend, Unavailable, dash } from "./Instrument";
 import { formatCurrency, toneClass } from "../lib/formatters";
 import { FILL_LIMIT, TraderFills } from "../lib/trader";
+import type { ReceiptAge } from "../lib/servedAge";
 import {
   DirFacets,
   LabelledFill,
@@ -24,8 +25,10 @@ import {
   formatZone,
   groupFills,
   isRebate,
+  liquidationPath,
   realisedTotal,
   venueOf,
+  type LiquidationPath,
 } from "../lib/fills";
 
 // The Trades tab.
@@ -85,7 +88,22 @@ function DirCell({ facets, dir }: { facets: DirFacets; dir: string }) {
   );
 }
 
-function VenueTag({ venue, label }: { venue: Venue; label: string }) {
+// Which reading badged the row, for the title: the address on the fill is the fact, the
+// dir string is the fallback for the five fills in 956 that name it themselves.
+const LIQ_TITLE: Record<LiquidationPath, string> = {
+  liquidatedUser: "Liquidated — this address is the liquidated party on the fill",
+  dir: "Liquidated — the fill's own type says so",
+};
+
+function VenueTag({
+  venue,
+  label,
+  liquidated,
+}: {
+  venue: Venue;
+  label: string;
+  liquidated: LiquidationPath | null;
+}) {
   return (
     <span className="flex min-w-0 items-baseline gap-1.5">
       <span className="truncate font-medium text-foreground">{label}</span>
@@ -94,6 +112,15 @@ function VenueTag({ venue, label }: { venue: Venue; label: string }) {
       {venue !== "PERP" && (
         <span className="hl-venue" data-venue={venue}>
           {VENUE_TAG[venue]}
+        </span>
+      )}
+      {/* A forced close, whoever's dir it wears. Beside the market rather than in the
+          Action cell, whose word is already LIQ for the five fills the dir names — the
+          same word twice in one cell would read as a stutter. */}
+      {liquidated !== null && (
+        <span className="hl-liq" title={LIQ_TITLE[liquidated]}>
+          <span aria-hidden>LIQ</span>
+          <span className="sr-only">liquidated</span>
         </span>
       )}
     </span>
@@ -166,16 +193,22 @@ function TimeCell({ order }: { order: Order }) {
 export default function TradesPanel({
   address,
   data,
+  receipt,
   loading,
   error,
   onRetry,
+  onBoard,
 }: {
   address: string | null;
   data: TraderFills | null;
+  /** When `data` landed and how old it already was (lib/servedAge); null with `data`. */
+  receipt: ReceiptAge | null;
   loading: boolean;
   error: string | null;
   /** Re-reads this trader, both slices (useTrader's reload). */
   onRetry?: () => void;
+  /** Switches to the board tab through the page's tab-change path (see BoardWord). */
+  onBoard?: () => void;
 }) {
   const [grouped, setGrouped] = useState(true);
 
@@ -185,7 +218,9 @@ export default function TradesPanel({
   // any of these derivations is rendered — `fills: null` means upstream did not
   // answer, and every stat under it would be a figure about nothing.
   const fills = useMemo(() => (data?.fills ?? []) as LabelledFill[], [data]);
-  const orders = useMemo(() => groupFills(fills), [fills]);
+  // The address is what liquidationPath compares against; null before a selection,
+  // where the fallback array above is empty anyway.
+  const orders = useMemo(() => groupFills(fills, address ?? undefined), [fills, address]);
   const fees = useMemo(() => feeTotals(fills), [fills]);
   const realised = useMemo(() => realisedTotal(fills), [fills]);
   const span = useMemo(() => fillSpan(fills), [fills]);
@@ -195,7 +230,8 @@ export default function TradesPanel({
       <Panel>
         <Legend>No trader selected</Legend>
         <p className="mt-2 text-sm text-muted">
-          Pick a row on the leaderboard to read that address&rsquo;s recent fills.
+          Pick a trader on <BoardWord onBoard={onBoard} /> to read that address&rsquo;s
+          recent fills.
         </p>
       </Panel>
     );
@@ -214,19 +250,40 @@ export default function TradesPanel({
     );
   }
 
-  if (error) {
-    return (
+  // Only a tape that never ARRIVED is replaced by the failure. This branch used to come
+  // before the data branches, so a re-read that 429'd replaced a hundred fills with
+  // "Could not read"; a failed re-read over a tape is `reread` below, and the tape stays.
+  if (!data) {
+    if (error) {
+      return (
+        <Panel>
+          <AddressLegend prefix="Could not read " address={address} />
+          {/* The only recovery here used to be Clear → leaderboard → reselect, because
+              useTrader refetches on a CHANGE of address and re-clicking the same row
+              changes nothing. */}
+          <Unavailable reason={error} onRetry={onRetry} busy={loading} />
+        </Panel>
+      );
+    }
+    return null;
+  }
+
+  // The failure voice over a tape that is still on screen, dated so the reader knows how
+  // old what it stands over is. Not rendered over the absent branch below: a failed
+  // re-read of a tape upstream never sent is one failure, and that branch already says
+  // it, with the same Re-read.
+  const reread =
+    error === null ? null : (
       <Panel>
-        <AddressLegend prefix="Could not read " address={address} />
-        {/* The only recovery here used to be Clear → leaderboard → reselect, because
-            useTrader refetches on a CHANGE of address and re-clicking the same row
-            changes nothing. */}
+        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+          <AddressLegend prefix="Re-read failed · " address={address} />
+          {receipt !== null && (
+            <AsOf receipt={receipt} prefix="Showing the tape from" of="these fills" />
+          )}
+        </div>
         <Unavailable reason={error} onRetry={onRetry} busy={loading} />
       </Panel>
     );
-  }
-
-  if (!data) return null;
 
   // Absent before empty. The copy below asserts "that is a real state, not an error",
   // which is a literal falsehood over a call that never answered — it is only ever
@@ -250,16 +307,19 @@ export default function TradesPanel({
 
   if (fills.length === 0) {
     return (
-      <Panel>
-        <AddressLegend prefix="No recent fills · " address={address} />
-        {/* One sentence, about THIS trader. The previous copy spent three on the
-            fourteen addresses sampled while the panel was built — a fact about the
-            author, not about the address on screen. */}
-        <p className="mt-2 text-sm text-muted">
-          Upstream answered and reported no fills for this address — a real state, not
-          an error.
-        </p>
-      </Panel>
+      <div className="space-y-4">
+        {reread}
+        <Panel>
+          <AddressLegend prefix="No recent fills · " address={address} />
+          {/* One sentence, about THIS trader. The previous copy spent three on the
+              fourteen addresses sampled while the panel was built — a fact about the
+              author, not about the address on screen. */}
+          <p className="mt-2 text-sm text-muted">
+            Upstream answered and reported no fills for this address — a real state, not
+            an error.
+          </p>
+        </Panel>
+      </div>
     );
   }
 
@@ -288,6 +348,7 @@ export default function TradesPanel({
           fees: f.fee !== null && f.fee !== 0 ? { [f.feeToken || "USDC"]: f.fee } : {},
           latest: f.time,
           earliest: f.time,
+          liquidated: liquidationPath(f, address),
         };
       });
 
@@ -311,6 +372,11 @@ export default function TradesPanel({
   const zoneFrom = span === null ? "" : formatZone(span.from);
   const zoneTo = span === null ? "" : formatZone(span.to);
   const zoneLegend = zoneFrom === zoneTo ? zoneTo : `${zoneFrom} → ${zoneTo}`;
+  // The route says when the pair-name lookup did not happen; the footnote is shown only
+  // when a row on THIS tape is wearing its index for it — a flag over a tape with no spot
+  // fill would be a sentence about nothing on screen.
+  const unlabelledSpot =
+    data.pairNamesPartial && fills.some((f) => venueOf(f.coin) === "SPOT" && !f.label);
   const windowLegend =
     span === null
       ? "window unknown"
@@ -326,6 +392,7 @@ export default function TradesPanel({
 
   return (
     <div className="space-y-4">
+      {reread}
       <Panel>
         <div className="mb-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
           <AddressLegend prefix="Recent tape · " address={address} />
@@ -464,7 +531,7 @@ export default function TradesPanel({
                         <TimeCell order={o} />
                       </td>
                       <td className="px-2 sm:px-4">
-                        <VenueTag venue={o.venue} label={o.label} />
+                        <VenueTag venue={o.venue} label={o.label} liquidated={o.liquidated} />
                       </td>
                       <td className="px-2 sm:px-4">
                         <span className="flex items-baseline gap-1.5">
@@ -508,6 +575,17 @@ export default function TradesPanel({
             </tbody>
           </table>
         </div>
+
+        {/* One footnote, in the grouping note's voice. "@107" is upstream's own name for
+            the market and the row is a real trade; what the footnote adds is that the
+            name is an INDEX because the lookup did not answer, not because that is what
+            the market is called. */}
+        {unlabelledSpot && (
+          <p className="border-t border-border px-4 py-2 text-xs text-muted">
+            Some pair names unavailable — Hyperliquid spotMeta did not answer, so those
+            rows show the market&rsquo;s index rather than its pair.
+          </p>
+        )}
       </Panel>
     </div>
   );

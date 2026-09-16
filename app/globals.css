@@ -55,7 +55,13 @@
 .light {
   --background: #ffffff;
   --foreground: #0a0a0b;
-  --muted: #6b7280;
+  /* 4.84:1 on --card, 5.32:1 on --background and 4.51:1 on --card-hover — the surface
+     the board's text-muted addresses sit on while a row is hovered, which #646e7c
+     (4.70 / 5.17) still failed at 4.38. It was #6b7280, which measured 4.40:1 on the
+     card — under AA for every 11-16px text-muted run on the whale page's cards (fifty
+     board addresses, the volumes, the tape's clocks, the Positions dashes) and the home
+     page's glass. Two steps darker along the same slate; --legend is untouched. */
+  --muted: #626c7a;
   --accent: #2563eb;
   --accent-hover: #1d4ed8;
   --card: #f4f4f5;
@@ -837,13 +843,18 @@ input:focus {
    switching tabs unmounts a plate and mounts another, and this animation is a plate
    ARRIVING, not one sliding across the rack. A scaleX settle is the honest read of
    that: it grows into its own berth from its own centre. 0.3s, because a discrete
-   state change lands on an N x 100ms beat. */
+   state change lands on an N x 100ms beat.
+
+   Filled with --foreground, under a text-background label (TabNavigation.tsx). It was
+   --accent under white, which measures 3.68:1 on the dark theme; the page colour pair is
+   16.09:1 dark and 19.79:1 light, the same treatment TimeFilter and the phone's sort
+   segments use. */
 .hl-tab-plate {
   position: absolute;
   inset: 0;
   z-index: 0;
   border-radius: 0.5rem;
-  background: var(--accent);
+  background: var(--foreground);
   box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 26%, transparent);
   animation: hlPlateSeat 0.3s var(--ease-entrance) both;
 }
@@ -1056,8 +1067,9 @@ input:focus {
   }
 }
 
-/* THE CHEVRON (SortHeader). A direction toggle is not a travel — it turns this, in one
-   180ms settle, and the rows swap under it. The box is the stacked pair's 20px so the
+/* THE CHEVRON (SortHeader, and the phone's SortSegments). A direction toggle is not a
+   travel — it turns this, in one 200ms settle (two 100ms beats; it was 180ms, which sat
+   on no beat), and the rows swap under it. The box is the stacked pair's 20px so the
    header row keeps its height. The settle runs at the commit tier only; the seat and
    the still get the turned chevron with no travel between. */
 .hl-chevron {
@@ -1073,7 +1085,7 @@ input:focus {
   transform: rotate(180deg);
 }
 [data-surface="commit"] .hl-chevron > svg {
-  transition: transform 0.18s var(--ease-entrance);
+  transition: transform 0.2s var(--ease-entrance);
 }
 
 /* The inspect affordance: hidden until the row is hovered or its control focused,
@@ -1281,6 +1293,23 @@ input:focus {
 .hl-venue[data-venue="EQUITY"] {
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+/* Liquidation tag, the venue badge's shape in the loss tone. The dir names a forced
+   close on 5 of 956 live liquidation fills; the other 951 carry a plain Close dir and the
+   trader's own address in `liquidation.liquidatedUser`, which lib/fills liquidationPath
+   reads first. The word carries the meaning, so the badge survives greyscale. */
+.hl-liq {
+  flex-shrink: 0;
+  padding: 0.0625rem 0.25rem;
+  border-radius: 0.1875rem;
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.5625rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--loss);
+  background: color-mix(in srgb, var(--loss) 8%, transparent);
+  box-shadow: inset 0 0 0 1px var(--engrave-lo);
 }
 
 /* How many raw fills a grouped row stands in for. This is the honesty valve on

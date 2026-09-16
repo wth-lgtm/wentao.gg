@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { AddressLegend, Legend, Unavailable, dash } from "./Instrument";
-import { formatCurrency, formatPercent, toneClass } from "../lib/formatters";
+import { useMemo } from "react";
+import { AddressLegend, AsOf, BoardWord, Legend, Unavailable, dash } from "./Instrument";
+import { formatCurrency, formatDollars, formatPercent, toneClass } from "../lib/formatters";
 import { formatPrice, formatSize } from "../lib/fills";
+import type { ReceiptAge } from "../lib/servedAge";
 import {
   Aggregate,
   DUST_USD,
@@ -39,17 +40,15 @@ function Metric({ label, children }: { label: string; children: React.ReactNode 
   );
 }
 
-/**
- * Where a figure on this panel stops being written out in full.
- *
- * One place, because it had two: money() below and spotValue() four hundred lines
- * down both carried `Math.abs(v) >= 10_000`, so the perp ledger and the spot list
- * agreed on the threshold only by coincidence.
- */
-const compactAbove = (v: number) => Math.abs(v) >= 10_000;
-
-const money = (v: number | null, decimals = 2) =>
-  v === null ? dash : formatCurrency(v, { compact: compactAbove(v), decimals });
+// ONE precision per column (whale-plan-7). This panel used to switch to the compact
+// form at 10K — money() and spotValue() both carried `Math.abs(v) >= 10_000` — so one
+// column read "$4,663.84" beside "$15.2K": two precisions and two widths for one
+// quantity. Value and Margin, in their cells, their phone tiles, the account figures and
+// their totals, are whole dollars (formatDollars: the tape's Notional rule, with the
+// sub-dollar bound the dust drawer needs); Funding is two fixed decimals, never compacted
+// (see Funding); the spot column and its total are two fixed decimals, because that
+// drawer names cents. No magnitude switch anywhere on the panel.
+const dollars = (v: number | null) => (v === null ? dash : formatDollars(v));
 
 // formatPrice and formatSize hand back a bare "—" for null, which sits a shade
 // darker than the muted `dash` every other unknown on this panel uses — Entry and
@@ -72,54 +71,9 @@ function SideBadge({ side }: { side: PerpPosition["side"] }) {
   );
 }
 
-/**
- * Age of THIS address's snapshot.
- *
- * The route caches at the edge (`s-maxage=30, stale-while-revalidate=120`) and two
- * consecutive live GETs came back MISS then HIT with an identical fetchedAt, so what
- * is on screen can be two minutes old with nothing saying so. The rail above the tabs
- * ages the LEADERBOARD, which is different data on a different schedule — hence a
- * second, local reading in the rail's own MM:SS language.
- *
- * Deliberately not a live region (`aria-live="off"`, matching the rail): a clock
- * inside one would interrupt a screen reader every second, forever.
- */
-function AsOf({ since }: { since: number }) {
-  // Elapsed SECONDS in state, label is pure formatting — and the first sample is
-  // deferred a frame rather than taken in the effect body, so nothing reads
-  // Date.now() during render and no setState cascades a second render.
-  const [seconds, setSeconds] = useState<number | null>(null);
-
-  useEffect(() => {
-    const sample = () => setSeconds(Math.max(0, Math.floor((Date.now() - since) / 1000)));
-    const frame = requestAnimationFrame(sample);
-    const id = setInterval(sample, 1000);
-    return () => {
-      cancelAnimationFrame(frame);
-      clearInterval(id);
-    };
-  }, [since]);
-
-  const label =
-    seconds === null
-      ? "--:--"
-      : `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
-
-  return (
-    <Legend>
-      As of{" "}
-      <span aria-live="off" className="tabular-nums text-foreground">
-        {label}
-      </span>{" "}
-      ago
-      <span className="sr-only">
-        {" "}
-        — how long since these perp and spot figures were read; the snapshot age on the
-        rail above belongs to the leaderboard
-      </span>
-    </Legend>
-  );
-}
+// The "As of" clock moved to Instrument.tsx as AsOf: the Trades tab's failed-re-read
+// voice needs to date the tape it stands over, and one clock per panel is how the two
+// ended up subtracting the server's stamp from the visitor's clock (lib/servedAge).
 
 // ── Position ordering and the dust gate ───────────────────────────────────────
 //
@@ -232,7 +186,7 @@ function TotalsRow({ totals, maintenance }: { totals: PerpTotals; maintenance: n
         ) : (
           <span className="flex flex-wrap items-baseline gap-x-1.5">
             <SideBadge side={netSide} />
-            <span>{money(Math.abs(net))}</span>
+            <span>{dollars(Math.abs(net))}</span>
             <Legend>
               {totals.longs} long · {totals.shorts} short
             </Legend>
@@ -274,9 +228,11 @@ function TotalsRow({ totals, maintenance }: { totals: PerpTotals; maintenance: n
 
 function Funding({ value }: { value: number }) {
   return (
-    // Already in the trader's P&L sign (see PerpPosition.fundingSinceOpen).
+    // Already in the trader's P&L sign (see PerpPosition.fundingSinceOpen). Two fixed
+    // decimals and never compacted: funding is small money that accrues in cents, and
+    // the cell, the phone tile and the Σ all print through this one component.
     <span className={toneClass(value)}>
-      {formatCurrency(value, { showSign: true, compact: true })}
+      {formatCurrency(value, { showSign: true })}
       <span className="sr-only">{value > 0 ? " received" : value < 0 ? " paid" : ""}</span>
     </span>
   );
@@ -391,9 +347,9 @@ function PositionList({ rows, dust = false }: { rows: PerpPosition[]; dust?: boo
                 </td>
                 <Td>{size(p.szi === null ? null : Math.abs(p.szi))}</Td>
                 <Td muted>{price(p.entryPx)}</Td>
-                <Td>{money(p.positionValue)}</Td>
+                <Td>{dollars(p.positionValue)}</Td>
                 <Td muted className="hidden lg:table-cell">
-                  {money(p.marginUsed)}
+                  {dollars(p.marginUsed)}
                 </Td>
                 <Td className="hidden md:table-cell">
                   <Roe p={p} dust={dust} />
@@ -423,8 +379,8 @@ function PositionList({ rows, dust = false }: { rows: PerpPosition[]; dust?: boo
             <div className="grid grid-cols-2 gap-x-4 gap-y-2">
               <Metric label="Size">{size(p.szi === null ? null : Math.abs(p.szi))}</Metric>
               <Metric label="Entry">{price(p.entryPx)}</Metric>
-              <Metric label="Value">{money(p.positionValue)}</Metric>
-              <Metric label="Margin">{money(p.marginUsed)}</Metric>
+              <Metric label="Value">{dollars(p.positionValue)}</Metric>
+              <Metric label="Margin">{dollars(p.marginUsed)}</Metric>
               <Metric label="ROE">
                 <Roe p={p} dust={dust} />
               </Metric>
@@ -518,17 +474,16 @@ const SPOT_DUST_USD = 1;
 /**
  * A holding too small for two decimal places still has to read as a holding.
  *
- * money() prints two decimals, so the long tail of a memecoin wallet rounds to "$0.00"
+ * Two decimals round the long tail of a memecoin wallet to "$0.00"
  * — a confident zero over something the account genuinely owns. Measured on the zero
  * address: 39 of its 63 sub-dollar balances price below a cent (KNTQ at $0.00000064),
  * and "0" is reserved in this panel for a real zero.
  */
 function spotValue(usd: number): string {
   if (usd > 0 && usd < 0.005) return "<$0.01";
-  // Not money() itself, because its null branch hands back a JSX dash and the row
-  // renders the unpriced case for itself — but the same threshold, from the same
-  // constant, so the two columns cannot drift apart.
-  return formatCurrency(usd, { compact: compactAbove(usd), decimals: 2 });
+  // Two fixed decimals for the whole column, so "$5.90" and "$43,250,000.00" share one
+  // resolution and one decimal point; the total below prints through the same call.
+  return formatCurrency(usd, { decimals: 2 });
 }
 
 const isSpotDust = (b: SpotBalance) => b.usdValue !== null && b.usdValue < SPOT_DUST_USD;
@@ -623,15 +578,19 @@ function SpotDustBlock({ rows, total }: { rows: SpotBalance[]; total: number }) 
 export default function PositionsPanel({
   address,
   data,
+  receipt,
   loading,
   error,
   leaderboardAccountValue,
   onRetry,
+  onBoard,
 }: {
   address: string | null;
   /** The positions slice only. Fills live in their own route and their own slice, so
    * this panel no longer waits on a 1.16-1.38s userFills call it never reads. */
   data: TraderPositions | null;
+  /** When `data` landed and how old it already was (lib/servedAge); null with `data`. */
+  receipt: ReceiptAge | null;
   loading: boolean;
   error: string | null;
   /** This address's equity as the LEADERBOARD measures it, from the row that is
@@ -641,6 +600,8 @@ export default function PositionsPanel({
   leaderboardAccountValue: number | null;
   /** Re-reads this trader, both slices (useTrader's reload). */
   onRetry?: () => void;
+  /** Switches to the board tab through the page's tab-change path (see BoardWord). */
+  onBoard?: () => void;
 }) {
   // Derived before the early returns, because hooks cannot live behind a branch. Each
   // one is keyed on the snapshot object, so a re-render that does not change the data
@@ -657,7 +618,8 @@ export default function PositionsPanel({
       <Panel>
         <Legend>No trader selected</Legend>
         <p className="mt-2 text-sm text-muted">
-          Pick a row on the leaderboard to inspect what that address is holding.
+          Pick a trader on <BoardWord onBoard={onBoard} /> to inspect what that address is
+          holding.
         </p>
       </Panel>
     );
@@ -676,18 +638,21 @@ export default function PositionsPanel({
     );
   }
 
-  if (error) {
-    return (
-      <Panel>
-        <AddressLegend prefix="Could not read " address={address} />
-        <p className="mt-2 font-mono text-xs uppercase tracking-[0.16em] text-[var(--loss)]">
-          {error}
-        </p>
-      </Panel>
-    );
+  // Only a reading that never ARRIVED is replaced by the failure. This branch used to
+  // come before the data branches, so a re-read that 429'd replaced twelve live
+  // positions with "Could not read" — the visitor pressed Re-read for a fresher reading
+  // and lost the one they had. A failed re-read over a reading is `reread` below.
+  if (!data) {
+    if (error) {
+      return (
+        <Panel>
+          <AddressLegend prefix="Could not read " address={address} />
+          <Unavailable reason={error} onRetry={onRetry} busy={loading} />
+        </Panel>
+      );
+    }
+    return null;
   }
-
-  if (!data) return null;
 
   const { margin, positions, spot } = data;
 
@@ -701,7 +666,29 @@ export default function PositionsPanel({
     positions !== null && positions.length === 0 && spot !== null && spot.length > 0;
   // Both slices absent is one upstream refusal, not two — see the spot notice below.
   const bothAbsent = positions === null && spot === null;
-  const asOf = <AsOf since={data.fetchedAt} />;
+  const asOf =
+    receipt === null ? null : <AsOf receipt={receipt} of="these perp and spot figures" />;
+
+  // The failure voice over a reading that is still on screen. The reading is still the
+  // most recent thing upstream said about this address, so it stays, and the failure
+  // says how old what it is standing over is. `loading` here is a further re-read in
+  // flight over both.
+  const reread =
+    error === null ? null : (
+      <Panel key="reread">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+          <AddressLegend prefix="Re-read failed · " address={address} />
+          {receipt !== null && (
+            <AsOf
+              receipt={receipt}
+              prefix="Showing the reading from"
+              of="the perp and spot figures below"
+            />
+          )}
+        </div>
+        <Unavailable reason={error} onRetry={onRetry} busy={loading} />
+      </Panel>
+    );
 
   // Both figures or neither, and both above zero. A ratio needs a positive denominator
   // to be a ratio at all, and it needs a positive NUMERATOR to be worth printing:
@@ -730,10 +717,10 @@ export default function PositionsPanel({
         {spotFirst ? <Legend>Secondary — no open perps</Legend> : asOf}
       </div>
       <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
-        <Metric label="Account value">{money(margin?.accountValue ?? null)}</Metric>
-        <Metric label="Notional open">{money(margin?.totalNtlPos ?? null)}</Metric>
-        <Metric label="Margin used">{money(margin?.totalMarginUsed ?? null)}</Metric>
-        <Metric label="Withdrawable">{money(margin?.withdrawable ?? null)}</Metric>
+        <Metric label="Account value">{dollars(margin?.accountValue ?? null)}</Metric>
+        <Metric label="Notional open">{dollars(margin?.totalNtlPos ?? null)}</Metric>
+        <Metric label="Margin used">{dollars(margin?.totalMarginUsed ?? null)}</Metric>
+        <Metric label="Withdrawable">{dollars(margin?.withdrawable ?? null)}</Metric>
       </div>
       {totals && (
         <>
@@ -769,8 +756,8 @@ export default function PositionsPanel({
       <p className="mt-3 text-xs text-muted">
         {leaderboardEquity !== null && (
           <>
-            Leaderboard equity {money(leaderboardEquity.leaderboard)} · live perp{" "}
-            {money(leaderboardEquity.perp)} — the leaderboard reads{" "}
+            Leaderboard equity {dollars(leaderboardEquity.leaderboard)} · live perp{" "}
+            {dollars(leaderboardEquity.perp)} — the leaderboard reads{" "}
             {leaderboardEquity.ratio.toFixed(2)}× the live perp account.{" "}
           </>
         )}
@@ -843,7 +830,7 @@ export default function PositionsPanel({
           <Legend>
             Total ≈{" "}
             <span className="tabular-nums text-foreground">
-              {money(spotRanked.value.total)}
+              {formatCurrency(spotRanked.value.total, { decimals: 2 })}
             </span>{" "}
             <Coverage agg={spotRanked.value} what="spot mid" unit="balances" />
           </Legend>
@@ -900,6 +887,7 @@ export default function PositionsPanel({
 
   return (
     <div className="space-y-4">
+      {reread}
       {spotFirst
         ? [spotBalances, perpAccount, perpPositions]
         : [perpAccount, perpPositions, spotBalances]}

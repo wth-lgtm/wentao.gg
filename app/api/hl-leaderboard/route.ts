@@ -68,7 +68,9 @@ const UPSTREAM_TIMEOUT_MS = 20_000;
  *     signal passed in as an argument would be JSON-stringified into the cache key.
  *   - `updatedAt` is stamped here. It is what the rail's AGE field ages (SoundingRail's
  *     SnapshotAge), and stamping it in the handler would report ~0s for a body up to
- *     TTL_S old — the instrument asserting a freshness it does not have.
+ *     TTL_S old — the instrument asserting a freshness it does not have. The handler
+ *     below DOES stamp a second figure at send time, `servedAgeMs`, but as a duration
+ *     derived from this one: how long the cached body has already sat here.
  */
 const getReduced = unstable_cache(
   async () => {
@@ -127,6 +129,14 @@ export async function GET() {
       ...reduced,
       // The rail shows the real cache window rather than a hardcoded guess.
       ttlSeconds: TTL_S,
+      // How old the body already is as it leaves — both stamps are THIS server's clock,
+      // so the subtraction is within one clock and the client never has to compare its
+      // own Date.now() against `updatedAt`. It exists because the CDN `age` header is the
+      // client's other source and it is absent on a MISS, while a MISS here is answered
+      // out of the Data Cache with a body up to TTL_S old: without this the rail read AGE
+      // 00:00 over a five-minute-old snapshot and the STALE cue and the wake schedule
+      // inherited the under-count. The client takes the larger of the two (lib/servedAge).
+      servedAgeMs: Math.max(0, Date.now() - reduced.updatedAt),
     },
     {
       headers: {

@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { TimePeriod, TraderMetrics } from "../lib/types";
 import { Legend, Unavailable } from "./Instrument";
-import { formatAddress, formatCurrency } from "../lib/formatters";
+import { formatAddress, formatCurrency, formatPercent } from "../lib/formatters";
 import {
   Periods,
   WINDOWS,
@@ -109,6 +109,10 @@ function LeaderCard({
   note: string;
   className?: string;
 }) {
+  // The board's pair (LeaderboardRow): the compact figure on screen, the exact one in
+  // the title, and the title only when the two differ.
+  const roi = formatRoi(trader.winRate);
+  const roiExact = formatPercent(trader.winRate);
   return (
     <div className={className ? `hl-archetype ${className}` : "hl-archetype"}>
       <Legend>{role}</Legend>
@@ -124,7 +128,9 @@ function LeaderCard({
         <Cell label="PnL">
           {formatCurrency(trader.pnl, { compact: true, showSign: true })}
         </Cell>
-        <Cell label="Return">{formatRoi(trader.winRate)}</Cell>
+        <Cell label="Return" title={roiExact === roi ? undefined : roiExact}>
+          {roi}
+        </Cell>
         <Cell label="Capital">
           {formatCurrency(trader.accountValue, { compact: true, decimals: 1 })}
         </Cell>
@@ -134,13 +140,24 @@ function LeaderCard({
   );
 }
 
-function Cell({ label, children }: { label: string; children: React.ReactNode }) {
+function Cell({
+  label,
+  title,
+  children,
+}: {
+  label: string;
+  /** The exact figure behind a compacted one. */
+  title?: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="min-w-0">
       <dt className="font-mono text-[9px] uppercase tracking-[0.12em] text-[var(--legend)]">
         {label}
       </dt>
-      <dd className="truncate tabular-nums text-xs text-foreground">{children}</dd>
+      <dd className="truncate tabular-nums text-xs text-foreground" title={title}>
+        {children}
+      </dd>
     </div>
   );
 }
