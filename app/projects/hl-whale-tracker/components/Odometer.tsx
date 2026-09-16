@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { useReducedMotion } from "framer-motion";
+import { useEffect, useState } from "react";
+import { useSurfaceTier } from "../hooks/useSurfaceTier";
 
 // A digit tumbler for the board's figures.
 //
@@ -19,6 +19,13 @@ import { useReducedMotion } from "framer-motion";
 // whichever direction it needs, so a figure that falls visibly rolls DOWN. For a
 // quantity that reads as more honest than a mechanical constraint.
 
+// NOTE, not a defect to fix here: a period switch profiles as one ~56 ms long task, and
+// it is React MOUNTING forty-nine rows each containing one of these — eleven digit
+// columns of ten cells is ~110 spans per figure — not the commit engine, whose measured
+// share of that task is 1.3 ms. It predates the engine and it is the cost of the drum
+// being real DOM rather than a canvas, which is what lets it inherit the board's type,
+// tabular numerals and theme tokens. Recorded so the next profile does not read the
+// engine's 1.3 ms as the thing to optimise.
 const DIGITS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
 
 export interface OdometerCell {
@@ -64,24 +71,36 @@ export default function Odometer({
   /** Stagger for the first-paint roll, so the board fills top-down. */
   delayMs?: number;
 }) {
-  const reduce = useReducedMotion() ?? false;
+  // THE decision, read at the source. This asked framer-motion's useReducedMotion,
+  // which answers one of the surface tier's three questions and knows nothing about a
+  // coarse pointer or a sub-sm window — so on a phone or a tablet the entrance state
+  // machine still ran (a timer per odometer, fifty per board, plus a re-render each)
+  // and only the stylesheet stopped the paint. That CSS gate stays as the backstop it
+  // was written to be; this is the component agreeing with it.
+  //
+  // It also removes the last framer-motion import on this route (perf-bundle-11): the
+  // page's own entrance is a CSS keyframe and the re-seat is Web Animations, so this
+  // one hook was pulling the animation runtime into the board's chunk for a boolean.
+  const rolls = useSurfaceTier() === "commit";
 
   // The enter roll plays once per mount and is then switched off, so a later value
   // change transitions from where the digit actually is rather than snapping back to
   // zero and rolling up again.
-  const [entering, setEntering] = useState(!reduce);
-  const timer = useRef<number | null>(null);
+  //
+  // `entered` rather than `entering`, because the tier is not knowable on the first
+  // render: useSurfaceTier serves the "still" server snapshot through hydration, and
+  // initialising state from it would have latched the roll off for good. So the flag
+  // records only whether the enter WINDOW has elapsed, and the tier gates the paint
+  // every render.
+  const [entered, setEntered] = useState(false);
+  const entering = rolls && !entered;
 
   useEffect(() => {
-    if (!entering) return;
+    if (!rolls || entered) return;
     // Longest possible enter = the stagger plus the roll itself.
-    timer.current = window.setTimeout(() => setEntering(false), delayMs + 900);
-    return () => {
-      if (timer.current !== null) window.clearTimeout(timer.current);
-    };
-    // Runs once: `entering` starts true and only ever goes false.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    const timer = window.setTimeout(() => setEntered(true), delayMs + 900);
+    return () => window.clearTimeout(timer);
+  }, [rolls, entered, delayMs]);
 
   return (
     <span className="hl-odo">
@@ -93,8 +112,8 @@ export default function Odometer({
       <span
         aria-hidden
         className="hl-odo-track"
-        data-enter={entering && !reduce ? "true" : undefined}
-        style={entering && !reduce ? { animationDelay: `${delayMs}ms` } : undefined}
+        data-enter={entering ? "true" : undefined}
+        style={entering ? { animationDelay: `${delayMs}ms` } : undefined}
       >
         {odometerCells(formatted).map(({ key, ch, digit }) =>
           digit ? (

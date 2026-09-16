@@ -2,7 +2,7 @@
 
 import { ChevronRight, ExternalLink } from "lucide-react";
 import Odometer from "./Odometer";
-import { Legend } from "./Instrument";
+import { DeltaPlate, Legend, Plate } from "./Instrument";
 import { TraderMetrics } from "../lib/types";
 import {
   formatAddress,
@@ -11,14 +11,29 @@ import {
   signGlyph,
   toneClass,
 } from "../lib/formatters";
-import { tierOf } from "../lib/tier";
 
 interface TraderCardProps {
   trader: TraderMetrics;
   rank: number;
+  /** Whether the table has a delta column at all (see LeaderboardTable). */
+  deltaColumn?: boolean;
+  /**
+   * Berths moved since the next-shorter window, exactly as the desktop row takes it: a
+   * number is a reading (0 included), `null` means the trader was not on that window's
+   * board, `undefined` means there is no window to compare against (24H).
+   */
+  delta?: number | null;
   selected?: boolean;
   onSelect?: (address: string) => void;
 }
+
+// The three layout literals the live card and its arming frame have to agree on, to the
+// pixel. They were written out twice — here and in LeaderboardTable's ArmingCards — and
+// the arming frame's whole job is to be the card's exact geometry before the data lands,
+// so two copies of it is two chances for the stack to jump at the seating moment.
+const CARD = "hl-berth-card px-3 py-2.5";
+const LINE_1 = "flex items-center gap-1";
+const LINE_2 = "mt-1.5 flex items-baseline gap-4 pl-[2.875rem]";
 
 // The phone's berth. Not a second design — the SAME instrument as the desktop row,
 // folded onto two lines because 390px cannot hold five columns.
@@ -35,10 +50,15 @@ interface TraderCardProps {
 export default function TraderCard({
   trader,
   rank,
+  deltaColumn = false,
+  delta,
   selected = false,
   onSelect,
 }: TraderCardProps) {
   const explorerUrl = `https://app.hyperliquid.xyz/explorer/address/${trader.address}`;
+  // Only when the two differ — see the same pair in LeaderboardRow.
+  const roi = formatPercent(trader.winRate, { compact: true });
+  const roiExact = formatPercent(trader.winRate);
 
   return (
     <div
@@ -47,32 +67,35 @@ export default function TraderCard({
       // content and a role="button" container would make that invalid.
       onClick={() => onSelect?.(trader.address)}
       data-selected={selected}
-      className="hl-berth-card px-3 py-2.5"
+      className={CARD}
     >
-      {/* Line 1: rank plate, address, figure. The gaps are 6px, not the row's 8px, and
-          the inspect box is 40px rather than 44: at 390px the content box is 332px and
-          the widest possible line — a 40px plate, the 6-character address at 120px, and
-          a 9-glyph compact figure (the ceiling, since the mantissa never reaches 1000)
-          at 103px — measured 333px with 8px gaps and a 44px box, which clipped two
-          pixels off the address and cost a hex character. This lands at 323px. */}
-      <div className="flex items-center gap-1.5">
-        <span className="hl-plate shrink-0" data-tier={tierOf(rank)}>
-          {String(rank).padStart(2, "0")}
-        </span>
+      {/* Line 1: rank plate, address, figure, explorer, inspect. Every width on it is
+          spent, so the numbers are worth keeping: at 390px the card's content box is
+          332px, the plate is 40, the six-and-six address needs 122.41 (JetBrains Mono at
+          12px), the widest compact figure measured 92.73, and the two 40px controls give
+          back 12px (the inspect box's -mr-3, into the card's own padding) and 8px (the
+          explorer's -mx-1).
 
-        <a
-          href={explorerUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          // Stop the card's select handler firing when the intent was the explorer.
-          onClick={(e) => e.stopPropagation()}
-          className="flex min-w-0 items-center gap-1 text-muted"
-        >
-          <span className="truncate font-mono text-xs">
-            {formatAddress(trader.address, 6)}
-          </span>
-          <ExternalLink size={10} aria-hidden className="shrink-0" />
-        </a>
+          The gaps are 4px, not the 6px they were. Promoting the explorer from an inline
+          10px glyph to a real 40px control (see below) cost line one 18px, and measured
+          across the live 30-day board that pushed 4 of the 50 cards past their budget:
+          their address box came back 115.27px against the 122.41px the string needs, so
+          the ellipsis ate a hex character — the exact defect the 6px gaps were chosen to
+          avoid. Four gaps at 2px less is the 8px that buys it back, and it is the only
+          slack on the line that is not a touch target or a numeral. */}
+      <div className={LINE_1}>
+        <Plate rank={rank} className="shrink-0" />
+
+        {/* PLAIN TEXT, not a link. As a link it was a 136x16 box in the middle of line
+            one — 9% of the card's area, and sitting right where a thumb lands. Chromium's
+            touch-target adjustment snaps a tap within a few pixels of a small link INTO
+            it, so a measured tap at the card's centre opened the explorer in a new tab
+            and never selected the trader (a tap on line two selected correctly). The
+            address is now part of the select target, which is what the rest of the card
+            already was. */}
+        <span className="truncate font-mono text-xs text-muted">
+          {formatAddress(trader.address, 6)}
+        </span>
 
         <span
           className={`ml-auto inline-flex shrink-0 items-baseline text-base font-semibold tabular-nums ${toneClass(trader.pnl)}`}
@@ -89,6 +112,34 @@ export default function TraderCard({
           />
         </span>
 
+        {/* The explorer, as its own control with its own box, and at the END of the line
+            rather than beside the address.
+
+            40px square — the platform touch minimum, and the same size as the inspect
+            button next to it — with negative vertical margins so the tap box grows into
+            the card's padding rather than growing the card, and `-mx-1` giving back 8px
+            of the line's width budget so the address keeps its full six-and-six hex
+            characters.
+
+            The POSITION is the whole point. Measured at 390px: the card is 356x66, so its
+            centre is (178, 33) — and a 40px control placed at the address's right lands on
+            x 175-215, y 1-41, which contains that point. So the first cut of this fix
+            moved the defect instead of removing it: a tap at the card's centre still
+            adjusted into the explorer link and still opened a new tab instead of selecting
+            the trader. Here the control sits at x 276-316, 98px clear of the centre, and
+            the centre is plain card. */}
+        <a
+          href={explorerUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          // Stop the card's select handler firing when the intent was the explorer.
+          onClick={(e) => e.stopPropagation()}
+          aria-label={`Open ${trader.address} in the Hyperliquid explorer`}
+          className="-my-2.5 -mx-1 inline-grid h-10 w-10 shrink-0 place-items-center rounded text-muted transition-colors hover:text-accent"
+        >
+          <ExternalLink size={13} aria-hidden />
+        </a>
+
         {/* Keyboard/AT path for selection. Touch devices have no hover, so unlike
             the desktop row's .hl-inspect this control is always visible, not
             revealed on hover — and it is 40px square (the platform touch minimum)
@@ -102,24 +153,28 @@ export default function TraderCard({
           }}
           aria-pressed={selected}
           aria-label={`Inspect positions for ${trader.address}`}
-          className="-my-2.5 -mr-3 inline-grid h-10 w-10 shrink-0 place-items-center rounded text-muted"
+          // hover:text-accent, like the desktop row's .hl-inspect. Below sm is not only
+          // touch: a desktop window narrowed past 640px renders this card with a fine
+          // pointer, and both of its controls gave no feedback at all on hover.
+          className="-my-2.5 -mr-3 inline-grid h-10 w-10 shrink-0 place-items-center rounded text-muted transition-colors hover:text-accent"
         >
           <ChevronRight size={18} aria-hidden />
         </button>
       </div>
 
-      {/* Line 2: the two readings, as mono legend/value pairs in the rail's language.
+      {/* Line 2: the readings, as mono legend/value pairs in the rail's language.
           Indented past the plate (40px + the 6px gap) so both lines hang off one edge. */}
-      <div className="mt-1.5 flex items-baseline gap-4 pl-[2.875rem]">
+      <div className={LINE_2}>
         <div className="flex items-baseline gap-1.5">
           <Legend>ROI</Legend>
           {/* Same compact form as the desktop row, so the two views never print the
-              same ROI two different ways. The exact figure rides in the title. */}
+              same ROI two different ways. The exact figure rides in the title, and only
+              when it differs from what is printed. */}
           <span
             className={`text-xs tabular-nums ${toneClass(trader.winRate)}`}
-            title={formatPercent(trader.winRate)}
+            title={roiExact === roi ? undefined : roiExact}
           >
-            {formatPercent(trader.winRate, { compact: true })}
+            {roi}
           </span>
         </div>
         <div className="flex items-baseline gap-1.5">
@@ -135,6 +190,54 @@ export default function TraderCard({
               {formatCurrency(trader.volume, { compact: true, decimals: 1 })}
             </span>
           )}
+        </div>
+        {/* The delta, in the same three-channel plate the desktop column uses. The phone
+            had no delta at all — the plate lived inside LeaderboardRow, so there was
+            nothing to import — which left the two views disagreeing about what a berth
+            row says. Last on the line and only when the caller wired the windows: the
+            reference window is named once, in the desktop table's Δ header, and a phone
+            card cannot carry that legend. `ml-auto` puts it on the right edge, clear of
+            the two readings. */}
+        {deltaColumn && (
+          <div className="ml-auto flex items-baseline gap-1.5">
+            <Legend>Δ</Legend>
+            <DeltaPlate delta={delta} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * ARMING: this card's exact frame with the plate and the legends present and every value
+ * absent, so the stack is already its final height (fifty cards at the card's measured
+ * 65.6px) when the figures land.
+ *
+ * It is a variant of the card rather than a lookalike in LeaderboardTable, which is what
+ * it used to be: it shares CARD, LINE_1 and LINE_2 above, so a change to the card's
+ * padding or indent cannot leave the arming frame a different shape.
+ *
+ * The value slots are load-bearing. Line two's 17px comes from a 12px text-xs value
+ * sitting baseline-aligned beside a 10px legend; legends alone measured 16px, which is a
+ * pixel per card and a 50px jump in the stack at the seating moment. The slot is a flex
+ * item, so an empty one is a zero-height block — the zero-width space is a real text node
+ * that gives it the 12px font's strut while printing nothing.
+ */
+export function ArmingCard({ rank }: { rank: number }) {
+  return (
+    <div className={CARD} data-arming="true" aria-hidden>
+      <div className={LINE_1}>
+        <Plate rank={rank} className="shrink-0" />
+      </div>
+      <div className={LINE_2}>
+        <div className="flex items-baseline gap-1.5">
+          <Legend>ROI</Legend>
+          <span className="text-xs tabular-nums">{"\u200B"}</span>
+        </div>
+        <div className="flex items-baseline gap-1.5">
+          <Legend>VOL</Legend>
+          <span className="text-xs tabular-nums">{"\u200B"}</span>
         </div>
       </div>
     </div>

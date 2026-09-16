@@ -38,6 +38,9 @@
      NOT a visual engine. Sign is always carried by an explicit +/- as well. */
   --gain: #34d399;
   --loss: #f87171;
+  /* One rung darker, the same direction --accent-hover goes. Exists so a red
+     BUTTON can have a hover without reaching for a palette step. */
+  --loss-hover: #ef4444;
 
   /* Split-flap board (dark) — opaque plastic flaps so the animated bg doesn't bleed. */
   --flap-bg: #202024;
@@ -79,6 +82,7 @@
   --legend: #52525b;
   --gain: #047857;
   --loss: #b91c1c;
+  --loss-hover: #991b1b;
 
   /* Split-flap board (light). */
   --flap-bg: #e7e7ea;
@@ -111,6 +115,7 @@
   --color-legend: var(--legend);
   --color-gain: var(--gain);
   --color-loss: var(--loss);
+  --color-loss-hover: var(--loss-hover);
   --font-sans: var(--font-space-grotesk);
   --font-mono: var(--font-jetbrains-mono);
 }
@@ -127,7 +132,15 @@ html {
    transform or wide element briefly extends past the viewport edge.
    clip, not hidden: hidden made body a scroll container, so every position: sticky on
    the site stuck to body and never moved (the whale page's header measured top -556px
-   after a 556px scroll, in production). clip cuts the same overflow and scrolls nothing. */
+   after a 556px scroll, in production). clip cuts the same overflow and scrolls nothing.
+
+   The floor for `overflow: clip` is Chrome/Edge 90, Firefox 81 and Safari 16 — later
+   than `hidden` by years, and there is no fallback here on purpose. Below the floor
+   the declaration is simply dropped, so an old browser gets no horizontal clipping and
+   may swipe sideways; what it does NOT get is the broken-sticky bug, because the
+   invalid declaration also never makes body a scroll container. Degrading to a stray
+   swipe is the right way round: a sticky header frozen at top -556px is a defect on
+   every scroll, a sideways swipe is one on a transform that briefly overhangs. */
 html, body {
   overflow-x: clip;
   max-width: 100%;
@@ -254,6 +267,22 @@ button:active, .btn:active {
   outline-offset: 2px;
   border-radius: 4px;
   transition: outline-offset var(--dur-fast) var(--ease-entrance);
+}
+
+/* A control whose own border box IS its .glass host's clip rectangle has to draw its
+   focus ring INSIDE itself: .glass is overflow:hidden, so the `outline-offset: 2px`
+   above lands entirely outside the clip and is never painted (WCAG 2.4.7).
+
+   This was two Tailwind utilities on the element in Experience.tsx, each carrying a
+   `!` — load-bearing there, because the unlayered `*:focus-visible` above outranks any
+   utility however specific. As a stylesheet rule the specificity does the work
+   instead: (0,2,0) against the universal selector's (0,1,0), so nothing needs to shout.
+   A class rather than `.glass > button`, because the control is a grandchild of the
+   glass host (the company link is its sibling, anchored to the header) and a
+   descendant selector would also catch every chip and toggle nested deeper in. */
+.glass-inset-focus:focus-visible {
+  outline-offset: -4px;
+  border-radius: 14px;
 }
 
 /* Skip-to-content link — off-screen until keyboard-focused, then slides in */
@@ -1137,22 +1166,34 @@ input:focus {
    Same engraved language as the board, but the tape is a FEED, not a ranking: rows
    are chronological and nothing re-seats, so it gets an ingest reveal instead of the
    board's travel. */
-.hl-tape {
+/* The engraved table itself is shared with the ledger (Positions), one selector list
+   rather than two identical blocks 350 lines apart: same two-line rule, same baseline
+   alignment, same padding. They were byte-identical copies, which is how one of them
+   ends up a pixel off the other. What differs between the two tabs is MOTION, and that
+   lives on the row classes below. */
+.hl-tape,
+.hl-pos-table {
   border-collapse: separate;
   border-spacing: 0;
 }
-.hl-tape tbody td {
+.hl-tape tbody td,
+.hl-pos-table tbody td {
   padding-top: 0.5rem;
   padding-bottom: 0.5rem;
   border-bottom: 1px solid var(--engrave-lo);
   box-shadow: inset 0 1px 0 var(--engrave-hi);
   vertical-align: baseline;
 }
-.hl-tape thead th {
+.hl-tape thead th,
+.hl-pos-table thead th {
   border-bottom: 1px solid var(--engrave-lo);
 }
+/* No transition on the hover fill. `background-color` is on the plan's banned list
+   (whale-plan-11) and these two rows were the last pair still animating one: a hover
+   is a discrete state change, so under ESCAPEMENT it lands on the beat rather than
+   easing over 120ms, and an animated paint on a row that may exist fifty times is
+   exactly the cost the ban is about. The fill itself is unchanged. */
 .hl-tape-row {
-  transition: background-color var(--dur-fast) var(--ease-entrance);
   /* `backwards` so the first frame is already the start state — without it a long
      list flashes at full opacity before the delays begin. */
   animation: hlTapeIn var(--dur-base) var(--ease-entrance) backwards;
@@ -1298,9 +1339,15 @@ input:focus {
    filter, no animated colour). */
 .hl-scroll-x {
   --hl-scroll-shadow: color-mix(in srgb, var(--foreground) 16%, transparent);
+  /* The cover colour has to be the colour of whatever the scroller sits ON, or the
+     cover reads as a band rather than as nothing. Every host so far is a --card panel,
+     so that is the default — but it is a variable now that the tape uses this too, so a
+     scroller on some other surface can set `--hl-scroll-bg` on itself instead of
+     needing a second copy of all four gradients. */
+  --hl-scroll-bg: var(--card);
   /* Layer order: left cover, right cover, left shadow, right shadow. */
-  background-image: linear-gradient(var(--card), var(--card)),
-    linear-gradient(var(--card), var(--card)),
+  background-image: linear-gradient(var(--hl-scroll-bg), var(--hl-scroll-bg)),
+    linear-gradient(var(--hl-scroll-bg), var(--hl-scroll-bg)),
     linear-gradient(to right, var(--hl-scroll-shadow), transparent),
     linear-gradient(to left, var(--hl-scroll-shadow), transparent);
   background-position: left center, right center, left center, right center;
@@ -1358,33 +1405,29 @@ input:focus {
   stroke-dasharray: 2 3;
   fill: none;
 }
+/* Stroke and dash only. The OPACITY is set inline by AnalyticsPanel.tsx from its own
+   UNFOCUSED_OPACITY (0.7, raised from the 0.4 that used to live here because 0.4
+   measured 2.18:1 on dark, under the 3:1 WCAG 1.4.11 asks of a graphical object), and
+   an inline style beats any rule in this file — so the `opacity: 0.4` and `opacity: 1`
+   these two rules carried had not applied to anything for some time. One value, in the
+   one file that also gives the legend swatch its opacity, is the point.
+
+   The legend swatch wears this same class, so the focus colour is declared once here
+   and not restated per swatch; it overrides only stroke-width, since a 1px hairline is
+   right in the chart and invisible in a 16x4 box.
+
+   A `.hl-curve-key` block used to sit below this and style a coloured div. Deleted: the
+   swatch has been a real <line> since the dash patterns arrived — that is the only way
+   to guarantee it carries the same pattern as the curve it names — so nothing had
+   rendered that class in either theme. */
 .hl-curve-line {
   fill: none;
   stroke: var(--legend);
   stroke-width: 1;
-  /* Unfocused windows stay legible but recede. Opacity rather than a second hue,
-     because four distinct colours here would be decoration, not information. */
-  opacity: 0.4;
 }
 .hl-curve-line[data-focus="true"] {
   stroke: var(--accent);
   stroke-width: 2;
-  opacity: 1;
-}
-/* The legend swatch mirrors the line treatment exactly. */
-.hl-curve-key {
-  display: inline-block;
-  width: 0.625rem;
-  height: 2px;
-  margin-right: 0.375rem;
-  vertical-align: middle;
-  background: var(--legend);
-  opacity: 0.4;
-}
-.hl-curve-key[data-focus="true"] {
-  background: var(--accent);
-  height: 3px;
-  opacity: 1;
 }
 
 /* Window-overlap matrix. Magnitude rides on opacity, but the numeral is always
@@ -1494,23 +1537,8 @@ input:focus {
    No animation here on purpose. The board re-seats because ranks move and the tape
    reveals because fills arrive; a position list does neither — it is a standing
    inventory, so it is machined, not staged. */
-.hl-pos-table {
-  border-collapse: separate;
-  border-spacing: 0;
-}
-.hl-pos-table tbody td {
-  padding-top: 0.5rem;
-  padding-bottom: 0.5rem;
-  border-bottom: 1px solid var(--engrave-lo);
-  box-shadow: inset 0 1px 0 var(--engrave-hi);
-  vertical-align: baseline;
-}
-.hl-pos-table thead th {
-  border-bottom: 1px solid var(--engrave-lo);
-}
-.hl-pos-row {
-  transition: background-color var(--dur-fast) var(--ease-entrance);
-}
+/* The table rules are shared with .hl-tape — see the tape section above. Only the
+   hover fill is declared here, and without a transition, for the reason stated there. */
 .hl-pos-row:hover {
   background: var(--card-hover);
 }
@@ -1581,7 +1609,8 @@ input:focus {
 
 @media (prefers-reduced-motion: reduce) {
   /* The caret still has to point the right way, so the rotation stays and only the
-     travel goes. */
+     travel goes. The `.hl-pos-row { transition: none }` that sat beside this is gone
+     with the transition it was overriding — the hover fill is instant for everyone
+     now, so there is nothing left here to reduce. */
   .hl-pos-caret { transition: none; }
-  .hl-pos-row { transition: none; }
 }

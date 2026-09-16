@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { TimePeriod, TraderMetrics } from "../lib/types";
-import { Legend } from "./Instrument";
+import { Legend, Unavailable } from "./Instrument";
 import { formatAddress, formatCurrency } from "../lib/formatters";
 import {
   Periods,
@@ -31,9 +31,10 @@ import {
 // Every sentence below is templated over `divs`, `churn` and `conc`. That is the
 // whole point of this file's history: the prose used to be a July snapshot, so the
 // live table rendered its own refutation 40px above a paragraph claiming the PnL
-// leader "has the worst return on the board" (live ranks: #21, #26, #50, #1) and that
-// the all-time relationship "flips weakly positive" (live: -0.01, within noise). Any
-// number in the JSX must come from the payload; any number in a comment is dated.
+// leader "has the worst return on the board" (ranks measured 2026-09-16: #21, #26,
+// #50, #1) and that the all-time relationship "flips weakly positive" (measured
+// 2026-09-16: -0.01, within noise). Any number in the JSX must come from the payload;
+// any number in a comment is dated — including those two, which were not.
 //
 // Costs no network. The leaderboard hook already fetches all four windows in one
 // request; this reads what is already in memory.
@@ -194,9 +195,15 @@ export default function AnalyticsPanel({
   if (present.length === 0 && error !== null) {
     return (
       <Panel title="Board unavailable">
-        <p className="text-sm text-muted">
-          The leaderboard request failed, so there is nothing in memory to aggregate.
-          Retry from the Leaderboard tab.
+        {/* The same etched failure line the Positions and Trades tabs use, from the
+            same shared primitive: this panel said its absent state in muted prose
+            while the other two said theirs in mono --loss, so one tab out of three
+            did not look like a failure at all. No retry here — this tab makes no
+            request of its own, which is why the sentence below points at the one
+            that does. */}
+        <Unavailable reason="The leaderboard request failed" />
+        <p className="mt-2 text-sm text-muted">
+          There is nothing in memory to aggregate. Retry from the Leaderboard tab.
         </p>
       </Panel>
     );
@@ -254,6 +261,17 @@ export default function AnalyticsPanel({
   const shareSpread =
     topShares.length > 1 && formatShare(shareHi.share) !== formatShare(shareLo.share);
   const shareSteady = topShares.length > 1 && !shareSpread;
+  // Whether it is the SAME address. topShare is the share held by the window's
+  // largest earner, which is divergence()'s own pnlLeader, so this needs no second
+  // pass over the rows. The sentences below said "one address holds X% of the total in
+  // each", which a reader takes as one address across every window — and the churn
+  // matrix two panels down measures exactly 1 address in all four, so for most of the
+  // board it was the reading the page itself refutes.
+  const topAddress = (w: TimePeriod) => divs.get(w)?.pnlLeader?.address;
+  const hiAddress = topAddress(shareHi?.window ?? present[0]);
+  const sameTopAddress =
+    hiAddress !== undefined &&
+    topShares.every(({ window: w }) => topAddress(w) === hiAddress);
 
   // The board is fifty rows per window today, but that is upstream's choice, not
   // ours, and the panel used to spell it "fifty" in four places.
@@ -437,17 +455,26 @@ export default function AnalyticsPanel({
                 Drawn in --muted because --engrave-lo measured 1.11:1 on dark, which
                 is not a reference line anyone can see, and in a long dash that no
                 window wears, so the ALL curve running closest to it cannot be read as
-                the reference itself. */}
-            <line
-              x1="0"
-              y1={CURVE_H}
-              x2={CURVE_W}
-              y2="0"
-              className="hl-curve-equality"
-              strokeDasharray={EQUALITY_DASH}
-              style={{ stroke: "var(--muted)" }}
-              vectorEffect="non-scaling-stroke"
-            />
+                the reference itself.
+
+                Withheld when no window has more than one address. A one-row window's
+                cumulative curve IS this diagonal by construction — one address holds
+                100% of its own total — so drawing the reference underneath it puts two
+                identical lines on the chart under copy telling the reader to measure
+                the gap between them, and the only gap available is zero. Nothing is
+                lost: with one address there is no distribution to be concentrated. */}
+            {boardSize > 1 && (
+              <line
+                x1="0"
+                y1={CURVE_H}
+                x2={CURVE_W}
+                y2="0"
+                className="hl-curve-equality"
+                strokeDasharray={EQUALITY_DASH}
+                style={{ stroke: "var(--muted)" }}
+                vectorEffect="non-scaling-stroke"
+              />
+            )}
             {present.map((w) => {
               const c = conc.get(w);
               const d = c ? curvePath(c.curve, CURVE_W, CURVE_H) : "";
@@ -476,7 +503,12 @@ export default function AnalyticsPanel({
                   <dt>
                     {/* An actual line, not a coloured block: the swatch has to carry
                         the same dash pattern as the curve it names, and the only way
-                        to guarantee that is to draw it the same way. */}
+                        to guarantee that is to draw it the same way — which now
+                        includes wearing the curve's own class, so the two cannot be
+                        given different strokes. It restated `var(--accent)` /
+                        `var(--legend)` inline, one copy of the focus colour per
+                        swatch. Only the WIDTH is overridden: .hl-curve-line's 1px is
+                        a hairline the chart wants and a 16×4 swatch cannot show. */}
                     <svg
                       className="mr-1.5 inline-block align-middle"
                       width="16"
@@ -489,7 +521,8 @@ export default function AnalyticsPanel({
                         y1="2"
                         x2="16"
                         y2="2"
-                        stroke={isFocus ? "var(--accent)" : "var(--legend)"}
+                        className="hl-curve-line"
+                        data-focus={isFocus}
                         strokeWidth={isFocus ? 3 : 2}
                         strokeDasharray={WINDOW_DASH[w]}
                         opacity={isFocus ? 1 : UNFOCUSED_OPACITY}
@@ -515,16 +548,21 @@ export default function AnalyticsPanel({
           {shareSpread && (
             <>
               {" "}
-              Concentration is not stable across windows: one address holds{" "}
+              Concentration is not stable across windows: the largest earner holds{" "}
               {formatShare(shareHi.share)} of the {WINDOW_PROSE[shareHi.window]} total and{" "}
+              {sameTopAddress ? "the same address holds" : "another holds"}{" "}
               {formatShare(shareLo.share)} of the {WINDOW_PROSE[shareLo.window]} total.
             </>
           )}
           {shareSteady && (
             <>
               {" "}
-              Concentration is similar across the windows measured: one address holds{" "}
-              {formatShare(shareHi.share)} of the total in each.
+              Concentration is similar across the windows measured:{" "}
+              {sameTopAddress
+                ? "one address holds"
+                : "each window\u2019s largest earner holds"}{" "}
+              {formatShare(shareHi.share)} of the total in each
+              {sameTopAddress ? "" : ", but they are not all the same address"}.
             </>
           )}
         </p>
@@ -568,8 +606,16 @@ export default function AnalyticsPanel({
                         key={b}
                         data-self={self}
                         // Opacity carries magnitude, the numeral carries the value.
-                        // Never colour alone.
-                        style={self ? undefined : { opacity: 0.35 + (n / 50) * 0.65 }}
+                        // Never colour alone. The denominator is the board's own size
+                        // — the panel spent four places spelling that "fifty" before
+                        // boardSize existed, and this was the fifth: a board of 20
+                        // would have ramped over a range it never reaches and shown
+                        // every pair at nearly the same shade.
+                        style={
+                          self
+                            ? undefined
+                            : { opacity: 0.35 + (boardSize > 0 ? n / boardSize : 0) * 0.65 }
+                        }
                       >
                         <span className="tabular-nums">{n}</span>
                       </td>

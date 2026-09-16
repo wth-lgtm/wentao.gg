@@ -50,9 +50,20 @@ export function useTabpanelFocus() {
     const measure = () => {
       if (panel.querySelector(FOCUSABLE) === null) {
         panel.setAttribute("tabindex", "0");
-      } else {
-        panel.removeAttribute("tabindex");
+        return;
       }
+      // The panel is about to stop being focusable, and the reader may be STANDING on
+      // it: Tab into a panel that held no control, then the fetch resolves underneath.
+      // Removing the attribute then leaves focus on an element the browser no longer
+      // considers focusable, and where the next Tab resumes from is browser-specific —
+      // so the reader either walks on from here or is dropped to <body> and restarts the
+      // whole sequence at the top of the page. Handing focus to the first control the
+      // panel now has keeps their place, and it is the element Tab would have reached
+      // next in any case. Guarded on the panel ITSELF holding focus: a control inside it
+      // is already where we would be sending them.
+      const parked = document.activeElement === panel;
+      panel.removeAttribute("tabindex");
+      if (parked) panel.querySelector<HTMLElement>(FOCUSABLE)?.focus();
     };
     measure();
     // A panel's focusability changes when its CONTENT does — a fetch resolving, a

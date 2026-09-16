@@ -4,13 +4,12 @@ import { Component, useMemo, useRef, type ReactNode } from "react";
 import { TraderMetrics, SortField, SortDirection, TimePeriod } from "../lib/types";
 import { PREVIOUS_WINDOW, rankByPnl, rankDelta, type RankedTrader } from "../lib/rank";
 import { NO_CHANGE, ROW_H, zeroBlock, type BoardChange } from "../lib/commitPlan";
-import { tierOf } from "../lib/tier";
 import { useSurfaceTier } from "../hooks/useSurfaceTier";
 import { useCommit } from "../hooks/useCommit";
-import { Legend } from "./Instrument";
+import { Legend, Plate } from "./Instrument";
 import SortHeader from "./SortHeader";
 import LeaderboardRow from "./LeaderboardRow";
-import TraderCard from "./TraderCard";
+import TraderCard, { ArmingCard } from "./TraderCard";
 
 interface LeaderboardTableProps {
   /** Sorted for display, each row carrying the rank the plate shows (useTableControls.sortRows). */
@@ -91,14 +90,6 @@ class OutgoingBoard extends Component<OutgoingBoardProps> {
   }
 }
 
-function plate(rank: number) {
-  return (
-    <span className="hl-plate" data-tier={tierOf(rank)}>
-      {String(rank).padStart(2, "0")}
-    </span>
-  );
-}
-
 /**
  * ARMING. Fifty berths with their plates, rendered before the request answers, in the
  * exact geometry the data will land in: the same <tr> height lock, the same columns, the
@@ -117,7 +108,9 @@ function ArmingRows({ deltaColumn }: { deltaColumn: boolean }) {
         // "01" … "50" with empty cells is a frame to look at, not content to read; the
         // caption says the board is loading instead.
         <tr key={rank} data-arming="true" aria-hidden>
-          <td className="px-3 sm:px-4">{plate(rank)}</td>
+          <td className="px-3 sm:px-4">
+            <Plate rank={rank} />
+          </td>
           {deltaColumn && <td />}
           <td />
           <td />
@@ -130,34 +123,14 @@ function ArmingRows({ deltaColumn }: { deltaColumn: boolean }) {
   );
 }
 
-/**
- * The same frame folded for the phone: TraderCard's two lines with the plate and the
- * two legends present and the values absent, so the stack is already its final height
- * (fifty cards at the card's measured 65.6px) when the figures land.
- *
- * The value slots are load-bearing. Line two's 17px comes from a 12px text-xs value
- * sitting baseline-aligned beside a 10px legend; legends alone measured 16px, which is
- * a pixel per card and a 50px jump in the stack at the seating moment. The slot is a
- * flex item, so an empty one is a zero-height block — the zero-width space is a real
- * text node that gives it the 12px font's strut while printing nothing.
- */
+// The phone's arming frame is TraderCard's own ArmingCard variant, so the two cannot be
+// laid out differently: this used to be a second copy of the card's markup and its three
+// layout literals, in the one place whose job is to match the card to the pixel.
 function ArmingCards() {
   return (
     <>
       {BERTHS.map((rank) => (
-        <div key={rank} className="hl-berth-card px-3 py-2.5" data-arming="true" aria-hidden>
-          <div className="flex items-center gap-1.5">{plate(rank)}</div>
-          <div className="mt-1.5 flex items-baseline gap-4 pl-[2.875rem]">
-            <div className="flex items-baseline gap-1.5">
-              <Legend>ROI</Legend>
-              <span className="text-xs tabular-nums">{"\u200B"}</span>
-            </div>
-            <div className="flex items-baseline gap-1.5">
-              <Legend>VOL</Legend>
-              <span className="text-xs tabular-nums">{"\u200B"}</span>
-            </div>
-          </div>
-        </div>
+        <ArmingCard key={rank} rank={rank} />
       ))}
     </>
   );
@@ -368,6 +341,15 @@ export default function LeaderboardTable({
                 positions held, not traded", cut to what a 112px column holds; the
                 sentence below carries the whole of it. */}
             <div
+              // Re-keyed on a PERIOD commit so the plate re-stamps. .hl-block's entrance
+              // is `animation: hlBlockStamp` (globals.css), which runs on mount — and a
+              // period switch keeps the same element while its rows dissolve, travel and
+              // seat underneath it, so the plate slid to a new height and a new count
+              // without a stamp, the one still thing in a commit that is all motion.
+              // Only `period`: a sort-field commit that keeps the block at all is a
+              // re-sort WITHIN the volume sort, where the plate is describing the same
+              // rows it already described, and a refresh is not a commit.
+              key={change.kind === "period" ? `block-${change.seq}` : "block"}
               className="hl-block hidden lg:flex flex-col items-end justify-start"
               aria-hidden
               style={{ bottom: block.below * ROW_H, height: block.count * ROW_H }}
@@ -401,6 +383,14 @@ export default function LeaderboardTable({
               key={trader.address}
               trader={trader}
               rank={trader.canonicalRank}
+              // The same two props the desktop row gets, from the same two maps, so
+              // neither view can compute a delta the other disagrees with.
+              deltaColumn={deltaColumn}
+              delta={
+                referenceRanks === null
+                  ? undefined
+                  : rankDelta(currentRanks, referenceRanks, trader.address)
+              }
               selected={trader.address === selectedAddress}
               onSelect={onSelect}
             />

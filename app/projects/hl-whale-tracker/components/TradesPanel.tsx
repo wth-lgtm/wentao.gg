@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useMemo, useState } from "react";
-import { AddressLegend, Legend, dash } from "./Instrument";
+import { AddressLegend, Legend, Unavailable, dash } from "./Instrument";
 import { formatCurrency, toneClass } from "../lib/formatters";
 import { FILL_LIMIT, TraderFills } from "../lib/trader";
 import {
@@ -163,20 +163,6 @@ function TimeCell({ order }: { order: Order }) {
   );
 }
 
-/** Re-asks for this address through useTrader's reload. */
-function Retry({ onRetry, loading }: { onRetry: () => void; loading: boolean }) {
-  return (
-    <button
-      type="button"
-      onClick={onRetry}
-      disabled={loading}
-      className="mt-3 rounded border border-border px-2 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--legend)] transition-colors hover:text-foreground disabled:opacity-50"
-    >
-      {loading ? "Re-reading" : "Re-read"}
-    </button>
-  );
-}
-
 export default function TradesPanel({
   address,
   data,
@@ -232,13 +218,10 @@ export default function TradesPanel({
     return (
       <Panel>
         <AddressLegend prefix="Could not read " address={address} />
-        <p className="mt-2 font-mono text-xs uppercase tracking-[0.16em] text-[var(--loss)]">
-          {error}
-        </p>
         {/* The only recovery here used to be Clear → leaderboard → reselect, because
             useTrader refetches on a CHANGE of address and re-clicking the same row
             changes nothing. */}
-        {onRetry && <Retry onRetry={onRetry} loading={loading} />}
+        <Unavailable reason={error} onRetry={onRetry} busy={loading} />
       </Panel>
     );
   }
@@ -256,13 +239,11 @@ export default function TradesPanel({
     return (
       <Panel>
         <AddressLegend prefix="Tape unavailable · " address={address} />
-        <p className="mt-2 font-mono text-xs uppercase tracking-[0.16em] text-[var(--loss)]">
-          Upstream did not answer for this address
-        </p>
-        {/* The tab, the selection and the positions reading all survive the retry.
-            Disabled while a request is in flight, since a retry over a body that is
-            still on screen changes nothing else to say the click landed. */}
-        {onRetry && <Retry onRetry={onRetry} loading={loading} />}
+        <Unavailable
+          reason="Upstream did not answer for this address"
+          onRetry={onRetry}
+          busy={loading}
+        />
       </Panel>
     );
   }
@@ -323,6 +304,13 @@ export default function TradesPanel({
   // 03:59:24" to a UTC viewer, an end apparently earlier than its start.
   const stamp = (ms: number) =>
     crossesDay ? `${formatDate(ms)} ${formatClock(ms)}` : formatClock(ms);
+  // Both zone names when the span straddles a DST change, because then there is no
+  // single "the zone" and the clocks either side are not on the same one. A tape can
+  // run 22:45 → 03:59 and the US change falls at 02:00 local, so this is reachable by
+  // exactly the span the header was built for. Named once per panel either way.
+  const zoneFrom = span === null ? "" : formatZone(span.from);
+  const zoneTo = span === null ? "" : formatZone(span.to);
+  const zoneLegend = zoneFrom === zoneTo ? zoneTo : `${zoneFrom} → ${zoneTo}`;
   const windowLegend =
     span === null
       ? "window unknown"
@@ -331,7 +319,7 @@ export default function TradesPanel({
           `${stamp(span.from)} → ${stamp(span.to)}`,
           `${formatElapsed(span.from, span.to)}${capped ? "" : " of activity"}`,
           // The zone, named once for the panel rather than on every row.
-          formatZone(span.to),
+          zoneLegend,
         ]
           .filter((part) => part !== null)
           .join(" · ");
@@ -429,7 +417,11 @@ export default function TradesPanel({
           </p>
         )}
 
-        <div className="overflow-x-auto">
+        {/* .hl-scroll-x, like the two scrollers on the Analytics tab: eight columns do
+            not fit a phone, and a scroller with no edge shadow gives a reader nothing
+            to tell them the Fee column exists. Zero JS and none of the banned
+            techniques — see globals.css. */}
+        <div className="hl-scroll-x overflow-x-auto">
           <table className="hl-tape w-full text-sm">
             <thead>
               <tr>

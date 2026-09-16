@@ -31,7 +31,11 @@ export default function WhaleTrackerError({
 
   return (
     <main className="min-h-screen bg-background">
-      <header className="sticky top-0 z-50 border-b border-border bg-background/95">
+      {/* bg-background, not /95: the page this stands in for made its header fully
+          opaque precisely because a 95% fill let the content behind ghost through once
+          body's overflow-x became `clip` and sticky started engaging, and the comment at
+          the top of this file promises "the same sticky header". */}
+      <header className="sticky top-0 z-50 border-b border-border bg-background">
         <div className="max-w-4xl mx-auto px-4 py-3 grid grid-cols-[1fr_auto_1fr] items-center">
           <Link
             href="/#projects"

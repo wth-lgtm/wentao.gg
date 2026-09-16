@@ -97,8 +97,8 @@ function settledSentence({
  * board is checked at:
  *
  *            390px   1440px
- *   rail       59       59   (two wrapped lines at both; one line, 36px, from 640-767
- *                             where SRC is still hidden and the fields fit)
+ *   rail       59       59   (two wrapped lines at both; ONE line, 36px, from 475 to
+ *                             767, where SRC is still hidden and the fields fit on one)
  *   rack       48       48
  *   filter     32       44
  *   table    3282     2253   (the arming frame: fifty berth cards vs. a thead and
@@ -113,7 +113,16 @@ function settledSentence({
 function HullPlaceholder() {
   return (
     <div aria-hidden>
-      <div className="mb-4 h-[59px] rounded-xl border border-border bg-card sm:h-9 md:h-[59px]" />
+      {/* The rail's one-line band starts at 475px, not at Tailwind's sm (640px). Measured
+          on the LOADING rail in `next dev` — the state hydration lands in — by stalling
+          /api/hl-leaderboard and stepping the viewport a pixel at a time: 59.19px up to
+          474px, 35.59px from 475px to 767px, 59.19px again from 768px where SRC appears.
+          The `sm:` boundary was a guess at where the fields stop wrapping, and it was
+          23.4px wrong across 165px of viewport — a phone in landscape and every small
+          tablet reserved two lines for a rail that renders one, and the hull collapsed by
+          that much at hydration. An arbitrary min-[] variant is worth more than a round
+          number here, because the number is a content wrap point and not a breakpoint. */}
+      <div className="mb-4 h-[59px] rounded-xl border border-border bg-card min-[475px]:h-9 md:h-[59px]" />
       <div className="mb-3 h-12 rounded-xl border border-border bg-card" />
       {/* The filter row is deliberately an empty spacer, not a card: the real row is
           `bg-background` pills on the page's own `bg-background`, so a filled block
@@ -148,6 +157,7 @@ function WhaleTracker() {
     loading,
     refreshing,
     error,
+    errorKind,
     snapshot,
     rowsSeen,
     rowsPartial,
@@ -160,7 +170,14 @@ function WhaleTracker() {
 
   // One sort site. This used to be re-implemented inline here, unmemoized, while
   // the hook's own memoized sort ran against a permanently-empty array.
-  const displayTraders = sortRows(traders);
+  //
+  // Memoized, because the array's IDENTITY is a dependency downstream: sortRows returns
+  // a fresh array every call, and LeaderboardTable's `currentRanks` map is a useMemo
+  // keyed on it — so an unmemoized call here rebuilt that fifty-entry map on every
+  // render of this page, including every tick of the rail's age clock. sortRows is
+  // itself a useCallback over [sort, dir], so this recomputes exactly when the order
+  // can actually change.
+  const displayTraders = useMemo(() => sortRows(traders), [sortRows, traders]);
   // Whether the open panel needs its own tab stop depends on what it currently holds,
   // so it is measured after render rather than declared per panel. See the hook.
   const tabpanelRef = useTabpanelFocus();
@@ -208,6 +225,13 @@ function WhaleTracker() {
   });
 
   const [announcement, setAnnouncement] = useState("");
+  // Alternated when the visitor ASKED for the commit. A live region does not re-announce
+  // text identical to what it already holds, which is right for a state that merely
+  // recurred — a wake refetch that changed nothing, a sort reversed and reversed again —
+  // and wrong for an action just taken: two presses of Refresh over an unchanged
+  // snapshot produce the same sentence, and the second one said nothing at all. A
+  // zero-width space makes the text node differ without adding a spoken character.
+  const nonceRef = useRef(false);
   useEffect(() => {
     const id = window.setTimeout(() => {
       // Nothing has landed yet: the skeleton is the statement, and a row count of 0
@@ -215,6 +239,14 @@ function WhaleTracker() {
       if (loading) return;
       const settled = askedRef.current && !refreshing;
       if (settled) askedRef.current = false;
+      const speak = (text: string) => {
+        if (!settled) {
+          setAnnouncement(text);
+          return;
+        }
+        nonceRef.current = !nonceRef.current;
+        setAnnouncement(nonceRef.current ? `${text}\u200B` : text);
+      };
       // An identical string is not written back to the DOM, which is what keeps a
       // repeated state (a wake refetch that changed nothing, a sort that reverses and
       // reverses again) from announcing twice.
@@ -223,9 +255,23 @@ function WhaleTracker() {
       // over the failure: "Refresh complete. Leaderboard unavailable: …" both
       // contradicts itself and, because the error string is usually the same one
       // already showing, was the only way a failed click could announce nothing at all.
+      //
+      // But only a REQUEST failure is a failed refresh. The hook composes one `error`
+      // string from a thrown request and from a 200 whose rows could not be read, and
+      // this branch called both a failure: a click that completed and came back with an
+      // unreadable board announced "Refresh failed", and the unreadable message — which
+      // already opens "Leaderboard unreadable:" — was prefixed with a second
+      // "Leaderboard unavailable:". errorKind is what tells them apart.
       if (error !== null) {
-        setAnnouncement(
-          settled ? `Refresh failed: ${error}` : `Leaderboard unavailable: ${error}`
+        const failed = errorKind === "request";
+        speak(
+          settled
+            ? failed
+              ? `Refresh failed: ${error}`
+              : `Refresh complete. ${error}`
+            : failed
+              ? `Leaderboard unavailable: ${error}`
+              : error
         );
         return;
       }
@@ -234,10 +280,10 @@ function WhaleTracker() {
           ? "Refresh complete, the snapshot has not changed. "
           : "Refresh complete. "
         : "";
-      setAnnouncement(head + sentence);
+      speak(head + sentence);
     }, ANNOUNCE_DEBOUNCE_MS);
     return () => window.clearTimeout(id);
-  }, [sentence, error, loading, refreshing]);
+  }, [sentence, error, errorKind, loading, refreshing]);
 
   return (
     // The page's one entrance, as a CSS keyframe. It was a framer-motion `motion.div`

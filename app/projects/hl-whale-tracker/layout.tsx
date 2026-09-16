@@ -24,6 +24,12 @@ export const metadata: Metadata = {
     // Without this the inherited og:url points crawlers at the homepage as the
     // canonical object for this page.
     url: "/projects/hl-whale-tracker",
+    // Next REPLACES the parent's openGraph block rather than merging into it, which is
+    // the whole point of the note above — and it takes these two with it. The root
+    // declares both, so every share of this route lost og:site_name and og:locale the
+    // moment this block appeared: a card with no site attribution and no language.
+    siteName: "wentao.GG",
+    locale: "en_US",
   },
   twitter: {
     card: "summary_large_image",
