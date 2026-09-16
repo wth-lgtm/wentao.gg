@@ -5,6 +5,7 @@
 // that would have to unmount itself.
 
 import type { CommitDay } from "./githubStats";
+import { WORLD, fitCamera, type CameraFit } from "./pileScene";
 
 export interface Piece {
   /** The grid's five-step level of the day this commit landed on. */
@@ -38,13 +39,13 @@ export function piecesForDays(days: readonly CommitDay[]): Piece[] {
 
 /**
  * The most bodies the pile will simulate. The route pages to 300 dated commits (500 with a
- * token); Task 12's idle/re-lay/swipe numbers were taken at 200 bodies. The cap also has to
- * fit the legibility rule: 200 level-4 pieces (the busiest kind of quarter) solve to a
- * scale of 0.76 on a 1024 px viewport's tray and 0.80 at 1440, both above TRAY.kLegible,
- * whereas 240 came out at 0.72 even at 1440 — the tray would have hidden itself for exactly
- * the quarters with the most to show. The newest commits survive the cut (the input is
- * oldest first), and the legend says how many are shown — never fewer commits than the
- * payload knows, silently.
+ * token); Task 12's idle/swipe numbers were taken at 200 bodies, and 200 convex bodies is
+ * about where rapier's step stops being free on an iGPU laptop's CPU. The cap also has to
+ * fit the legibility rule: 200 level-4 pieces (the busiest kind of quarter) solve to k 0.46
+ * under the coverage rule, a 14 px narrowest box at the 691 px tray's 72 px/u and 10.6 px
+ * at a 520 px one — legible down to a 489 px tray column. The newest commits survive the cut
+ * (the input is oldest first), and the legend says how many are shown — never fewer
+ * commits than the payload knows, silently.
  */
 export const PIECE_CAP = 200;
 
@@ -57,11 +58,14 @@ export function rand(i: number, seed: number): number {
   return Math.abs(Math.sin(i * 127.1 + seed * 311.7) * 43758.5453) % 1;
 }
 
-// "Lego land" — a mixed pile of geometric primitives instead of only bars. The box brick
-// is the most common (three picks in nine) so it still reads as a heatmap pile.
+// A tray of objects, not a zoo of primitives. The box brick is the most common (three picks
+// in nine) so it still reads as a heatmap pile; the other six are things a desk tray holds
+// — a die, a domino, a puck, a capsule, a sphere, a ring. Cones, tetrahedra and icosahedra
+// were the largest "game asset" tell: knife edges no real tray ever held. Shape is texture,
+// not data: only the level (and a box's height) is the commit's.
 // Not exported: nothing outside this file names it, and the type below is what callers
-// actually want (FloatingBackground keys its material and collider maps on ShapeKey).
-const SHAPES = ["box", "sphere", "cone", "octa", "tetra", "torus", "ico"] as const;
+// actually want (FloatingBackground keys its geometry and collider maps on ShapeKey).
+const SHAPES = ["box", "die", "domino", "puck", "capsule", "sphere", "torus"] as const;
 export type ShapeKey = (typeof SHAPES)[number];
 const PICK = [0, 0, 0, 1, 2, 3, 4, 5, 6];
 
@@ -70,56 +74,93 @@ export function shapeOf(i: number): ShapeKey {
 }
 
 // A box's height is the heatmap's own extrusion for its level; every other shape is a
-// uniform scale so it keeps its silhouette. AREA is each unit primitive's camera-facing
-// cross-section (× s²), for the fill rule.
-// Not exported either: only sizeOf reads it, and a bar height is not a number a caller
-// can do anything with on its own.
-const HEIGHTS = [0.34, 0.62, 0.96, 1.35, 1.85];
-// `box` is deliberately absent rather than 0. A box returns from sizeOf before AREA is
-// read — its area is w × h, from its own random dimensions — so the 0 that used to sit
-// here was a value nothing could consume and a reader had to rule out. Omitting it makes
-// the type say so: a lookup for "box" is a compile error, which is the correct answer.
-const AREA: Record<Exclude<ShapeKey, "box">, number> = {
-  sphere: 0.79, cone: 0.52, octa: 0.77, tetra: 0.55, torus: 0.72, ico: 0.8,
+// uniform scale so it keeps its silhouette. Exported because the canvas bakes one rounded
+// box geometry per LEVEL with this height in it: a unit cube scaled 1 : 4 per instance
+// would stretch its bevel 4 : 1 with it.
+export const HEIGHTS = [0.34, 0.62, 0.96, 1.35, 1.85] as const;
+
+/**
+ * Each unit shape's RESTING footprint — the x·z extent it covers once it has come to lie on
+ * the floor (× s²) — for the coverage rule. The unit geometries the canvas builds are sized
+ * to these: die edge 1; domino 0.5 × 0.175 × 1.0 (1 : 0.35 : 2); puck r 0.32; capsule
+ * r 0.16 + 0.3 long; sphere r 0.5; torus R 0.36 r 0.16 (outer r 0.52).
+ * `box` is deliberately absent rather than 0: a box returns from sizeOf before this is
+ * read — its footprint is its own largest face — so a lookup for "box" is a compile error,
+ * which is the correct answer.
+ */
+const FOOTPRINT: Record<Exclude<ShapeKey, "box">, number> = {
+  die: 1,
+  domino: 0.5,
+  puck: Math.PI * 0.32 * 0.32,
+  capsule: 0.32 * 0.62,
+  sphere: Math.PI * 0.25,
+  torus: Math.PI * 0.52 * 0.52,
 };
 
-/** Unit-scale size and face area of piece `i` — shape, size and spin are texture, not data. */
-export function sizeOf(i: number, key: ShapeKey, level: number): { scale: [number, number, number]; area: number } {
+/** Unit-scale size and resting footprint of piece `i` — shape, size and spin are texture,
+ *  not data. A box rests on its largest face: a level-4 stick lies down. */
+export function sizeOf(i: number, key: ShapeKey, level: number): { scale: [number, number, number]; footprint: number } {
   if (key === "box") {
     const w = 0.42 + rand(i, 1) * 0.14;
     const d = w * (0.9 + rand(i, 2) * 0.2);
     const h = HEIGHTS[level] * (0.9 + rand(i, 12) * 0.22);
-    return { scale: [w, h, d], area: w * h };
+    const sorted = [w, h, d].sort((a, b) => b - a);
+    return { scale: [w, h, d], footprint: sorted[0] * sorted[1] };
   }
   const s = 0.5 + rand(i, 1) * 0.62; // uniform → keeps each primitive's shape, varied sizes
-  return { scale: [s, s, s], area: AREA[key] * s * s };
+  return { scale: [s, s, s], footprint: FOOTPRINT[key] * s * s };
   // `key` is narrowed to Exclude<ShapeKey, "box"> by the early return above.
 }
 
 /**
- * The tray in world units, shared by the canvas (which builds it) and the DOM (which
- * decides whether to show it). `crest` is where the topmost piece's centre should settle as
- * a fraction of the tray's height; `density` is how densely this shape mix packs, measured
- * on the live 165 level-4 commits (coverage 0.68 of the tray settled to a crest of 0.89).
- * `kLegible` is the piece scale below which a block is under ~10 px on the 273 px tray —
- * a tray that would need smaller pieces is hidden, never overfilled.
+ * The fill rule's constants. `coverage` is the summed resting footprint as a multiple of the
+ * inner floor. Re-keyed by measurement: the design's 1.8 ("two flat layers") crested at
+ * 1.5 u on the live 192 — tumbled mixed shapes pack at ~0.5, not flat — and ran the heap
+ * into the legend; 1.3 puts the crest near WORLD.CREST (0.9 u), the height the camera
+ * budget and the shove caps are solved for. `minBox` is
+ * the narrowest unit box sizeOf makes and `minPx` the width under which three faces stop
+ * reading; together they decide whether a tray is legible at a given px/u. `kMax` keeps a
+ * handful of commits from becoming boulders (a die at k 0.9 is up to 1 u — a third of the
+ * tray's depth).
  */
-export const TRAY = { inset: 1.0, floorLift: 0.7, crest: 0.55, density: 0.76, kMax: 1.6, kLegible: 0.7 };
+export const TRAY = { coverage: 1.3, kMax: 0.9, minBox: 0.42, minPx: 10 } as const;
+
+export interface TrayFit {
+  /** piece scale: Σ footprint_i(k) = coverage × W × D */
+  k: number;
+  /** the fitted camera's pixels per world unit at the look-at plane */
+  pxPerUnit: number;
+  /** the k under which the narrowest box is below minPx at this px/u */
+  kLegible: number;
+  /** the narrowest box's width on this tray, in px — what the DOM's hysteresis is on */
+  boxPx: number;
+  legible: boolean;
+  /** the camera's height budget did not squeeze the tray into a strip (see fitCamera) */
+  headroomOk: boolean;
+  camera: CameraFit;
+}
 
 /**
- * Fill rule: the count follows the quarter and so does the mass (a level-4 box is four times
- * the face of a level-0 one), so the pieces are scaled so that their summed cross-section,
- * packed at `density`, puts the crest at `crest` of the tray. Solved from the tray every
- * time, with no floor: a floor of 0.75 left today's 165 pieces cresting at 0.93 of a 720 px
- * tray and 1.29 at 640, through the ceiling and into the overflow clip. Only the top is
- * clamped — a handful of commits become a few big blocks, not boulders.
+ * Fill rule, now a COVERAGE rule on a world-fixed tray. The count follows the quarter and so
+ * does the mass, so the pieces are scaled so that their resting footprints sum to `coverage`
+ * floors: k = √(coverage · W · D / Σ footprint). k depends on the pieces alone — the canvas
+ * only moves the camera — and legibility is then a separate question of pixels: the DOM
+ * runs the same camera fit on the tray the grid WOULD give and mounts nothing under
+ * `minPx`. (The old 2-D rule solved k from a viewport-sized tray, so every height in the
+ * scene was a screen quantity that a tilted camera made false.)
  */
-export function fillScale(hw: number, hh: number, pieces: readonly Piece[]): number {
+export function coverageScale(pieces: readonly Piece[]): number {
   let sum = 0;
-  for (let i = 0; i < pieces.length; i++) sum += sizeOf(i, shapeOf(i), pieces[i].level).area;
-  if (sum === 0) return 1;
-  const tray = 2 * (hw - TRAY.inset) * (2 * hh - TRAY.floorLift);
-  return Math.min(TRAY.kMax, Math.sqrt((TRAY.crest * TRAY.density * tray) / sum));
+  for (let i = 0; i < pieces.length; i++) sum += sizeOf(i, shapeOf(i), pieces[i].level).footprint;
+  return sum === 0 ? 1 : Math.min(TRAY.kMax, Math.sqrt((TRAY.coverage * WORLD.W * WORLD.D) / sum));
+}
+
+export function trayFit(trayWpx: number, trayHpx: number, pieces: readonly Piece[]): TrayFit {
+  const k = coverageScale(pieces);
+  const camera = fitCamera(trayWpx / trayHpx, trayHpx);
+  const kLegible = TRAY.minPx / (TRAY.minBox * camera.pxPerUnit);
+  const boxPx = k * TRAY.minBox * camera.pxPerUnit;
+  return { k, pxPerUnit: camera.pxPerUnit, kLegible, boxPx, legible: boxPx >= TRAY.minPx, headroomOk: camera.headroomOk, camera };
 }
 
 /**

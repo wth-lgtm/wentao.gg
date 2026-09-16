@@ -6,18 +6,17 @@ import {
   POUR,
   TRAY,
   capPieces,
-  fillScale,
   levelFor,
   piecesForDays,
   pourSchedule,
   shapeOf,
   sizeOf,
   trainFor,
+  trayFit,
   type Piece,
 } from "../app/lib/commitPile";
+import { WORLD } from "../app/lib/pileScene";
 import { buildDayWindow } from "../app/lib/githubStats";
-
-const HH = Math.tan((45 / 2) * Math.PI / 180) * 11; // R3F viewport half-height at fov 45, z 11
 
 test("levelFor is the grid's five-step ramp", () => {
   assert.deepEqual([0, 1, 2, 3, 5, 6, 10, 11, 45].map(levelFor), [0, 1, 1, 2, 2, 3, 3, 4, 4]);
@@ -65,29 +64,54 @@ test("capPieces keeps the newest pieces and reports the true total", () => {
   assert.equal(few.total, 165);
 });
 
-// The live 2026-09-16 payload: 165 commits, every one on a level-4 day.
-const live: Piece[] = Array.from({ length: 165 }, () => ({ level: 4 }));
+// The live 2026-09-16 payload: 192 commits, every one on a level-4 day.
+const live: Piece[] = Array.from({ length: 192 }, () => ({ level: 4 }));
 
-test("fillScale solves the crest rule from the tray area with no floor", () => {
-  // The 1440 px tray measured hw 11.533; the rule gave k 0.866 there.
-  const k1440 = fillScale(11.533, HH, live);
-  assert.ok(Math.abs(k1440 - 0.866) < 0.01, `k at 1440 = ${k1440}`);
-  // Twice the tray area → √2 the scale; a tray too small for legible pieces is reported
-  // as such (k below TRAY.kLegible), not clamped up to overflow.
-  const small = fillScale(5, HH, live);
-  assert.ok(small < TRAY.kLegible, `k on a 5 u half-width tray = ${small}`);
-  const area = (hw: number) => 2 * (hw - TRAY.inset) * (2 * HH - TRAY.floorLift);
-  const hwDouble = area(11.533) * 2 / (2 * (2 * HH - TRAY.floorLift)) + TRAY.inset;
-  assert.ok(Math.abs(fillScale(hwDouble, HH, live) / k1440 - Math.SQRT2) < 1e-6);
-  // A handful of commits caps at kMax rather than becoming boulders.
-  assert.equal(fillScale(11.533, HH, live.slice(0, 3)), TRAY.kMax);
-  assert.equal(fillScale(11.533, HH, []), 1);
+test("trayFit solves the coverage rule: the pieces' resting footprints sum to TRAY.coverage floors", () => {
+  const fit = trayFit(691, 273, live);
+  let sum = 0;
+  for (let i = 0; i < live.length; i++) sum += sizeOf(i, shapeOf(i), live[i].level).footprint;
+  assert.ok(Math.abs((sum * fit.k * fit.k) / (WORLD.W * WORLD.D) - TRAY.coverage) < 1e-9, `coverage at k ${fit.k}`);
+  // Re-keyed by measurement: the design expected k ≈ 0.6 at coverage 1.8; the tray objects
+  // have larger resting footprints and the heap packs looser than flat layers, so at the
+  // measured coverage 1.3 the live 192 solve to k ≈ 0.47: boxes 0.20–0.26 u = 14–19 px at
+  // 72 px/u, legible (≥ 10 px) with room.
+  assert.ok(fit.k > 0.4 && fit.k < 0.55, `k = ${fit.k}`);
+  assert.ok(fit.pxPerUnit > 69 && fit.pxPerUnit < 75, `px/u ${fit.pxPerUnit}`);
+  assert.ok(fit.legible, `the smallest box is ${fit.k * TRAY.minBox * fit.pxPerUnit} px`);
+  assert.ok(fit.headroomOk);
 });
 
-test("sizeOf gives a level-4 box about four times the face of a level-0 one", () => {
-  const lo = sizeOf(0, "box", 0).area;
-  const hi = sizeOf(0, "box", 4).area;
-  assert.ok(Math.abs(hi / lo - 1.85 / 0.34) < 1e-9);
+test("trayFit: k follows the pieces, not the pixels; legibility follows the pixels", () => {
+  const wide = trayFit(691, 273, live);
+  const fluid = trayFit(520, 273, live);
+  assert.equal(wide.k, fluid.k);
+  assert.ok(fluid.pxPerUnit < wide.pxPerUnit);
+  assert.ok(fluid.legible, "a ~900 px viewport still mounts the tray");
+  // A tray column too narrow for a 10 px block hides itself, never overfills.
+  const tiny = trayFit(300, 273, live);
+  assert.equal(tiny.k, wide.k);
+  assert.ok(!tiny.legible, `k·minBox·px/u = ${tiny.k * TRAY.minBox * tiny.pxPerUnit}`);
+  assert.ok(tiny.kLegible > tiny.k);
+  assert.ok(wide.kLegible < wide.k);
+});
+
+test("trayFit caps a handful of commits at kMax rather than boulders, and an empty pile at 1", () => {
+  assert.equal(trayFit(691, 273, live.slice(0, 3)).k, TRAY.kMax);
+  assert.equal(trayFit(691, 273, []).k, 1);
+});
+
+test("sizeOf: a box rests on its largest face and its height is the day's extrusion", () => {
+  const { scale, footprint } = sizeOf(0, "box", 4);
+  const [w, h, d] = scale;
+  assert.ok(h > w && h > d, "a level-4 box is a tall stick");
+  assert.ok(Math.abs(footprint - w * Math.max(h, d)) < 1e-12);
+  // level 4 stands 1.85/0.34 of a level-0 box for the same piece
+  assert.ok(Math.abs(sizeOf(0, "box", 4).scale[1] / sizeOf(0, "box", 0).scale[1] - 1.85 / 0.34) < 1e-9);
+  // round pieces keep their silhouette: uniform scale, footprint ∝ s²
+  const die = sizeOf(1, "die", 4);
+  assert.equal(die.scale[0], die.scale[1]);
+  assert.ok(Math.abs(die.footprint - die.scale[0] * die.scale[0]) < 1e-12);
   // The box brick is the most common shape (three of nine picks).
   const boxes = Array.from({ length: 9000 }, (_, i) => shapeOf(i)).filter((s) => s === "box").length;
   assert.ok(boxes > 2700 && boxes < 3300, `${boxes} boxes in 9000`);

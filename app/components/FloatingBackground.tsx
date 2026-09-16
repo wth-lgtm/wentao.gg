@@ -1,201 +1,414 @@
 "use client";
 
 import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Physics, RigidBody, CuboidCollider, InstancedRigidBodies, CoefficientCombineRule, useRapier, type RapierRigidBody, type InstancedRigidBodyProps } from "@react-three/rapier";
+import { Canvas, applyProps, useFrame, useThree } from "@react-three/fiber";
+import {
+  Physics,
+  RigidBody,
+  CuboidCollider,
+  RoundCuboidCollider,
+  RoundCylinderCollider,
+  CapsuleCollider,
+  InstancedRigidBodies,
+  CoefficientCombineRule,
+  useRapier,
+  type RapierRigidBody,
+  type InstancedRigidBodyProps,
+} from "@react-three/rapier";
+import { ContactShadows, Environment, Lightformer } from "@react-three/drei";
 import { easing } from "maath";
 import * as THREE from "three";
-import { TRAY, fillScale, pourSchedule, rand, shapeOf, sizeOf, trainFor, type Piece, type ShapeKey } from "../lib/commitPile";
+import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { HEIGHTS, coverageScale, pourSchedule, rand, shapeOf, sizeOf, trainFor, type Piece, type ShapeKey } from "../lib/commitPile";
+import { CAMERA, WORLD, capsFor, fitCamera, mouthFor, type CameraFit } from "../lib/pileScene";
+import { KEY_POSITION, SHADOW_AABB, shadowBoundsFor } from "../lib/pileShadow";
+import { jitterShade, roughnessFor, shadeFor } from "../lib/pileLook";
+import { createPointerRig, type PointerRig } from "../lib/pointerRig";
 
-// The tray. The sim box used to BE the clip rectangle (walls at ±hw, floor at −hh), so every
-// piece touching an edge was guillotined by the region's overflow: rotation is free on all
-// three axes and a corner at z = 1.3 projects 11/(11−1.3) = 13% outward. The walls now sit a
-// unit inside the frame and the floor 0.7 u above it, and the container is real geometry lit
-// by the same key as the pieces: a slab whose top face reads as a ~28 px perspective band and
-// two lips whose inner faces read as wedges. Perspective check (camera z 11, factor
-// 11/(11−z)): the slab's front-bottom edge at y = −hh+0.58, z = 0.9 projects to −4.33 > −hh
-// (−4.556), and a lip's outer top corner at z = 0.7 projects to (hw−0.88)·1.068, which stays
-// inside hw as long as hw < 13.8 — an upper bound, and the widest tray this card draws is
-// hw 11.5. So the tray is never itself clipped. (The originally proposed −hh+0.55 with z ±1.3
-// came out at −4.67: cut by the frame it was meant to replace.)
-const INSET = TRAY.inset; // wall inner face, inside the frame edge
-const FLOOR_LIFT = TRAY.floorLift; // floor top above the frame bottom
-const TH = 0.6; // floor / ceiling / z-wall collider half-thickness
-// Side walls are thick, outward. They follow the live viewport while the pile does not, so a
-// narrowing window drives them INTO the edge pieces; penetration resolves toward the nearest
-// face of the collider, and with a 1.2 u wall moved 1.2 u the nearest face was the outer one
-// — 1100→1000 px pushed 6 of 165 pieces out of the tray. At 4 u no narrowing short of the
-// re-lay threshold (RELAY_FRAC of hw, ≈1.7 u) can put a piece past the middle.
-const WALL_T = 4;
-const HZ = 1.3; // z half-depth pieces may tumble in
-const SLAB = { t: 0.12, d: 2.2, z: -0.2 };
-const LIP = { t: 0.12, h: 0.3, d: 2.0, z: -0.3 };
-// Ceiling underside as a fraction of hh: a top face at hh with the piece tumbled to z = 0.95
-// still projects inside the frame. It exists only once the pour is in, or nothing could
-// enter from the mouth above.
-const CEIL = 0.92;
+// ───────────────────────────── the tray ─────────────────────────────
+// World-fixed (see pileScene.WORLD); only the camera moves with the canvas. The visible tray
+// is one merged geometry — slab plus four lips, corners rounded r 0.04 — in a NEUTRAL zinc,
+// not the accent: an accent-tinted floor made the dark theme a navy monochrome in which a
+// shadow landing at luminance ~12 on a floor of ~30 was spent on nothing. Pieces carry all
+// the accent; the tray carries none, so the blue separates by chroma.
+const TH = 0.6; // collider half-thickness (floor and walls)
+// The invisible walls reach far above any mouth (≤ 6 u at the narrowest tray that mounts)
+// plus a five-rung train; the visible lips are 0.28 u. A wall that stopped short of the
+// train lost 1–2 of 200 pieces per pour when a dense train pushed its top sideways.
+const WALL_TOP = 14;
+// Parked (fixed) bodies wait here; the frame's top edge over the front lip is under 6 u at
+// every fit, so the park is never drawn in it.
+const PARK_Y = 20;
+const TRAY_R = 0.04;
 
-// Static floor + walls confining the sim to the tray. Grippy + near-zero bounce so the floor
-// is not a trampoline. The walls reach `top`, the highest point a released train occupies:
-// a dense re-lay into a narrow region pushes its topmost pieces sideways, and walls that
-// stopped short of the spawn lost 1–2 of 200 per re-lay at 800 px (0 once enclosed).
-function Tray({ hw, hh, top, poured, color }: { hw: number; hh: number; top: number; poured: boolean; color: THREE.Color }) {
-  const inner = hw - INSET;
-  const floorTop = -hh + FLOOR_LIFT;
+let trayGeometry: THREE.BufferGeometry | null = null;
+function getTrayGeometry(): THREE.BufferGeometry {
+  if (trayGeometry) return trayGeometry;
+  const hx = WORLD.W / 2 + WORLD.LIP;
+  const hz = WORLD.D / 2 + WORLD.LIP;
+  const part = (w: number, h: number, d: number, x: number, y: number, z: number) => new RoundedBoxGeometry(w, h, d, 2, TRAY_R).translate(x, y, z);
+  const parts = [
+    part(2 * hx, WORLD.SLAB_T, 2 * hz, 0, -WORLD.SLAB_T / 2, 0),
+    part(WORLD.LIP, WORLD.LIP_H, 2 * hz, -(WORLD.W / 2 + WORLD.LIP / 2), WORLD.LIP_H / 2, 0),
+    part(WORLD.LIP, WORLD.LIP_H, 2 * hz, WORLD.W / 2 + WORLD.LIP / 2, WORLD.LIP_H / 2, 0),
+    part(WORLD.W, WORLD.LIP_H, WORLD.LIP, 0, WORLD.LIP_H / 2, WORLD.D / 2 + WORLD.LIP / 2),
+    part(WORLD.W, WORLD.BACK_H, WORLD.LIP, 0, WORLD.BACK_H / 2, -(WORLD.D / 2 + WORLD.LIP / 2)),
+  ];
+  const merged = mergeGeometries(parts, false)!;
+  parts.forEach((g) => g.dispose());
+  // Remap UVs so the slab's TOP face spans the floor-AO texture (u, v ↔ x, z) and every
+  // other vertex samples its white centre: the lips' own box UVs would otherwise read the
+  // darkened rim as stripes.
+  const pos = merged.attributes.position;
+  const nrm = merged.attributes.normal;
+  const uv = merged.attributes.uv;
+  for (let i = 0; i < pos.count; i++) {
+    if (nrm.getY(i) > 0.5 && pos.getY(i) > -TRAY_R - 1e-4 && pos.getY(i) < 1e-4) {
+      uv.setXY(i, (pos.getX(i) + hx) / (2 * hx), (pos.getZ(i) + hz) / (2 * hz));
+    } else {
+      uv.setXY(i, 0.5, 0.5);
+    }
+  }
+  uv.needsUpdate = true;
+  trayGeometry = merged;
+  return merged;
+}
+
+// Floor AO, baked: darkens ~25% within 0.4 u of each inner wall face by distance to the
+// NEAREST wall (a radial gradient would darken the tray's ends more than its long sides).
+// Multiplied into the albedo rather than an aoMap: on a #2a2a2f floor the env-only term an
+// aoMap attenuates is ~2% of the pixel, invisible; the junction has to darken the key too.
+let floorAo: THREE.CanvasTexture | null = null;
+function getFloorAo(): THREE.CanvasTexture {
+  if (floorAo) return floorAo;
+  const w = 128;
+  const h = 64;
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d")!;
+  const img = ctx.createImageData(w, h);
+  const hx = WORLD.W / 2 + WORLD.LIP;
+  const hz = WORLD.D / 2 + WORLD.LIP;
+  for (let py = 0; py < h; py++) {
+    for (let px = 0; px < w; px++) {
+      const x = ((px + 0.5) / w) * 2 * hx - hx;
+      const z = ((py + 0.5) / h) * 2 * hz - hz;
+      const near = Math.min(WORLD.W / 2 - Math.abs(x), WORLD.D / 2 - Math.abs(z));
+      const t = Math.min(1, Math.max(0, near / 0.4));
+      const dark = 0.25 * (1 - t * t * (3 - 2 * t));
+      const v = Math.round(255 * (1 - dark));
+      const o = (py * w + px) * 4;
+      img.data[o] = img.data[o + 1] = img.data[o + 2] = v;
+      img.data[o + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  floorAo = tex;
+  return tex;
+}
+
+// The tray's own contact with the card: a radial alpha under the slab, centre nudged away
+// from the key (−x, +z). Without it the tray floats on the glass — ContactShadows grounds
+// the pieces on the tray, nothing grounded the tray on the card.
+let haloTex: THREE.CanvasTexture | null = null;
+function getHalo(): THREE.CanvasTexture {
+  if (haloTex) return haloTex;
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 128;
+  const ctx = canvas.getContext("2d")!;
+  const g = ctx.createRadialGradient(128, 64, 0, 128, 64, 128);
+  g.addColorStop(0, "#fff");
+  g.addColorStop(0.55, "#999");
+  g.addColorStop(1, "#000");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 256, 128);
+  haloTex = new THREE.CanvasTexture(canvas);
+  return haloTex;
+}
+
+function Tray({ light }: { light: boolean }) {
+  const geometry = useMemo(() => getTrayGeometry(), []);
+  const ao = useMemo(() => getFloorAo(), []);
+  const halo = useMemo(() => getHalo(), []);
+  const hx = WORLD.W / 2 + TH;
+  const hz = WORLD.D / 2 + TH;
   return (
     <>
-      <RigidBody type="fixed" colliders={false} friction={0.6} restitution={0.02}>
-        <CuboidCollider args={[inner + TH, TH, HZ + TH]} position={[0, floorTop - TH, 0]} />
-        <CuboidCollider args={[WALL_T, top, HZ + TH]} position={[-inner - WALL_T, 0, 0]} />
-        <CuboidCollider args={[WALL_T, top, HZ + TH]} position={[inner + WALL_T, 0, 0]} />
-        <CuboidCollider args={[inner + TH, top, TH]} position={[0, 0, -HZ - TH]} />
-        <CuboidCollider args={[inner + TH, top, TH]} position={[0, 0, HZ + TH]} />
-        {poured && <CuboidCollider args={[inner + TH, TH, HZ + TH]} position={[0, CEIL * hh + TH, 0]} />}
+      {/* Grippy, near-dead floor and walls (Min rule: the tray never adds bounce). Walls ≥ 1.2 u
+          thick: a capped shove travels V_CAP/60 + contactSkin ≈ 0.17 u per step, well inside. */}
+      <RigidBody type="fixed" colliders={false} friction={0.8} restitution={0.05} restitutionCombineRule={CoefficientCombineRule.Min}>
+        <CuboidCollider args={[hx + TH, TH, hz + TH]} position={[0, -TH, 0]} />
+        <CuboidCollider args={[TH, (WALL_TOP + TH) / 2, hz + TH]} position={[-(WORLD.W / 2 + TH), (WALL_TOP - TH) / 2, 0]} />
+        <CuboidCollider args={[TH, (WALL_TOP + TH) / 2, hz + TH]} position={[WORLD.W / 2 + TH, (WALL_TOP - TH) / 2, 0]} />
+        <CuboidCollider args={[hx + TH, (WALL_TOP + TH) / 2, TH]} position={[0, (WALL_TOP - TH) / 2, -(WORLD.D / 2 + TH)]} />
+        <CuboidCollider args={[hx + TH, (WALL_TOP + TH) / 2, TH]} position={[0, (WALL_TOP - TH) / 2, WORLD.D / 2 + TH]} />
       </RigidBody>
-      {/* Matte like the pieces — the level-0 shade of the current theme, so the tray is the
-          quiet end of the same ramp the heatmap's rest cells sit on. */}
-      <mesh position={[0, floorTop - SLAB.t / 2, SLAB.z]}>
-        <boxGeometry args={[2 * inner, SLAB.t, SLAB.d]} />
-        <meshStandardMaterial color={color} roughness={0.92} metalness={0} />
+      <mesh geometry={geometry} receiveShadow castShadow>
+        <meshStandardMaterial color={light ? "#e4e4e7" : "#2a2a2f"} roughness={light ? 0.8 : 0.85} metalness={0} map={ao} />
       </mesh>
-      {[-1, 1].map((s) => (
-        <mesh key={s} position={[s * (inner + LIP.t / 2), floorTop + LIP.h / 2, LIP.z]}>
-          <boxGeometry args={[LIP.t, LIP.h, LIP.d]} />
-          <meshStandardMaterial color={color} roughness={0.92} metalness={0} />
-        </mesh>
-      ))}
+      <mesh position={[-0.15, -WORLD.SLAB_T - 0.01, 0.1]} rotation-x={-Math.PI / 2} renderOrder={-1}>
+        <planeGeometry args={[WORLD.W + 2 * WORLD.LIP + 0.4, WORLD.D + 2 * WORLD.LIP + 0.4]} />
+        <meshBasicMaterial color="#000" alphaMap={halo} transparent opacity={light ? 0.25 : 0.35} depthWrite={false} />
+      </mesh>
     </>
   );
 }
 
+// ───────────────────────────── light ─────────────────────────────
+// ONE analytic light — the key, up and to the RIGHT (pileShadow.KEY_POSITION) — and the
+// room around it: an Environment built from two Lightformers, rendered once through PMREM
+// (frames 1, resolution 64, fetches nothing). The environment is FILL, not a lamp: a ceiling
+// rect and one former on the key's side aligned with the key direction, so the clearcoat's
+// hotspot and the shadow agree; nothing opposite (two mirror-symmetric strips read as two
+// lights on every sphere). Re-keyed by the grey-card probe (a roughness-1 plane at the floor,
+// key on vs off, read in linear): the design's key 1.8 lit an upright top face to 0.66 of
+// the board's level-4 cell — three's directional light is irradiance/π, so a top face equal
+// to its albedo needs key·0.777·(1 + env share) ≈ π → key 3.2 put the pile's lit quartile
+// at 0.89 of the cell, 3.5 inside the 8% band — and its ceiling former at 1.5 measured 42%
+// of the key when the rule is ≤ 30% (a 12 × 6 rect at 8 u subtends ~0.7 sr). Formers at
+// 0.68 / 1.1 put the env at ~0.29 of the key in dark. No ambientLight: with an env map it
+// double-counts irradiance.
+const KEY_INTENSITY = 3.5;
+const CEILING_INTENSITY = 0.68;
+const SIDE_INTENSITY = 1.1;
+const ENV_INTENSITY = { dark: 1.1, light: 0.8 };
+const SHADOW = shadowBoundsFor(KEY_POSITION, SHADOW_AABB, 0.2);
+// Hoisted: drei re-renders the cube and regenerates the PMREM whenever `children` identity
+// changes, and this component re-renders on every CommitHeatmap render.
+const KEY_DIR = new THREE.Vector3(...KEY_POSITION).normalize();
+const FORMERS = (
+  <>
+    <Lightformer form="rect" intensity={CEILING_INTENSITY} scale={[12, 6, 1]} position={[0, 8, -4]} rotation={[Math.PI / 2, 0, 0]} />
+    <Lightformer form="rect" intensity={SIDE_INTENSITY} scale={[3, 3, 1]} position={[KEY_DIR.x * 6, KEY_DIR.y * 6, KEY_DIR.z * 6]} target={[0, 0, 0]} />
+  </>
+);
+
+// ───────────────────────────── pieces ─────────────────────────────
+// Physical, not matte: roughness per piece (matte/satin/glazed, pileLook.roughnessFor) via a
+// per-instance attribute so a family stays one draw, a shared clearcoat, and one procedural
+// normal map for grain. At 15–25 px a flat BRDF reads as CG; the env's sheen broken up by a
+// surface is what makes #3b82f6 read as a glazed object instead of fill colour.
+let grainTex: THREE.CanvasTexture | null = null;
+function getGrain(): THREE.CanvasTexture {
+  if (grainTex) return grainTex;
+  const n = 64;
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = n;
+  const ctx = canvas.getContext("2d")!;
+  const img = ctx.createImageData(n, n);
+  let seed = 7;
+  const r = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  for (let i = 0; i < n * n; i++) {
+    const nx = (r() - 0.5) * 0.6;
+    const ny = (r() - 0.5) * 0.6;
+    const nz = Math.sqrt(Math.max(0, 1 - nx * nx - ny * ny));
+    img.data[i * 4] = Math.round((nx * 0.5 + 0.5) * 255);
+    img.data[i * 4 + 1] = Math.round((ny * 0.5 + 0.5) * 255);
+    img.data[i * 4 + 2] = Math.round((nz * 0.5 + 0.5) * 255);
+    img.data[i * 4 + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.NoColorSpace;
+  grainTex = tex;
+  return tex;
+}
+
+let pieceMaterial: THREE.MeshPhysicalMaterial | null = null;
+function getPieceMaterial(): THREE.MeshPhysicalMaterial {
+  if (pieceMaterial) return pieceMaterial;
+  const m = new THREE.MeshPhysicalMaterial({
+    // roughness 1 × the per-instance factor below = the piece's own roughness
+    roughness: 1,
+    metalness: 0,
+    clearcoat: 0.5,
+    clearcoatRoughness: 0.15,
+    normalMap: getGrain(),
+    normalScale: new THREE.Vector2(0.07, 0.07),
+  });
+  m.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace("#include <common>", "attribute float aRough;\nvarying float vRough;\n#include <common>")
+      .replace("#include <begin_vertex>", "vRough = aRough;\n#include <begin_vertex>");
+    shader.fragmentShader = shader.fragmentShader
+      .replace("#include <common>", "varying float vRough;\n#include <common>")
+      .replace("#include <roughnessmap_fragment>", "#include <roughnessmap_fragment>\nroughnessFactor *= vRough;");
+  };
+  pieceMaterial = m;
+  return m;
+}
+
+// Per-shape feel. Restitution combines by AVERAGE with the tray's 0.05 (the old Max rule
+// kept a torus rocking forever); round pieces are damped harder because rapier has no
+// rolling resistance and a sphere at angularDamping 0.3 keeps 40% of its spin after 3 s.
+const MATERIALS: Record<ShapeKey, { density: number; restitution: number; angularDamping: number; linearDamping: number }> = {
+  box: { density: 1.1, restitution: 0.22, angularDamping: 0.35, linearDamping: 0.1 },
+  die: { density: 1.2, restitution: 0.22, angularDamping: 0.35, linearDamping: 0.1 },
+  domino: { density: 1.1, restitution: 0.22, angularDamping: 0.35, linearDamping: 0.1 },
+  puck: { density: 1.3, restitution: 0.15, angularDamping: 0.9, linearDamping: 0.3 },
+  capsule: { density: 0.9, restitution: 0.15, angularDamping: 0.9, linearDamping: 0.3 },
+  sphere: { density: 0.8, restitution: 0.15, angularDamping: 0.9, linearDamping: 0.3 },
+  torus: { density: 0.9, restitution: 0.15, angularDamping: 0.9, linearDamping: 0.3 },
+};
+const FRICTION = 0.7;
+
+// Unit geometries. The box is baked per LEVEL at the mean width sizeOf draws, so the
+// per-instance scale stays within ±15% of uniform and the bevel with it; a unit cube scaled
+// 1 : 4 gave a 4 : 1 bevel. Bevels as fractions of the smallest edge: brick 0.03, die 0.09
+// (real dice), domino 0.15 of its thickness.
+const BOX_W = 0.49;
+const BEVEL = { box: 0.03, die: 0.09, domino: 0.15 };
+const DOMINO = { w: 0.5, t: 0.175, l: 1.0 };
+const PUCK = { r: 0.32, h: 0.14 };
+const CAPSULE = { r: 0.16, len: 0.3 };
+const TORUS = { R: 0.36, r: 0.16 };
+
+interface Group {
+  key: ShapeKey;
+  /** boxes are grouped per level (one geometry each); other shapes use −1 */
+  level: number;
+  instances: InstancedRigidBodyProps[];
+  /** the piece's index in `pieces` — the seed for its colour, finish and spin */
+  idx: number[];
+  levels: number[];
+  beats: number[];
+  rungs: number[];
+  rx: number[];
+  rz: number[];
+}
+
+function geometryFor(g: Group): THREE.BufferGeometry {
+  switch (g.key) {
+    case "box": {
+      const h = HEIGHTS[g.level];
+      return new RoundedBoxGeometry(BOX_W, h, BOX_W, 2, BEVEL.box * Math.min(BOX_W, h));
+    }
+    case "die":
+      return new RoundedBoxGeometry(1, 1, 1, 3, BEVEL.die);
+    case "domino":
+      return new RoundedBoxGeometry(DOMINO.w, DOMINO.t, DOMINO.l, 2, BEVEL.domino * DOMINO.t);
+    case "puck":
+      return new THREE.CylinderGeometry(PUCK.r, PUCK.r, PUCK.h, 32);
+    case "capsule":
+      return new THREE.CapsuleGeometry(CAPSULE.r, CAPSULE.len, 4, 12);
+    case "sphere":
+      return new THREE.SphereGeometry(0.5, 24, 16);
+    case "torus":
+      return new THREE.TorusGeometry(TORUS.R, TORUS.r, 16, 32);
+  }
+}
+
+// Colliders match the geometry: a RoundCuboid for every bevelled box (a plain cuboid from
+// the bounding box left rounded corners floating r(√3−1) ≈ 4 px off their neighbours), an
+// exact capsule, a ball, and ROUND CYLINDERS for the two flat shapes. The design had hulls
+// for the puck and the ring; measured, a torus hull is a thin 32-gon disc the solver cannot
+// hold still under a stack — one sat 0.04 u INTO the floor vibrating at 0.8 u/s / 10 rad/s
+// for a full minute and kept the whole island (and the frameloop) awake. Rapier's own note:
+// round shapes settle more stably. The ring's hole is not collidable either way (nothing in
+// this size range could pass a 0.2 u hole). Rapier scales explicit args by the instance's
+// scale per axis (radius by x), so one node serves every instance.
+type AutoCollider = "ball" | "hull" | false;
+function collidersFor(g: Group): { auto: AutoCollider; nodes: ReactNode[] } {
+  switch (g.key) {
+    case "box": {
+      const h = HEIGHTS[g.level];
+      const r = BEVEL.box * Math.min(BOX_W, h);
+      return { auto: false, nodes: [<RoundCuboidCollider key="c" args={[BOX_W / 2 - r, h / 2 - r, BOX_W / 2 - r, r]} />] };
+    }
+    case "die":
+      return { auto: false, nodes: [<RoundCuboidCollider key="c" args={[0.5 - BEVEL.die, 0.5 - BEVEL.die, 0.5 - BEVEL.die, BEVEL.die]} />] };
+    case "domino": {
+      const r = BEVEL.domino * DOMINO.t;
+      return { auto: false, nodes: [<RoundCuboidCollider key="c" args={[DOMINO.w / 2 - r, DOMINO.t / 2 - r, DOMINO.l / 2 - r, r]} />] };
+    }
+    case "capsule":
+      return { auto: false, nodes: [<CapsuleCollider key="c" args={[CAPSULE.len / 2, CAPSULE.r]} />] };
+    case "puck":
+      return { auto: false, nodes: [<RoundCylinderCollider key="c" args={[PUCK.h / 2 - 0.02, PUCK.r - 0.02, 0.02]} />] };
+    case "torus":
+      return { auto: false, nodes: [<RoundCylinderCollider key="c" args={[TORUS.r - 0.05, TORUS.R + TORUS.r - 0.05, 0.05]} />] };
+    case "sphere":
+      return { auto: "ball", nodes: [] };
+  }
+}
+
+// ───────────────────────────── motion ─────────────────────────────
 const SETTLE_MIN = 2.5;
 const SETTLE_MAX = 10;
 // Rapier sleeps whole contact islands and the pile is one island, so it never reaches the
-// engine's own threshold (replicated 90 s in Node: 200/200 awake). Nor does it ever go quiet
-// by itself: the Max-restitution round pieces keep a torus wobbling on the floor at ~6 rad/s
-// and a sphere rolling at 0.5 u/s indefinitely, so the settled pile's peak speed keeps
-// spiking to 0.6–1.0 u/s, now and then past it, forever (per-frame trace over 30 s in
-// Chrome: 90% of frames above 0.15 u/s, longest quiet run 4 frames — "all under 0.15 for six
-// frames" fired once, at 38 s; at 1.0 one run stayed awake 17 s). So: once no body has
-// exceeded IDLE_V for IDLE_T seconds of simulated time we put the island to sleep ourselves —
-// rapier then has no active body to invalidate() for and the demand frameloop stops: no
-// stepping, no setMatrixAt per piece, no draw. 1.5 u/s is ~57 px/s here, 50% over the creep
-// peaks; anything airborne passes it within 125 ms under g = 12, a recall slide is faster or
-// friction-locked, and a rolling sphere decays home inside 3 s. A kinetic test, not a pointer
-// one: after a swipe the cursor is gone while pieces are still airborne or being recalled by
-// the spring below.
-const IDLE_V = 1.5;
+// engine's own threshold (replicated 90 s in Node: 200/200 awake). So: once no body has
+// exceeded the idle speed for IDLE_T seconds of simulated time we put the island to sleep
+// ourselves — rapier then has no active body to invalidate() for and the demand frameloop
+// stops: no stepping, no setMatrixAt per piece, no draw. The threshold is a visible freeze,
+// so it is set in SCREEN space (≈ 50 px/s) and converted at the live px/u: 0.7 u/s on the
+// 691 px tray, 0.9 on a 520 px one. A kinetic test, not a pointer one: after a swipe the
+// cursor is gone while pieces are still airborne or being recalled by the spring below.
+const IDLE_PX = 50;
 const IDLE_T = 3;
 // How long a pointer can sit still inside the region before it stops counting as a
 // shove. Longer than a hand's natural tremor and shorter than the idle window above, so
 // a parked cursor lets the pile settle and then sleep rather than holding it awake.
 const POINTER_IDLE_MS = 1200;
+// The quiet timer is a HARD RESET, not a decaying window: one frame over the idle speed
+// discards every second of quiet accumulated before it — a pile still exchanging solver
+// kicks has not settled.
 
-// The quiet timer is a HARD RESET, not a decaying window: one frame over IDLE_V discards
-// every second of quiet accumulated before it. That is the conservative reading — a pile
-// still exchanging solver kicks has not settled — and the cost is that a single spike at
-// 2.9 s of quiet buys another full IDLE_T at frame rate. A decaying window (subtract
-// rather than zero) would tolerate the spike and risk sleeping a pile that is genuinely
-// still moving. Left as the hard reset deliberately; the trade is recorded here because
-// the choice is not visible from the one line that makes it.
-// soft cursor field — a FORCE model (impulse = force·dt, no ×mass) so heavy pieces resist
-// and light ones fly: weight becomes visible, and the shove is frame-rate independent.
-const R = 2.6; // influence radius
-const F_BASE = 26; // radial "presence" force
-const F_SWIPE = 6; // swipe / cursor-momentum coupling
-const V_FULL = 4.5; // cursor speed (u/s) for full swipe strength
+// The cursor field — a FORCE model (impulse = force·dt, no ×mass) so heavy pieces resist and
+// light ones fly. The pointer ray meets the horizontal plane y = HIT_Y (the heap's
+// mid-height); the field is a 3-D ball of radius R about that hit and pushes each body
+// horizontally away from it, with a small upward bias, at the body's CENTRE. The old field
+// met the vertical z = 0 plane and pushed in x/y from the cursor point: under a camera
+// looking down 40° a cursor on the front rim landed the field centre under the floor and
+// hoisted the front pieces straight up — a geyser on hover.
+// F_BASE is solved so a slow hover (presence floor only) slides a 0.3 u piece about one width:
+// at d = 0.3 the smoothstep gives 0.66, × FLOOR 0.3 = 0.2, and a 0.03-mass piece needs
+// F·0.2/0.03 > μg = 42 to move at all → F ≈ 7. F_SWIPE brings a full-speed swipe to about
+// the speed cap in a tenth of a second on the same mass.
+const HIT_Y = 0.35;
+const R = 0.9;
+const F_BASE = 7;
+const F_SWIPE = 1.0;
+const V_FULL = 1.8; // cursor speed (u/s) for full swipe strength, ≈ 130 px/s
 const FLOOR = 0.3; // presence floor: a slow/parked cursor still shoves
-// Speed caps after a shove. V_CAP 7 → a piece can rise at most 7²/24 ≈ 2 u, so nothing
-// launched from the pile's crest reaches the frame top (at 11 the rise was 5 u against a
-// 4.6 u half-height). W_CAP is new: the impulse lands AT the cursor point, so its torque was
-// uncapped, and a spinning body dumps that energy into its neighbours as linear speed on the
-// next contact — a 2000 px/s swipe reached 190–250 u/s and tunnelled 1–6 pieces through a
-// wall (3/3 trials on the old rig) while the linear cap alone read as satisfied.
-const V_CAP = 7;
-const W_CAP = 12; // rad/s
-// horizontal return spring (gravity owns the vertical axis → no hover/float)
-const K = 8; // gentler homing (was 14)
+const UP_BIAS = 0.2; // upward component as a fraction of the horizontal push
+// Speed caps after a shove come from the frame budget (pileScene.capsFor): a piece may rise
+// only to the frame's top edge over the back wall. W_CAP exists because an uncapped spin
+// dumps into neighbours as linear speed on the next contact — a 2000 px/s swipe reached
+// 190–250 u/s and tunnelled pieces through a wall while the linear cap alone read as met.
+// Recall spring in x AND z (a swipe that recalled in x alone migrated the heap to the front
+// wall with no way back). K re-solved for g 60: friction μg = 42 u/s² has to be overcome by
+// K·pull before a piece slides home at all, so K 60 moves a piece 1 u out in ~0.3 s.
+const K = 60;
 const C = 2 * Math.sqrt(K) * 0.9; // near-critical damping (zeta 0.9)
-const SLACK = 1.1; // recall only pieces shoved beyond this → pile reforms organically, not in columns
+const SLACK = 0.6; // recall only pieces shoved beyond ~two widths → the pile reforms organically
 
 // The pour. Pieces are born `fixed`, parked out of frame, and released on 100 ms beats from a
-// mouth just above the frame's top edge — the entrance is a metered pour that starts when
-// the tray is actually on screen, not a rain that played 300 px before the card arrived and
-// before its numbers existed. The metre itself (which slot opens on which beat, how tall a
-// train) is pourSchedule/trainFor in commitPile.ts, tested there. Two things about the trains
-// are only approximately true: a slot is reopened every POUR.phases beats, by which time the
-// previous train has fallen V0·0.3 + 0.54 ≈ 3 u — clear of the next one; and the members of
-// a train are a slot apart, which clears most pairs, but two tumbled level-4 boxes (half-
-// diagonals 0.92 u each against a 1.9 u slot) can touch at release and rapier parts them
-// with a small pop. Fixed bodies ignore each other, so the park can overlap freely, and the
-// mesh sync writes every body's matrix (not just active ones), so the park is drawn where it
-// is — out of frame.
+// mouth just above the frame's top edge over the FRONT lip (pileScene.mouthFor, read from
+// the live camera fit at release time — the frame's top edge is lane-dependent under a
+// tilted camera and the design's fixed 2.7 u sat inside the frame over the front lane at
+// the fitted distance). The metre itself (which slot opens on which beat, how tall a train)
+// is pourSchedule/trainFor in commitPile.ts, tested there; a slot here is an (x, lane) pair,
+// so each beat lays one lane across the tray and the next beat the next lane. Fixed bodies
+// ignore each other, so the park can overlap freely.
 const BEAT_MS = 100;
-const SLOT = 2.2; // × piece scale: clears a tumbled level-4 box (2.07 u tall)
-const V0 = 8; // exit speed downward (u/s)
-const VX = 0.5; // and a hint of drift toward the right, the way the ripple runs (1.5 heaped the right wall)
-const GRACE_BEATS = 12; // after the last release, before the ceiling closes: a 5-train top falls 10 u in 0.75 s
-const PARK = 40; // park height above the mouth
-const SPAWN_INSET = 1.7; // mouth half-width inside the frame: wall inset + a half piece + collider skin
-// A window drag re-lays once it has been still for this long, not once per band.
-const RELAY_QUIET_MS = 300;
-// Width change (fraction of the spawn half-width) past which the pile is re-laid rather than
-// nudged. It was a quarter; measured sweeps of the thick walls into the settled pile: 1.2 u
-// (1100→1000 px) nudges the edge pieces 1.4 u and keeps 165/165, 2.4 u (1072→930 px) drives
-// solver corrections to 14–53 u/s and forces 1–3 pieces out through the floor. 15% caps the
-// sweep at ~1.7 u on the widest tray.
-const RELAY_FRAC = 0.15;
-
-// Per-shape material feel. Restitution combine-rule priority (Max > Min > Average) means
-// round shapes (Max) stay lively off the Average floor and bounce/roll, while faceted
-// shapes (Min) land dead-calm — energetic character without stack-wide jitter.
-const MATERIALS: Record<ShapeKey, {
-  density: number; friction: number; restitution: number;
-  restitutionRule: CoefficientCombineRule; angularDamping: number; linearDamping: number;
-}> = {
-  box:    { density: 1.3, friction: 0.70, restitution: 0.08, restitutionRule: CoefficientCombineRule.Min, angularDamping: 0.50, linearDamping: 0.05 },
-  tetra:  { density: 1.1, friction: 0.80, restitution: 0.06, restitutionRule: CoefficientCombineRule.Min, angularDamping: 0.60, linearDamping: 0.05 },
-  cone:   { density: 1.0, friction: 0.70, restitution: 0.08, restitutionRule: CoefficientCombineRule.Min, angularDamping: 0.55, linearDamping: 0.05 },
-  octa:   { density: 1.0, friction: 0.60, restitution: 0.12, restitutionRule: CoefficientCombineRule.Min, angularDamping: 0.40, linearDamping: 0.05 },
-  sphere: { density: 0.7, friction: 0.45, restitution: 0.32, restitutionRule: CoefficientCombineRule.Max, angularDamping: 0.06, linearDamping: 0.04 },
-  ico:    { density: 0.8, friction: 0.50, restitution: 0.25, restitutionRule: CoefficientCombineRule.Max, angularDamping: 0.10, linearDamping: 0.04 },
-  torus:  { density: 0.9, friction: 0.55, restitution: 0.18, restitutionRule: CoefficientCombineRule.Max, angularDamping: 0.25, linearDamping: 0.05 },
-};
-
-// Each shape is its own instanced group with a matching auto-collider (cuboid/ball, convex
-// hull otherwise).
-type Collider = "cuboid" | "ball" | "hull";
-const COLLIDER: Record<ShapeKey, Collider> = { box: "cuboid", sphere: "ball", cone: "hull", octa: "hull", tetra: "hull", torus: "hull", ico: "hull" };
-
-function geomFor(key: ShapeKey): ReactNode {
-  switch (key) {
-    case "sphere": return <sphereGeometry args={[0.5, 16, 16]} />;
-    case "cone": return <coneGeometry args={[0.52, 1, 20]} />;
-    case "octa": return <octahedronGeometry args={[0.62]} />;
-    case "tetra": return <tetrahedronGeometry args={[0.66]} />;
-    case "torus": return <torusGeometry args={[0.36, 0.16, 12, 22]} />;
-    case "ico": return <icosahedronGeometry args={[0.56]} />;
-    default: return <boxGeometry />;
-  }
-}
-
-interface Group {
-  key: ShapeKey;
-  instances: InstancedRigidBodyProps[];
-  /** palette level per instance — the colour itself is theme-side, see `shades` */
-  levels: number[];
-  /** pour schedule per instance: the beat it is released on and where the mouth puts it */
-  beats: number[];
-  rx: number[];
-  ry: number[];
-}
+const SLOT = 2.2; // × piece scale: clears a tumbled level-4 stick
+const V0 = 3; // exit speed downward (u/s) — g 60 needs no help to feel brisk
+const VX = 0.3; // a hint of drift toward the right, the way the ripple runs
+const GRACE_BEATS = 12; // after the last release, before the pour clock is declared done
+const SPAWN_MARGIN = 0.55; // mouth inset from the inner wall, plus a tumbled half-diagonal
 
 interface Layout {
   groups: Group[];
   /** beats the pour takes */
   beats: number;
-  /** the highest point a released train occupies — the walls reach it */
-  top: number;
+  k: number;
+  slot: number;
 }
 
 type Holder = { current: (RapierRigidBody | null)[] | null };
@@ -211,64 +424,67 @@ function forEachBody(holders: Holder[], f: (b: RapierRigidBody) => void) {
   }
 }
 
-function Pile({ pieces, accent, card, light, visible, pour }: {
-  pieces: readonly Piece[]; accent: string; card: string; light: boolean; visible: boolean; pour: boolean;
+const LOOK = new THREE.Vector3(CAMERA.LOOK_AT.x, CAMERA.LOOK_AT.y, CAMERA.LOOK_AT.z);
+const DEG = Math.PI / 180;
+
+interface Debug {
+  probe: boolean;
+}
+
+function Pile({ pieces, accent, card, light, visible, pour, rig, contact, onDegrade, debug }: {
+  pieces: readonly Piece[];
+  accent: string;
+  card: string;
+  light: boolean;
+  visible: boolean;
+  pour: boolean;
+  rig: PointerRig;
+  contact: boolean;
+  onDegrade: () => void;
+  debug: Debug | null;
 }) {
-  const { viewport, camera, pointer, gl, invalidate } = useThree();
+  const { camera, pointer, gl, scene, size, invalidate } = useThree();
   const { rapier } = useRapier();
-  const hw = viewport.width / 2;
-  const hh = viewport.height / 2;
-  // The layout is frozen at mount. `position` is a mutable rapier option: a new instances
-  // array re-runs setTranslation on every body, so building positions from the live viewport
-  // teleported all 200 settled pieces back to the sky on every aspect change (reproduced on
-  // production at 1100→1000 px). Only the walls follow the viewport now; a narrower region
-  // nudges edge pieces inward, a wider one leaves a gap at the right — both beat a re-fall.
-  // Past RELAY_FRAC of the spawn width, though, the region has changed size class (the card
-  // going fluid below 1072 px, DevTools docking) and a pile laid out for the old width would
-  // leave half the box empty or half the pile outside it — there a re-rain is the honest
-  // answer, so the layout is re-laid to the live size once the drag has been still for
-  // RELAY_QUIET_MS (a continuous drag from 1440 to 700 re-laid at every 25% band before).
-  // The piece scale is re-solved for the new tray with it (a 1440→720 drag kept k for a 2.6×
-  // smaller tray and crested at 1.7 of its height), and `seq` remounts the instanced bodies
-  // so their colliders are rebuilt at the new scale — react-three-rapier derives child
-  // colliders once, when the `colliders` prop changes, never from a later `scale`.
-  const [spawn, setSpawn] = useState(() => ({ hw, hh, k: fillScale(hw, hh, pieces), seq: 0 }));
-  const relayPending = Math.abs(hw - spawn.hw) > RELAY_FRAC * spawn.hw;
+
+  // The camera is fitted to the world-fixed tray whenever the canvas changes size; nothing
+  // about the pile moves with it. The fit also carries the mouth height, the idle speed and
+  // the shove caps, all read live by the loop.
+  const fitRef = useRef<CameraFit>(fitCamera(size.width / size.height, size.height));
   useEffect(() => {
-    if (!relayPending) return;
-    const t = setTimeout(() => setSpawn((s) => ({ hw, hh, k: fillScale(hw, hh, pieces), seq: s.seq + 1 })), RELAY_QUIET_MS);
-    return () => clearTimeout(t);
-  }, [relayPending, hw, hh, pieces]);
-  // The walls follow the live width only inside the no-re-lay band. Past it they hold at
-  // the spawn width until the re-lay lands: a 1024→784 px drag moved them 4 u into the
-  // sleeping pile in the 300 ms before the re-lay, and a piece buried that deep in the
-  // thick wall AND the floor took a solver kick that read y = 849,612 — for a pile that
-  // was about to be parked and poured again anyway.
-  const wallHw = relayPending ? spawn.hw : hw;
+    const fit = fitCamera(size.width / size.height, size.height);
+    fitRef.current = fit;
+    camera.position.set(fit.position.x, fit.position.y, fit.position.z);
+    camera.lookAt(LOOK);
+    invalidate();
+  }, [size, camera, invalidate]);
+
+  // drei's Environment applies environmentIntensity only when its children change, so the
+  // theme knob is set here (applyProps, as drei itself does) and a frame asked for.
+  useEffect(() => {
+    applyProps(scene, { environmentIntensity: light ? ENV_INTENSITY.light : ENV_INTENSITY.dark });
+    invalidate();
+  }, [scene, light, invalidate]);
 
   // One entry per group; aligned by group index. InstancedRigidBodies assigns its ref
   // as an OBJECT ref (writes .current) — a function ref silently no-ops — so we hand it
   // stable { current } holders (built with useMemo below) instead of callback refs.
   const homeX = useRef<Float32Array[]>([]);
+  const homeZ = useRef<Float32Array[]>([]);
   const massA = useRef<Float32Array[]>([]);
   const captured = useRef(false);
   // Simulated seconds since the pour finished, accumulated from frame deltas clamped the way
   // rapier clamps them: R3F zeroes clock.elapsedTime on every frameloop switch, and the first
-  // frame after an idle carries the whole idle as its delta — a Canvas-age clock, or a raw
-  // sum, would capture home-X from mid-air trains on the first frame after a respawn.
+  // frame after an idle carries the whole idle as its delta.
   const sinceSpawn = useRef(0);
   const quietFor = useRef(0);
   const nextBeat = useRef(0);
   const pourDone = useRef(false);
+  const frames = useRef(0);
+  const perf = useRef({ n: 0, sum: 0 });
 
   const active = useRef(false);
-  // When the pointer last MOVED. Presence alone used to mean active forever: pointerenter
-  // and pointermove set the flag, only leave/out cleared it, so a cursor parked anywhere
-  // over the region kept `idling` false, reset the quiet timer on every frame and held the
-  // pile at full frame rate indefinitely (the spec's criterion was written as "cursor
-  // away", which a parked cursor is not). After POINTER_IDLE_MS of stillness the pile is
-  // allowed to settle and sleep; the next pointermove sets the flag and invalidates, so a
-  // single pixel of movement brings it straight back.
+  // When the pointer last MOVED: after POINTER_IDLE_MS of stillness the pile is allowed to
+  // settle and sleep; the next pointermove brings it straight back.
   const lastMove = useRef(0);
   const wasActive = useRef(false);
   // persistent vectors (damp3 stashes velocity on `cursor`; finite-diff needs `prev`)
@@ -277,83 +493,105 @@ function Pile({ pieces, accent, card, light, visible, pour }: {
   const cvel = useMemo(() => new THREE.Vector3(), []);
   const hit = useMemo(() => new THREE.Vector3(), []);
   const dir = useMemo(() => new THREE.Vector3(), []);
+  const camTarget = useMemo(() => new THREE.Vector3(), []);
 
-  // Shape, size, spin and mouth slot come from rand(i, seed) — texture, not data. Only the
-  // colour level (and a box's height, the heatmap's own extrusion) is the commit's.
+  // Shape, size, spin, lane and mouth slot come from rand(i, seed) — texture, not data. Only
+  // the colour level (and a box's height, the heatmap's own extrusion) is the commit's. The
+  // layout depends on the pieces alone: `position` is a mutable rapier option, so a layout
+  // that changed with the canvas re-ran setTranslation on every settled body.
   const layout = useMemo<Layout>(() => {
-    const k = spawn.k;
-    const gs: Group[] = (Object.keys(COLLIDER) as ShapeKey[]).map((key) => ({ key, instances: [], levels: [], beats: [], rx: [], ry: [] }));
+    const k = coverageScale(pieces);
     const n = pieces.length;
     const slot = SLOT * k;
-    const slots = Math.max(1, Math.floor((2 * (spawn.hw - SPAWN_INSET)) / slot));
+    const inset = SPAWN_MARGIN + 1.1 * k;
+    const span = WORLD.W - 2 * inset;
+    const xSlots = Math.max(1, Math.floor(span / slot));
+    // spread the slots over the whole span rather than pack them at SLOT: floor() dropped up
+    // to a slot's width and the heap landed in the middle 4 u of a 7 u tray
+    const pitch = span / xSlots;
+    const lanes = WORLD.LANES.length;
+    const slots = xSlots * lanes;
     const train = trainFor(n, slots);
     const stops = pourSchedule(n, slots, train);
-    const mouth = spawn.hh + 1.3 * k;
-    const x0 = -(slots * slot) / 2 + slot / 2;
+    const x0 = -span / 2 + pitch / 2;
+    const gs = new Map<string, Group>();
     for (let i = 0; i < n; i++) {
       const shape = shapeOf(i);
-      const g = gs.find((c) => c.key === shape)!;
       const level = pieces[i].level;
+      const id = shape === "box" ? `box${level}` : shape;
+      let g = gs.get(id);
+      if (!g) {
+        g = { key: shape, level: shape === "box" ? level : -1, instances: [], idx: [], levels: [], beats: [], rungs: [], rx: [], rz: [] };
+        gs.set(id, g);
+      }
       const unit = sizeOf(i, shape, level).scale;
-      const scale: [number, number, number] = [unit[0] * k, unit[1] * k, unit[2] * k];
+      const scale: [number, number, number] =
+        shape === "box"
+          ? [(unit[0] / BOX_W) * k, (unit[1] / HEIGHTS[level]) * k, (unit[2] / BOX_W) * k]
+          : [unit[0] * k, unit[1] * k, unit[2] * k];
       const stop = stops[i];
-      const rx = x0 + stop.slot * slot + (rand(i, 5) - 0.5) * 0.3 * k;
+      const lane = stop.slot % lanes;
+      const xi = Math.floor(stop.slot / lanes);
+      const rx = x0 + xi * pitch + (rand(i, 5) - 0.5) * 0.3 * k;
+      const rz = WORLD.LANES[lane] + (rand(i, 27) - 0.5) * 2 * WORLD.LANE_JITTER;
+      g.idx.push(i);
       g.levels.push(level);
       g.beats.push(stop.beat);
+      g.rungs.push(stop.rung);
       g.rx.push(rx);
-      g.ry.push(mouth + stop.rung * slot);
+      g.rz.push(rz);
       g.instances.push({
-        key: `${shape}-${g.instances.length}`,
+        key: `${id}-${g.instances.length}`,
         type: "fixed",
-        position: [rx, mouth + PARK, 0],
-        rotation: [0, 0, rand(i, 9) * Math.PI],
+        position: [rx, PARK_Y, rz],
+        rotation: [rand(i, 9) * Math.PI, rand(i, 10) * Math.PI, rand(i, 11) * Math.PI],
         scale,
       });
     }
     const beats = n > 0 ? stops[n - 1].beat + 1 : 0;
-    return { groups: gs.filter((g) => g.instances.length > 0), beats, top: mouth + train * slot + k };
-  }, [pieces, spawn]);
+    return { groups: [...gs.values()], beats, k, slot };
+  }, [pieces]);
 
-  // The React key that remounts the instanced bodies, and it has to track the LAYOUT and
-  // not just the re-lay. `spawn.seq` was bumped only by the re-lay effect above, so a new
-  // commit payload — the ISR route refreshing under a card that is already mounted — built
-  // new `instances` with new scales under the SAME key, and react-three-rapier derives a
-  // child collider ONCE, when the `colliders` prop changes, never from a later `scale`:
-  // the pile then simulated the previous shapes at the new sizes. The levels are in the
-  // string because a day crossing a level boundary changes a piece's height without
-  // changing how many pieces each shape has.
+  // The React key that remounts the instanced bodies tracks the LAYOUT: a new commit payload
+  // — the ISR route refreshing under a card that is already mounted — builds new `instances`
+  // with new scales, and react-three-rapier derives a child collider ONCE, never from a later
+  // `scale`. The levels are in the string because a day crossing a level boundary changes a
+  // piece's height without changing how many pieces each shape has.
   const layoutKey = useMemo(
-    () =>
-      `${spawn.seq}-${spawn.k.toFixed(3)}-${layout.groups
-        .map((g) => g.levels.join(""))
-        .join(".")}`,
-    [spawn.seq, spawn.k, layout]
+    () => `${layout.k.toFixed(3)}-${layout.groups.map((g) => g.levels.join("")).join(".")}`,
+    [layout]
   );
 
-  // One ramp read two ways: the heatmap mixes the accent 18/45/64/82/100% into --card in both
-  // themes, and so does the pile now — in light the rest pieces are the heatmap's rest-cell
-  // periwinkle, not the white foam of before. (THREE lerps in linear space, color-mix in
-  // sRGB, so the stops agree nominally, not to the pixel; same as dark always did.) Kept
-  // apart from the layout so a theme flip only recolours in place.
+  // One geometry per group, with the per-instance roughness attribute on it. Disposed with
+  // the layout they belong to.
+  const geometries = useMemo(
+    () =>
+      layout.groups.map((g) => {
+        const geom = geometryFor(g);
+        geom.setAttribute("aRough", new THREE.InstancedBufferAttribute(Float32Array.from(g.idx.map(roughnessFor)), 1));
+        return geom;
+      }),
+    [layout]
+  );
+  useEffect(() => () => geometries.forEach((g) => g.dispose()), [geometries]);
+  const material = useMemo(() => getPieceMaterial(), []);
+
+  // One ramp read two ways: the heatmap mixes the accent 18/45/64/82/100% into --card in
+  // sRGB, and so does the pile (pileLook.shadeFor) — a level-4 piece's albedo IS the level-4
+  // cell. Jittered ±8% lightness / ±4° hue per piece so 192 commits on level-4 days are 192
+  // objects, not one extrusion. Kept apart from the layout so a theme flip only recolours.
   const shades = useMemo(() => {
-    const acc = new THREE.Color(accent || "#3b82f6");
-    const base = new THREE.Color(card || (light ? "#f4f4f5" : "#18181b"));
-    return [0.18, 0.45, 0.64, 0.82, 1].map((keep) => acc.clone().lerp(base, 1 - keep));
+    const acc = accent || "#3b82f6";
+    const base = card || (light ? "#f4f4f5" : "#18181b");
+    return [0, 1, 2, 3, 4].map((lvl) => shadeFor(lvl, acc, base));
   }, [accent, card, light]);
 
-  // One stable { current } holder per group, aligned by index. Plain objects (not
-  // useRef) so passing them as `ref` and reading them isn't a ref-access-during-render.
-  const bodyHolders = useMemo<Holder[]>(
-    () => layout.groups.map(() => ({ current: null })),
-    [layout]
-  );
-  const meshHolders = useMemo(
-    () => layout.groups.map(() => ({ current: null as THREE.InstancedMesh | null })),
-    [layout]
-  );
+  const bodyHolders = useMemo<Holder[]>(() => layout.groups.map(() => ({ current: null })), [layout]);
+  const meshHolders = useMemo(() => layout.groups.map(() => ({ current: null as THREE.InstancedMesh | null })), [layout]);
 
   useEffect(() => {
     homeX.current = layout.groups.map((g) => new Float32Array(g.instances.length));
+    homeZ.current = layout.groups.map((g) => new Float32Array(g.instances.length));
     massA.current = layout.groups.map((g) => new Float32Array(g.instances.length));
     captured.current = false;
     sinceSpawn.current = 0;
@@ -363,10 +601,14 @@ function Pile({ pieces, accent, card, light, visible, pour }: {
   }, [layout]);
 
   useEffect(() => {
+    const c = new THREE.Color();
     layout.groups.forEach((g, gi) => {
       const mesh = meshHolders[gi]?.current;
       if (!mesh) return;
-      for (let i = 0; i < g.levels.length; i++) mesh.setColorAt(i, shades[g.levels[i]]);
+      for (let i = 0; i < g.levels.length; i++) {
+        const [r, gg, b] = jitterShade(shades[g.levels[i]], g.idx[i]);
+        mesh.setColorAt(i, c.setRGB(r, gg, b, THREE.SRGBColorSpace));
+      }
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     });
     invalidate(); // a sleeping pile has no frame coming to show the new colours
@@ -374,11 +616,9 @@ function Pile({ pieces, accent, card, light, visible, pour }: {
 
   // The pour clock. Runs only while the frameloop can (visible) and the tray is on screen
   // (pour), and skips beats in a hidden tab: the sim is frozen there, so a release would
-  // stack trains on the same mouth slot to pop apart on return. The ceiling closes
-  // GRACE_BEATS after the last release; `poured` follows the layout identity so a re-lay
-  // reopens it without an effect having to reset state.
-  const [pouredLayout, setPouredLayout] = useState<Layout | null>(null);
-  const poured = pouredLayout === layout;
+  // stack trains on the same mouth slot to pop apart on return. GRACE_BEATS after the last
+  // release the clock stops; there is no ceiling to close any more — the frame's headroom
+  // is protected by the speed caps instead.
   useEffect(() => {
     if (!visible || !pour || nextBeat.current >= layout.beats + GRACE_BEATS) return;
     const id = setInterval(() => {
@@ -386,6 +626,7 @@ function Pile({ pieces, accent, card, light, visible, pour }: {
       const b = nextBeat.current++;
       if (b < layout.beats) {
         const dynamic = rapier.RigidBodyType.Dynamic;
+        const mouth = mouthFor(fitRef.current, layout.k);
         layout.groups.forEach((g, gi) => {
           const list = bodyHolders[gi]?.current;
           if (!list) return;
@@ -393,10 +634,11 @@ function Pile({ pieces, accent, card, light, visible, pour }: {
             if (g.beats[i] !== b) continue;
             const body = list[i];
             if (!body) continue;
-            body.setTranslation({ x: g.rx[i], y: g.ry[i], z: 0 }, false);
+            const pi = g.idx[i];
+            body.setTranslation({ x: g.rx[i], y: mouth + g.rungs[i] * layout.slot, z: g.rz[i] }, false);
             body.setBodyType(dynamic, true);
             body.setLinvel({ x: VX, y: -V0, z: 0 }, true);
-            body.setAngvel({ x: 0, y: 0, z: (rand(i, 23) - 0.5) * 3 }, true);
+            body.setAngvel({ x: (rand(pi, 23) - 0.5) * 3, y: (rand(pi, 24) - 0.5) * 3, z: (rand(pi, 25) - 0.5) * 3 }, true);
           }
         });
         if (b === layout.beats - 1) {
@@ -405,8 +647,6 @@ function Pile({ pieces, accent, card, light, visible, pour }: {
         }
         invalidate();
       } else if (b >= layout.beats + GRACE_BEATS - 1) {
-        setPouredLayout(layout);
-        invalidate();
         clearInterval(id);
       }
     }, BEAT_MS);
@@ -431,6 +671,13 @@ function Pile({ pieces, accent, card, light, visible, pour }: {
     };
   }, [gl, invalidate]);
 
+  // The card's pointer rig asks for a frame on every move so the camera can start drifting;
+  // the drift then keeps the loop alive until damp3 says it has arrived.
+  useEffect(() => {
+    rig.bind(invalidate);
+    return () => rig.bind(null);
+  }, [rig, invalidate]);
+
   // Back on screen: the frameloop just went never → demand with the clock reset, and rapier
   // only invalidates from inside a step, so a pile frozen mid-fall would stay frozen until the
   // pointer arrived. One frame restarts whatever was still moving.
@@ -438,56 +685,114 @@ function Pile({ pieces, accent, card, light, visible, pour }: {
     if (visible) invalidate();
   }, [visible, invalidate]);
 
-  // A moved wall does not wake the sleeping island it now overlaps. Wake everything on a size
-  // change so penetration resolution can nudge edge pieces inward; the idle test re-sleeps it.
-  const sizeSeen = useRef(false);
+  // Dev-only inspection behind ?pileDebug=1: body positions, frame count (a sleeping pile
+  // draws none), the live fit, a key-light switch for the grey-card probe and a projector.
+  const keyRef = useRef<THREE.DirectionalLight>(null);
   useEffect(() => {
-    if (!sizeSeen.current) { sizeSeen.current = true; return; }
-    forEachBody(bodyHolders, (b) => b.wakeUp());
-    invalidate();
-  }, [wallHw, hh, bodyHolders, invalidate]);
+    if (!debug) return;
+    const w = window as unknown as { __pile?: unknown };
+    w.__pile = {
+      bodies: () => {
+        const out: { shape: string; x: number; y: number; z: number; v: number; w: number; asleep: boolean; fixed: boolean }[] = [];
+        layout.groups.forEach((g, gi) => {
+          const list = bodyHolders[gi]?.current;
+          if (!list) return;
+          for (const b of list) {
+            if (!b) continue;
+            const p = b.translation();
+            const lv = b.linvel();
+            const av = b.angvel();
+            out.push({ shape: g.key, x: p.x, y: p.y, z: p.z, v: Math.hypot(lv.x, lv.y, lv.z), w: Math.hypot(av.x, av.y, av.z), asleep: b.isSleeping(), fixed: b.isFixed() });
+          }
+        });
+        return out;
+      },
+      quietFor: () => quietFor.current,
+      frames: () => frames.current,
+      fit: () => ({ ...fitRef.current, k: layout.k, mouth: mouthFor(fitRef.current, layout.k), caps: capsFor(fitRef.current, layout.k) }),
+      setKey: (on: boolean) => {
+        if (keyRef.current) keyRef.current.intensity = on ? KEY_INTENSITY : 0;
+        invalidate();
+      },
+      project: (x: number, y: number, z: number) => {
+        const v = new THREE.Vector3(x, y, z).project(camera);
+        return [((v.x + 1) / 2) * size.width, ((1 - v.y) / 2) * size.height];
+      },
+    };
+    return () => { delete w.__pile; };
+  }, [debug, bodyHolders, layout, camera, size, invalidate]);
 
   useFrame((_, delta) => {
+    frames.current++;
     const gb = bodyHolders;
-    if (!gb.length || homeX.current.length !== layout.groups.length) return;
+    const fit = fitRef.current;
     const dt = Math.max(1e-4, Math.min(delta, 1 / 30));
+
+    // 0) camera drift: an orbit about the look-at toward the pointer's pose (yaw ±3°, pitch
+    //    ±1.5°), critically damped with a 0.35 s time constant — the board's spring is tuned
+    //    to the same, so both halves of the card move as one object. Rest when the pointer
+    //    has left the card; the return value doubles as the settle flag.
+    const yaw = (rig.over ? -rig.x * 2 * CAMERA.YAW_DRIFT : 0) * DEG;
+    const elev = (CAMERA.ELEVATION + (rig.over ? rig.y * 2 * CAMERA.PITCH_DRIFT : 0)) * DEG;
+    camTarget.set(
+      LOOK.x + fit.distance * Math.sin(yaw) * Math.cos(elev),
+      LOOK.y + fit.distance * Math.sin(elev),
+      LOOK.z + fit.distance * Math.cos(yaw) * Math.cos(elev)
+    );
+    if (easing.damp3(camera.position, camTarget, 0.35, dt)) {
+      camera.lookAt(LOOK);
+      invalidate();
+    }
+
+    if (!gb.length || homeX.current.length !== layout.groups.length) return;
     sinceSpawn.current += Math.min(delta, 0.5);
 
-    // 1) cursor follower (field center) + its RAW velocity. Sampling speed from the raw
-    //    hit point — not the low-passed follower — means fast flicks aren't smoothed away.
-    //    The speed divides by the real frame delta, not the clamped dt: at 10 fps the clamp
-    //    read a 600 px/s hover as 1800 px/s and swung the swipe coupling three times too hard.
+    // Frame budget during the pour: if twenty consecutive frames average over 20 ms the
+    // canvas steps down (DPR 2 → 1, then no ContactShadows). Only continuous frames count —
+    // the first frame after an idle carries the idle as its delta.
+    if (nextBeat.current > 0 && !captured.current && delta < 0.25) {
+      const p = perf.current;
+      p.n++;
+      p.sum += delta;
+      if (p.n >= 20) {
+        // not under ?pileDebug: software GL always trips the step-down, and a capture
+        // without ContactShadows would measure a scene no real GPU shows
+        if (p.sum / p.n > 0.02 && !debug) onDegrade();
+        p.n = 0;
+        p.sum = 0;
+      }
+    }
+
+    // 1) cursor follower (field centre) + its RAW velocity, on the plane y = HIT_Y. Sampling
+    //    speed from the raw hit point — not the low-passed follower — means fast flicks
+    //    aren't smoothed away; it divides by the real frame delta, not the clamped dt.
     if (active.current) {
       dir.set(pointer.x, pointer.y, 0.5).unproject(camera).sub(camera.position).normalize();
-      const distToPlane = -camera.position.z / dir.z;
-      hit.copy(camera.position).addScaledVector(dir, distToPlane);
-      if (!wasActive.current) { cursor.copy(hit); prevHit.copy(hit); wasActive.current = true; }
-      easing.damp3(cursor, hit, 0.05, dt, 60); // snappier center
-      cvel.copy(hit).sub(prevHit).divideScalar(Math.max(delta, 1e-4));
-      prevHit.copy(hit);
+      if (dir.y < -1e-3) {
+        hit.copy(camera.position).addScaledVector(dir, (HIT_Y - camera.position.y) / dir.y);
+        if (!wasActive.current) { cursor.copy(hit); prevHit.copy(hit); wasActive.current = true; }
+        easing.damp3(cursor, hit, 0.05, dt, 60); // snappier centre
+        cvel.copy(hit).sub(prevHit).divideScalar(Math.max(delta, 1e-4));
+        prevHit.copy(hit);
+      }
     } else {
       wasActive.current = false;
       cvel.set(0, 0, 0);
     }
-    const speed = active.current ? cvel.length() : 0;
+    const speed = active.current ? Math.hypot(cvel.x, cvel.z) : 0;
     const sf = Math.min(1, Math.pow(speed / V_FULL, 1.5)); // super-linear: a flick ≫ a drag
 
     // 2) the pile's peak speed — read once, for the settle capture and the idle test. Nothing
-    //    is captured while trains are still parked: a fixed body reads 0 u/s and its X is the
-    //    mouth's, and a home taken there would recall the piece to the sky. The idle test,
-    //    though, does not wait for the capture: a pour interrupted by a scroll (tray parked
-    //    0–30% visible, still inside the mount margin) would otherwise leave a half-poured
-    //    pile that never captured, never slept, and held the loop at full rate for nothing.
+    //    is captured while trains are still parked: a fixed body reads 0 u/s and a home taken
+    //    at the park would recall the piece to the sky. The idle test does not wait for the
+    //    capture: a pour interrupted by a scroll would otherwise hold the loop at full rate.
     const t = sinceSpawn.current;
     const settling = !captured.current && pourDone.current && t > SETTLE_MIN;
-    // A still pointer is idle too — see lastMove.
-    const idling =
-      !active.current || performance.now() - lastMove.current > POINTER_IDLE_MS;
+    const idling = !active.current || performance.now() - lastMove.current > POINTER_IDLE_MS;
     let maxV2 = 0;
     if (settling || idling) {
-      // "out" is the union of the live box and the spawn box: a wall that moved inward has
-      // not made the pieces it left behind escapees.
-      const outX = Math.max(hw, spawn.hw) + 1.5;
+      const outX = WORLD.W / 2 + 1.5;
+      const outZ = WORLD.D / 2 + 1.5;
       for (let gi = 0; gi < gb.length; gi++) {
         const list = gb[gi]?.current;
         if (!list) continue;
@@ -497,7 +802,7 @@ function Pile({ pieces, accent, card, light, visible, pour }: {
           // A piece that has tunnelled out of the box would fall forever and hold the loop
           // awake for nothing visible. Park it where it is and leave it out of the quiet test.
           const p = b.translation();
-          if (p.y < -hh - 1.5 || Math.abs(p.x) > outX || Math.abs(p.z) > HZ + 1.5) {
+          if (p.y < -1.5 || Math.abs(p.x) > outX || Math.abs(p.z) > outZ) {
             if (!b.isSleeping()) b.sleep();
             continue;
           }
@@ -508,17 +813,20 @@ function Pile({ pieces, accent, card, light, visible, pour }: {
       }
     }
 
-    // capture the settled pile as "home" X once it has come to rest
+    // capture the settled pile as home (x, z) once it has come to rest
     const captureHomes = () => {
       for (let gi = 0; gi < gb.length; gi++) {
         const list = gb[gi]?.current;
         if (!list) continue;
         const HX = homeX.current[gi];
+        const HZ = homeZ.current[gi];
         const MA = massA.current[gi];
         for (let i = 0; i < list.length; i++) {
           const b = list[i];
           if (!b) continue;
-          HX[i] = b.translation().x;
+          const p = b.translation();
+          HX[i] = p.x;
+          HZ[i] = p.z;
           MA[i] = b.mass();
         }
       }
@@ -526,22 +834,15 @@ function Pile({ pieces, accent, card, light, visible, pour }: {
     };
     if (settling && (maxV2 < 0.5 || t > SETTLE_MAX)) captureHomes();
 
-    // idle → sleep the whole island (see IDLE_V). Quiet time runs on the delta rapier itself
-    // integrates (clamped to 0.5 s), so a 10 fps tab and a 120 Hz one agree on "3 s".
-    // Nothing below has work for a sleeping pile. (Sleeping a still-parked fixed body is a
-    // no-op; a later release wakes it with setBodyType.)
+    // idle → sleep the whole island. Quiet time runs on the delta rapier itself integrates
+    // (clamped to 0.5 s), so a 10 fps tab and a 120 Hz one agree on "3 s".
+    const idleV = IDLE_PX / fit.pxPerUnit;
     if (idling) {
-      quietFor.current = maxV2 < IDLE_V * IDLE_V ? quietFor.current + Math.min(delta, 0.5) : 0;
+      quietFor.current = maxV2 < idleV * idleV ? quietFor.current + Math.min(delta, 0.5) : 0;
       if (quietFor.current >= IDLE_T) {
         quietFor.current = 0;
-        // Last chance to read where the pile came to rest. `settling` is gated on
-        // `t > SETTLE_MIN` (2.5 s) while the quiet test is not, so a pile that fell
-        // quickly and was never touched could reach IDLE_T (3 s of quiet) with the
-        // capture still waiting on SETTLE_MIN — and after the sleep below nothing
-        // invalidates, so the loop stops and that frame never comes. The homes were then
-        // whatever the pour left in the array, and the cursor's recall pulled pieces to
-        // the mouth. Capturing here costs one pass over a pile that has, by definition,
-        // stopped moving.
+        // Last chance to read where the pile came to rest: `settling` waits on SETTLE_MIN
+        // while the quiet test does not, and after the sleep nothing invalidates.
         if (!captured.current && pourDone.current) captureHomes();
         forEachBody(gb, (b) => b.sleep());
         return;
@@ -553,11 +854,14 @@ function Pile({ pieces, accent, card, light, visible, pour }: {
     const pushing = active.current; // presence floor → shove even when slow
     const cx = cursor.x;
     const cy = cursor.y;
+    const cz = cursor.z;
+    const { vCap, wCap } = capsFor(fit, layout.k);
 
     for (let gi = 0; gi < gb.length; gi++) {
       const list = gb[gi]?.current;
       if (!list) continue;
       const HX = homeX.current[gi];
+      const HZ = homeZ.current[gi];
       const MA = massA.current[gi];
       if (!HX) continue;
 
@@ -569,24 +873,26 @@ function Pile({ pieces, accent, card, light, visible, pour }: {
         if (pushing) {
           const dx = p.x - cx;
           const dy = p.y - cy;
-          const d = Math.hypot(dx, dy);
+          const dz = p.z - cz;
+          const d = Math.hypot(dx, dy, dz);
           if (d < R) {
             if (b.isSleeping()) b.wakeUp(); // wake the region so support-loss can fall
             const w = 1 - d / R;
             const s = w * w * (3 - 2 * w); // smoothstep → soft palm, no edge pop
             const strength = s * (FLOOR + (1 - FLOOR) * sf);
-            const inv = 1 / (d || 1e-4);
+            const inv = 1 / (Math.hypot(dx, dz) || 1e-4);
             const fx = (dx * inv * F_BASE + cvel.x * F_SWIPE) * strength;
-            const fy = (dy * inv * F_BASE + cvel.y * F_SWIPE) * strength;
-            // impulse = force·dt (frame-rate independent), applied AT the cursor point so the
-            // vertical offset + swipe component impart a real tipping torque → pieces topple.
-            b.applyImpulseAtPoint({ x: fx * dt, y: fy * dt, z: 0 }, { x: cx, y: cy, z: 0 }, true);
+            const fz = (dz * inv * F_BASE + cvel.z * F_SWIPE) * strength;
+            const fy = UP_BIAS * Math.hypot(fx, fz);
+            // impulse = force·dt (frame-rate independent), at the centre: the tipping comes
+            // from friction at the contact, as it does for a real finger
+            b.applyImpulse({ x: fx * dt, y: fy * dt, z: fz * dt }, true);
             const v = b.linvel();
             const sp = Math.hypot(v.x, v.y, v.z);
-            if (sp > V_CAP) { const kk = V_CAP / sp; b.setLinvel({ x: v.x * kk, y: v.y * kk, z: v.z * kk }, true); }
+            if (sp > vCap) { const kk = vCap / sp; b.setLinvel({ x: v.x * kk, y: v.y * kk, z: v.z * kk }, true); }
             const av = b.angvel();
             const ws = Math.hypot(av.x, av.y, av.z);
-            if (ws > W_CAP) { const kk = W_CAP / ws; b.setAngvel({ x: av.x * kk, y: av.y * kk, z: av.z * kk }, true); }
+            if (ws > wCap) { const kk = wCap / ws; b.setAngvel({ x: av.x * kk, y: av.y * kk, z: av.z * kk }, true); }
             continue; // being pushed → no recall this frame
           }
         }
@@ -595,14 +901,14 @@ function Pile({ pieces, accent, card, light, visible, pour }: {
         //    instead of snapping into columns. Sleeping pieces stay put (anti-jitter).
         if (!captured.current || b.isSleeping()) continue;
         const dX = HX[i] - p.x;
-        const adx = Math.abs(dX);
+        const dZ = HZ[i] - p.z;
+        const dist = Math.hypot(dX, dZ);
         const slack = SLACK * (0.8 + 0.4 * rand(i, 21)); // per-piece slack → no unison return
-        if (adx > slack) {
+        if (dist > slack) {
           const v = b.linvel();
-          const pull = adx - slack; // ramps in from zero → no teleport-home
-          const ax = K * Math.sign(dX) * pull - C * v.x;
+          const pull = (dist - slack) / dist; // ramps in from zero → no teleport-home
           const m = MA[i] || b.mass();
-          b.applyImpulse({ x: ax * m * dt, y: 0, z: 0 }, true);
+          b.applyImpulse({ x: (K * dX * pull - C * v.x) * m * dt, y: 0, z: (K * dZ * pull - C * v.z) * m * dt }, true);
         }
       }
     }
@@ -610,36 +916,61 @@ function Pile({ pieces, accent, card, light, visible, pour }: {
 
   return (
     <>
-      <Tray hw={wallHw} hh={hh} top={layout.top} poured={poured} color={shades[0]} />
+      <directionalLight
+        ref={keyRef}
+        position={KEY_POSITION}
+        intensity={KEY_INTENSITY}
+        castShadow
+        shadow-mapSize={[1024, 1024]}
+        shadow-bias={-0.0002}
+        shadow-normalBias={0.03}
+      >
+        <orthographicCamera attach="shadow-camera" args={[SHADOW.left, SHADOW.right, SHADOW.top, SHADOW.bottom, SHADOW.near, SHADOW.far]} />
+      </directionalLight>
+      <Environment resolution={64} frames={1}>
+        {FORMERS}
+      </Environment>
+      <Tray light={light} />
+      {/* Soft contact pool under the pieces, inner floor only (the walls fall outside its
+          footprint), far 1.0 so a second layer already saturates the blob. It re-renders on
+          every drawn frame and so stops with the pile. */}
+      {contact && <ContactShadows position={[0, 0.001, 0]} scale={[WORLD.W, WORLD.D]} far={1} blur={1.5} resolution={256} opacity={light ? 0.4 : 0.25} />}
+      {debug?.probe && (
+        <mesh position={[4.1, 0.001, 0]} rotation-x={-Math.PI / 2}>
+          <planeGeometry args={[0.5, 0.5]} />
+          <meshStandardMaterial color="#808080" roughness={1} metalness={0} toneMapped={false} />
+        </mesh>
+      )}
       {layout.groups.map((g, gi) => {
         const mat = MATERIALS[g.key];
+        const col = collidersFor(g);
         return (
           <InstancedRigidBodies
-            key={`${g.key}-${layoutKey}`}
+            key={`${g.key}${g.level}-${layoutKey}`}
             ref={bodyHolders[gi]}
             instances={g.instances}
-            colliders={COLLIDER[g.key]}
+            colliders={col.auto}
+            colliderNodes={col.nodes}
             density={mat.density}
-            friction={mat.friction}
+            friction={FRICTION}
             restitution={mat.restitution}
-            restitutionCombineRule={mat.restitutionRule}
+            restitutionCombineRule={CoefficientCombineRule.Average}
             linearDamping={mat.linearDamping}
             angularDamping={mat.angularDamping}
-            contactSkin={0.015}
-            softCcdPrediction={0.8}
-            enabledTranslations={[true, true, false]}
-            enabledRotations={[true, true, true]}
+            // contactSkin 0.015 held resting bodies 0.015 u apart — 0.45 px at 30 px/u, a
+            // hairline at 72. Soft CCD covers the fall instead: a train from the mouth lands
+            // at ~22 u/s, 0.37 u per step against 0.2 u pieces.
+            contactSkin={0.004}
+            softCcdPrediction={0.5}
           >
             <instancedMesh
               ref={meshHolders[gi]}
-              args={[undefined, undefined, g.instances.length]}
+              args={[geometries[gi], material, g.instances.length]}
               count={g.instances.length}
               frustumCulled={false}
-            >
-              {geomFor(g.key)}
-              {/* Matte to match the site — no clearcoat gloss; form comes from diffuse shading only. */}
-              <meshStandardMaterial roughness={0.92} metalness={0} />
-            </instancedMesh>
+              castShadow
+              receiveShadow
+            />
           </InstancedRigidBodies>
         );
       })}
@@ -654,6 +985,7 @@ export default function FloatingBackground({
   light = false,
   active = true,
   pour = true,
+  rig,
 }: {
   /** One per dated commit in the grid's window, oldest first; the level is the day's. */
   pieces: readonly Piece[];
@@ -665,17 +997,34 @@ export default function FloatingBackground({
   active?: boolean;
   /** The tray itself is on screen — the pour waits for it so it is seen, not inferred. */
   pour?: boolean;
+  /** The card's shared pointer; without one the camera holds its rest pose. */
+  rig?: PointerRig;
 }) {
+  const localRig = useMemo(() => createPointerRig(), []);
+  // Measured step-down, held as Canvas props: R3F re-asserts its `dpr` prop on every
+  // Canvas render, so a setDpr() from inside the loop would be undone by the next theme
+  // flip. Tier 1 drops to DPR 1, tier 2 also drops the ContactShadows passes.
+  const [tier, setTier] = useState(0);
+  const debug = useMemo<Debug | null>(() => {
+    if (typeof window === "undefined") return null;
+    const q = new URLSearchParams(window.location.search);
+    return q.has("pileDebug") ? { probe: q.has("pileProbe") } : null;
+  }, []);
   return (
     <Canvas
-      dpr={[1, 1.5]}
+      dpr={tier >= 1 ? 1 : [1, 2]}
+      shadows="soft"
       // "demand": rapier invalidate()s once per active body after each step, so the drop and
       // every shove sustain the loop themselves and the settled, sleeping pile costs nothing.
       // "never" while the card is offscreen — rapier steps inside useFrame, so this parks the
       // world too, and the pile resumes exactly where it froze instead of raining in again.
       frameloop={active ? "demand" : "never"}
-      gl={{ alpha: true, antialias: true }}
-      camera={{ position: [0, 0, 11], fov: 45 }}
+      // Neutral tone mapping: ACES (R3F's default) and AgX both pull the brand blue toward a
+      // primary and halve its saturation (#3b82f6 → S 0.52 under AgX); Khronos Neutral is the
+      // identity below 0.76 and keeps H ±3°, S ±0.06, so the pile's level-4 tops land on the
+      // board's cell colour. Exposure is the theme knob.
+      gl={{ alpha: true, antialias: true, toneMapping: THREE.NeutralToneMapping, toneMappingExposure: light ? 1.05 : 0.95 }}
+      camera={{ fov: CAMERA.FOV, near: CAMERA.NEAR, far: CAMERA.FAR, position: [0, 11, 13] }}
       onCreated={({ gl }) => {
         gl.domElement.addEventListener("webglcontextlost", (e) => e.preventDefault());
       }}
@@ -683,23 +1032,24 @@ export default function FloatingBackground({
       // and the default arrow said nothing about it.
       style={{ width: "100%", height: "100%", cursor: "grab" }}
     >
-      {/* There is ONE key light on this site and it sits up and to the RIGHT — the direction
-          the heatmap's extruded bars (CommitHeatmap FACE_LIT/FACE_SHADE) and the hero's caustic
-          are painted for. [6, 8, 2.5] normalises to 0.58/0.78/0.24, so an upright box reads
-          top 1 : right 0.78 : front 0.42 under the dark rig (2.0 + 0.3 ambient) — the bars'
-          1 : 0.78 : 0.46 within four points, and blocks and bars become one lit set. The old
-          four-light rig had a directional fill from the lower LEFT that alone added 0.27 to
-          every camera-facing face and pushed FRONT above TOP (1.96 top / 2.04 front): the flat
-          blue mass in the production screenshots. Its two point lights were near no-ops at
-          three's physical 1/d² decay (≈1% of the key; the accent one sat behind the pile). */}
-      <ambientLight intensity={light ? 0.45 : 0.3} />
-      <directionalLight position={[6, 8, 2.5]} intensity={light ? 1.4 : 2.0} />
       <Suspense fallback={null}>
         {/* interpolate is off: react-three-rapier only lerps the `mesh` branch — an instanced
             body is written straight from the step (esm.js "instancedMesh" → setMatrix) — so the
-            flag bought nothing but a translation()+rotation() snapshot of every body per step. */}
-        <Physics gravity={[0, -12, 0]} timeStep={1 / 60} interpolate={false} numSolverIterations={12} numInternalPgsIterations={1}>
-          <Pile pieces={pieces} accent={accent} card={card} light={light} visible={active} pour={pour} />
+            flag bought nothing but a translation()+rotation() snapshot of every body per step.
+            12 solver iterations were tuned for the stacked heap; kept until measured. */}
+        <Physics gravity={[0, -WORLD.G, 0]} timeStep={1 / 60} interpolate={false} numSolverIterations={12} numInternalPgsIterations={1}>
+          <Pile
+            pieces={pieces}
+            accent={accent}
+            card={card}
+            light={light}
+            visible={active}
+            pour={pour}
+            rig={rig ?? localRig}
+            contact={tier < 2}
+            onDegrade={() => setTier((t) => Math.min(2, t + 1))}
+            debug={debug}
+          />
         </Physics>
       </Suspense>
     </Canvas>

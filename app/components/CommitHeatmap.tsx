@@ -6,7 +6,8 @@ import { motion, useMotionValue, useSpring, useTransform, useReducedMotion } fro
 import { GitCommit, Code, Github, Flame, Zap } from "lucide-react";
 import { useTheme } from "./ThemeProvider";
 import { buildDayWindow, currentStreak, utcDayKey, type CommitDay } from "../lib/githubStats";
-import { TRAY, capPieces, fillScale, levelFor, piecesForDays } from "../lib/commitPile";
+import { TRAY, capPieces, levelFor, piecesForDays, trayFit } from "../lib/commitPile";
+import { createPointerRig } from "../lib/pointerRig";
 
 // Interactive physics pile — client-only, lazy (three.js + rapier off the initial bundle).
 const FloatingBackground = dynamic(() => import("./FloatingBackground"), { ssr: false });
@@ -66,13 +67,17 @@ const LEVELS = [
 const CELL = 15;
 const GAP = 5;
 const STEP = CELL + GAP;
-const BASE_TILT_X = 52; // 3/4 skyline tilt
-// The tray's column: `gap-x-8` between the board column and the tray, and the tray's fixed
-// height in world units — R3F's viewport half-height at fov 45 from z 11 — so the DOM can run
-// the pile's own fill rule on the tray the grid WOULD give, before mounting a canvas.
+// The board and the tray beside it are one turned tabletop seen through one lens. The tray's
+// camera is a 13° lens at 40° elevation (pileScene.CAMERA); the CSS equivalent of that lens
+// on the 273 px tray is (273/2)/tan(6.5°) ≈ 1200 px, and 90 − rotateX is the board's
+// elevation, so 50° puts its face at the tray's 40°. The old pair — perspective 900 at
+// rotateX 52 beside a fov-45 eye-level pile — converged at 2× different rates 32 px apart,
+// which is what "a bit distorted" was.
+const PERSPECTIVE_PX = 1200;
+const BASE_TILT_X = 50;
+// The tray's column: `gap-x-8` between the board column and the tray.
 const TRAY_GAP = 32;
-const TRAY_HH = Math.tan((45 / 2) * Math.PI / 180) * 11;
-const BASE_ROT_Y = -26; // horizontal turn — staggers columns so fewer bars hide
+const BASE_ROT_Y = -14; // horizontal turn — staggers columns so fewer bars hide
 
 export default function SiteStats() {
   const [commitData, setCommitData] = useState<Map<string, number>>(new Map());
@@ -120,9 +125,13 @@ export default function SiteStats() {
     if (node) {
       const warm = new IntersectionObserver(([e]) => {
         if (!e.isIntersecting) return;
+        warm.disconnect();
+        // Only where a canvas can mount at all (the use3D gates, read directly — this ref
+        // callback is created once): a phone or a reduced-motion visitor was downloading the
+        // ~1 MB pile chunk for a tray that never exists.
+        if (window.innerWidth < 640 || !window.matchMedia("(hover: hover) and (pointer: fine)").matches || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
         // A failed warm is only a lost head start: dynamic() fetches again at mount and reports.
         import("./FloatingBackground").catch(() => {});
-        warm.disconnect();
       }, { rootMargin: "200% 0px" });
       warm.observe(node);
       warmObserver.current = warm;
@@ -143,7 +152,7 @@ export default function SiteStats() {
     trayObserver.current = null;
     if (!node) {
       // The tray is taken away and given back — the ResizeObserver below drops it when
-      // the block narrows past TRAY.kLegible and restores it when it widens — and this
+      // the block narrows past the legibility gate and restores it when it widens — and this
       // state outlived the node that produced it. The next mount was handed the OLD
       // answer for the frame or two before the fresh observer's first callback, so a tray
       // reappearing off-screen could be told to pour where nobody could see it.
@@ -167,12 +176,19 @@ export default function SiteStats() {
     }
   }, []);
 
-  // Cursor-parallax tilt for the 3D bar chart (drives the board only).
+  // ONE pointer rig for the whole card drives both the board's tilt springs and the tray's
+  // camera drift, on the same ~0.35 s time constant (stiffness 50 / damping 14 / mass 1 is
+  // critically damped at ω 7; the pile uses maath damp3 at smoothTime 0.35). The two halves
+  // used to answer separate listeners with separate clocks — the board only over the board,
+  // the tray only over the canvas — and never moved together. Ranges are half the old ones:
+  // the tray's yaw is ±3°, and a board swinging ±8° beside it read as a different object.
   const px = useMotionValue(0);
   const py = useMotionValue(0);
-  const springCfg = { stiffness: 120, damping: 18, mass: 0.4 };
-  const rotateX = useSpring(useTransform(py, [-0.5, 0.5], [BASE_TILT_X + 5, BASE_TILT_X - 6]), springCfg);
-  const rotateY = useSpring(useTransform(px, [-0.5, 0.5], [BASE_ROT_Y - 8, BASE_ROT_Y + 8]), springCfg);
+  const springCfg = { stiffness: 50, damping: 14, mass: 1 };
+  const rotateX = useSpring(useTransform(py, [-0.5, 0.5], [BASE_TILT_X + 2.5, BASE_TILT_X - 3]), springCfg);
+  const rotateY = useSpring(useTransform(px, [-0.5, 0.5], [BASE_ROT_Y - 4, BASE_ROT_Y + 4]), springCfg);
+  // Mutated in place, read by the pile's frame loop — no re-render per pointer move.
+  const rig = useMemo(() => createPointerRig(), []);
 
   useEffect(() => {
     setMounted(true);
@@ -287,14 +303,18 @@ export default function SiteStats() {
 
   const boardW = weeksToShow * STEP - GAP;
   const boardH = 7 * STEP - GAP;
-  const onBoardMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+  const onCardMove = (e: ReactPointerEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    px.set((e.clientX - rect.left) / rect.width - 0.5);
-    py.set((e.clientY - rect.top) / rect.height - 0.5);
+    const x = (e.clientX - rect.left) / rect.width - 0.5;
+    const y = (e.clientY - rect.top) / rect.height - 0.5;
+    px.set(x);
+    py.set(y);
+    rig.move(x, y);
   };
   const resetTilt = () => {
     px.set(0);
     py.set(0);
+    rig.leave();
   };
   const dayTitle = (day: CommitDay) =>
     `${day.date} (UTC): ${day.count} commit${day.count !== 1 ? "s" : ""}`;
@@ -311,31 +331,31 @@ export default function SiteStats() {
     : stats.truncated
       ? `Commit activity (UTC days) — most recent ${windowCommits} commit${plural}; older days not shown${snapshotNote}`
       : `Commit activity for ${span} (UTC days) — ${windowCommits} commit${plural}${snapshotNote}`;
-  // Does the tray the grid would give hold legible pieces? Run the pile's fill rule on it:
-  // the tray is the block minus the board column and the gap, as tall as the block, and the
-  // camera is fixed so its height in world units is always TRAY_HH. Below TRAY.kLegible the
-  // blocks would be under ~10 px, so the tray is hidden and the block is one column rather
-  // than an overfilled tray sliced by its own clip (today's 165 commits need ~470 px of
-  // tray, a ~850 px viewport). A 0.05 band of hysteresis so a drag across the edge does not
-  // mount and unmount a WebGL context on every pixel. (setState during render is React's
-  // pattern for state that follows other state; an effect would cascade.)
+  // Does the tray the grid would give hold legible pieces? Run the pile's own camera fit on
+  // it: the tray is the block minus the board column and the gap, as tall as the block; the
+  // pieces' scale follows the commits alone (the coverage rule), and the fit says how many
+  // pixels a world unit gets on that tray. Under 10 px for the narrowest box the tray is
+  // hidden and the block is one column rather than an overfilled tray sliced by its own clip
+  // (today's 192 commits are legible down to a ~490 px tray column, a ~870 px viewport). A
+  // half-pixel band of hysteresis so a drag across the edge does not mount and unmount a
+  // WebGL context on every pixel — on the PIXEL size, not on k: k follows the commits alone
+  // now, and a +0.05 band on it made the 900 px card (10.9 px boxes) never mount at all.
+  // (setState during render is React's pattern for state that follows other state; an
+  // effect would cascade.)
   const trayW = blockSize ? blockSize.w - boardW - TRAY_GAP : 0;
   const trayH = blockSize ? blockSize.h : 0;
-  const kFit = useMemo(
-    () => (trayW > 0 && trayH > 0 ? fillScale(TRAY_HH * (trayW / trayH), TRAY_HH, pieces) : 0),
-    [trayW, trayH, pieces],
-  );
-  const wantTray = trayShown ? kFit >= TRAY.kLegible : kFit >= TRAY.kLegible + 0.05;
+  const fit = useMemo(() => (trayW > 0 && trayH > 0 ? trayFit(trayW, trayH, pieces) : null), [trayW, trayH, pieces]);
+  const wantTray = fit !== null && fit.headroomOk && fit.boxPx >= TRAY.minPx - (trayShown ? 0.5 : 0);
   if (wantTray !== trayShown) setTrayShown(wantTray);
   // The pile is a second reading of the same window, so it exists only when the window is
   // known, there is something to pour, and the tray fits; without it the activity block is
   // one column, as it is for every non-3D visitor.
   //
   // `pieces.length > 0` is the case the other two gates miss. A window that is KNOWN and
-  // genuinely holds no commit is a real state — twelve quiet weeks — and fillScale returns
-  // 1 for an empty pile (no area to fit, so nothing constrains the scale), which clears
-  // TRAY.kLegible and opened an empty tray beside the board under a legend reading "one
-  // block per commit … push them", with nothing in it to push.
+  // genuinely holds no commit is a real state — twelve quiet weeks — and the fill rule
+  // returns k 1 for an empty pile (no footprint to fit, so nothing constrains the scale),
+  // which clears the legibility gate and opened an empty tray beside the board under a
+  // legend reading "one block per commit … push them", with nothing in it to push.
   const showTray = use3D && windowKnown && pieces.length > 0 && trayShown;
   // The legend states the encoding, and the cut when there is one.
   const cut = pile.total > pieces.length ? ` · ${pieces.length} of ${pile.total} shown` : "";
@@ -354,6 +374,9 @@ export default function SiteStats() {
           viewport={{ once: true }}
           transition={{ duration: 0.5 }}
           className="glass p-6 sm:p-8 pointer-events-auto"
+          // the one pointer rig (board tilt + tray drift) listens on the card, not its halves
+          onPointerMove={onCardMove}
+          onPointerLeave={resetTilt}
         >
           {/* Content — pointer-events pass THROUGH except on interactive bits */}
           <div className="relative z-10 pointer-events-none">
@@ -435,9 +458,7 @@ export default function SiteStats() {
                           look changed with the window. */}
                       <div
                         className="relative pointer-events-auto"
-                        style={{ width: boardW, paddingTop: 64, paddingBottom: 14, perspective: 900, perspectiveOrigin: "50% 50%" }}
-                        onPointerMove={onBoardMove}
-                        onPointerLeave={resetTilt}
+                        style={{ width: boardW, paddingTop: 64, paddingBottom: 14, perspective: PERSPECTIVE_PX, perspectiveOrigin: "50% 50%" }}
                         role="img"
                         aria-label={boardLabel}
                       >
@@ -453,7 +474,9 @@ export default function SiteStats() {
                                   aria-hidden
                                   title={dayTitle(day)}
                                   className="absolute cursor-default"
-                                  style={{ left: weekIndex * STEP, top: dayIndex * STEP, width: CELL, height: CELL, transformStyle: "preserve-3d", opacity: 0.82 }}
+                                  // opaque: a translucent bar beside a lit, shadowed tray was the
+                                  // single loudest "vector chart" cue on the card
+                                  style={{ left: weekIndex * STEP, top: dayIndex * STEP, width: CELL, height: CELL, transformStyle: "preserve-3d" }}
                                   initial={{ z: -26 }}
                                   whileInView={{ z: 0 }}
                                   viewport={{ once: true }}
@@ -461,6 +484,9 @@ export default function SiteStats() {
                                   transition={{ delay: 0.1 * weekIndex, type: "spring", stiffness: 260, damping: 22 }}
                                   whileHover={{ z: 18, scale: 1.08 }}
                                 >
+                                  {/* the bar's shadow on the board, thrown down-left away from the
+                                      upper-right key — the same direction the tray's shadows fall */}
+                                  <div className="absolute inset-0 rounded-[2px]" style={{ boxShadow: `-3px 4px 6px rgba(0,0,0,${resolvedTheme === "light" ? 0.18 : 0.35})` }} />
                                   <div className="absolute inset-0 rounded-[2px]" style={{ background: lvl.top, transform: `translateZ(${lvl.h}px)` }} />
                                   {/* front face — turned away from the key light */}
                                   <div className="absolute left-0 bottom-0" style={{ width: CELL, height: lvl.h, background: lvl.shade, transformOrigin: "bottom", transform: "rotateX(-90deg)" }} />
@@ -514,6 +540,7 @@ export default function SiteStats() {
                           light={resolvedTheme === "light"}
                           active={bgVisible}
                           pour={trayInView}
+                          rig={rig}
                         />
                       )}
                       <span className="absolute left-3 right-3 top-2 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--legend)] pointer-events-none select-none">
