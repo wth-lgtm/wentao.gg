@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { TimePeriod } from "../lib/types";
-import { UPSTREAM_HOST } from "../lib/config";
+import { SWR_S, UPSTREAM_HOST } from "../lib/config";
+import type { LeaderboardSnapshot } from "../hooks/useLeaderboard";
 
 // Replaces the banner that used to sit here reading "Still tuning the API
 // integration" in bg-red-500/10 error styling — a demo announcing itself as
@@ -11,8 +12,9 @@ import { UPSTREAM_HOST } from "../lib/config";
 // Every value on this rail traces to something already in memory. Nothing is
 // invented: rows scanned is the real upstream row count, TTL is the real
 // s-maxage on our own route, and the age counts real seconds since the snapshot.
-// The status word is IDLE or FETCHING, never "POLL" — there is no poller, and
-// naming one would invent machinery.
+// The status word is IDLE, FETCHING or UNCHANGED, never "POLL" — there is still no
+// poller (the hook refetches on expiry and on the tab coming forward, not on an
+// interval), and naming one would invent machinery.
 
 const WINDOW_LABEL: Record<TimePeriod, string> = {
   "1d": "24H",
@@ -20,15 +22,6 @@ const WINDOW_LABEL: Record<TimePeriod, string> = {
   "30d": "30D",
   allTime: "ALL",
 };
-
-// Mirrors SWR_S in app/api/hl-leaderboard/route.ts, the
-// `stale-while-revalidate` on our own Cache-Control. Duplicated rather than imported
-// because Next's route type plugin rejects any non-handler export from a route file —
-// the same reason TTL_S already lives in lib/config.ts. Until the TTL passes, the
-// snapshot is current; for SWR_S after that the CDN is still contracted to serve it
-// while it revalidates. Only past TTL + SWR is nothing guaranteeing the reading, which
-// is the first moment the rail can honestly call it stale.
-const SWR_SECONDS = 900;
 
 // Past an hour the age used to print "60:00", then "125:07" — `Math.floor(s/60)` with
 // no hours term, so a tab left open showed a minutes field that had stopped being one.
@@ -46,7 +39,13 @@ function formatAge(seconds: number): string {
  * whole page. aria-live is explicitly off: a clock inside a live region would
  * interrupt a screen reader every second, forever.
  */
-function SnapshotAge({ since, ttlSeconds }: { since: number | null; ttlSeconds: number | null }) {
+function SnapshotAge({
+  snapshot,
+  ttlSeconds,
+}: {
+  snapshot: LeaderboardSnapshot | null;
+  ttlSeconds: number | null;
+}) {
   // Elapsed SECONDS live in state; the label is pure formatting. Two things are
   // deliberately avoided here, both of which React 19's lint catches and both of
   // which are real violations rather than noise:
@@ -57,31 +56,45 @@ function SnapshotAge({ since, ttlSeconds }: { since: number | null; ttlSeconds: 
   const [seconds, setSeconds] = useState<number | null>(null);
 
   useEffect(() => {
-    if (since === null) {
+    if (snapshot === null) {
       return;
     }
-    const sample = () => setSeconds(Math.max(0, Math.floor((Date.now() - since) / 1000)));
+    // The CDN's own age at the moment the body landed, plus our own elapsed time since
+    // — one clock on each side of the subtraction. This used to be
+    // `Date.now() - body.updatedAt`, which straddles two clocks: a visitor running
+    // three minutes behind the server was shown a fresh 00:00 over a snapshot that was
+    // genuinely three minutes old. See LeaderboardSnapshot in useLeaderboard.
+    const sample = () =>
+      setSeconds(
+        Math.max(
+          0,
+          Math.floor(
+            (snapshot.ageAtReceipt + (Date.now() - snapshot.receivedAt)) / 1000
+          )
+        )
+      );
     const frame = requestAnimationFrame(sample);
     const id = setInterval(sample, 1000);
     return () => {
       cancelAnimationFrame(frame);
       clearInterval(id);
     };
-  }, [since]);
+  }, [snapshot]);
 
   const label = seconds === null ? "--:--" : formatAge(seconds);
 
   // Only claimable when the TTL is known: with ttlSeconds === null there is no window
   // to be outside of, and a guessed staleness is worse than none.
-  const stale = seconds !== null && ttlSeconds !== null && seconds > ttlSeconds + SWR_SECONDS;
+  const stale = seconds !== null && ttlSeconds !== null && seconds > ttlSeconds + SWR_S;
 
   return (
     <span className="inline-flex items-baseline gap-1.5" aria-live="off">
       <span className={`tabular-nums ${stale ? "text-[var(--legend)]" : ""}`}>{label}</span>
       {/* Not a colour swap alone — the rail's own sign convention is that a state is
-          always carried by something you can read. Nothing here auto-refetches: the
-          route serves the same CDN snapshot until it revalidates, so REFRESH is the
-          action and this is the invitation. */}
+          always carried by something you can read. Reaching this word now takes a tab
+          that was hidden for the whole TTL + SWR window: the hook refetches once the
+          snapshot passes its TTL and again whenever the tab comes forward, so a
+          foreground reader should never see it. */}
       {stale ? <span className="text-[var(--legend)]">STALE</span> : null}
     </span>
   );
@@ -118,17 +131,20 @@ function Field({
 
 export default function SoundingRail({
   refreshing,
+  unchanged,
   rowsSeen,
   surfaced,
   period,
-  updatedAt,
+  snapshot,
   ttlSeconds,
 }: {
   refreshing: boolean;
+  /** A refresh answered with the body already on screen. Transient — see useLeaderboard. */
+  unchanged: boolean;
   rowsSeen: number | null;
   surfaced: number;
   period: TimePeriod;
-  updatedAt: number | null;
+  snapshot: LeaderboardSnapshot | null;
   ttlSeconds: number | null;
 }) {
   return (
@@ -136,9 +152,15 @@ export default function SoundingRail({
       className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-border bg-card px-3 py-2 font-mono text-[11px] uppercase tracking-[0.16em]"
       style={{ borderTopColor: "var(--engrave-hi)" }}
     >
+      {/* Three readings, and only one of them is activity. A refresh inside the cache
+          window is answered by the CDN with the body already on screen, so the spinner
+          used to imply work that could not change anything; UNCHANGED is what actually
+          happened. It stays foreground rather than accent because it is a result, not
+          a state the instrument is in — the word carries it, which is this rail's own
+          rule. */}
       <Field label="STATE">
         <span className={refreshing ? "text-accent" : "text-foreground/85"}>
-          {refreshing ? "FETCHING" : "IDLE"}
+          {refreshing ? "FETCHING" : unchanged ? "UNCHANGED" : "IDLE"}
         </span>
       </Field>
       {/* Scanned is hidden first on narrow screens — it is context, not a reading. */}
@@ -159,7 +181,7 @@ export default function SoundingRail({
           sr-only gloss. AGE says it on the surface, and on a phone it is the only
           freshness signal at all, since TTL is hidden below sm. */}
       <Field label="AGE" gloss="time since this data was fetched">
-        <SnapshotAge since={updatedAt} ttlSeconds={ttlSeconds} />
+        <SnapshotAge snapshot={snapshot} ttlSeconds={ttlSeconds} />
       </Field>
       <Field label="TTL" gloss="seconds this snapshot is cached for" className="hidden sm:flex">
         <span className="tabular-nums">{ttlSeconds === null ? "—" : `${ttlSeconds}s`}</span>

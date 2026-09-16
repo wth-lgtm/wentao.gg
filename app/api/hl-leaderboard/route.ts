@@ -3,7 +3,7 @@ import {
   fetchLeaderboard,
   mapAllPeriods,
 } from "@/app/projects/hl-whale-tracker/lib/hyperliquid";
-import { TTL_S } from "@/app/projects/hl-whale-tracker/lib/config";
+import { SWR_S, TTL_S } from "@/app/projects/hl-whale-tracker/lib/config";
 
 // Reduces Hyperliquid's leaderboard to the top 50 per period, server-side.
 //
@@ -20,7 +20,6 @@ import { TTL_S } from "@/app/projects/hl-whale-tracker/lib/config";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const SWR_S = 900;
 const UPSTREAM_TIMEOUT_MS = 20_000;
 
 export async function GET() {
