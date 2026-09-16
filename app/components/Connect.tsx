@@ -2,6 +2,7 @@
 
 import { motion } from "framer-motion";
 import { Mail, Github, Linkedin } from "lucide-react";
+import { numberOf } from "./sections";
 
 const socialLinks = [
   {
@@ -33,15 +34,19 @@ export default function Connect() {
           className="text-center mb-12"
         >
           <div className="flex items-center justify-center gap-3 mb-3">
-            <span className="font-mono text-xs tracking-[0.25em] text-muted">04</span>
+            <span className="font-mono text-xs tracking-[0.25em] text-muted">{numberOf("connect")}</span>
             <span className="h-px w-12 bg-border" />
           </div>
           <h2 className="text-3xl md:text-4xl font-bold mb-6 tracking-tight heading-legible">
-            Let&apos;s Connect
+            Say hello
           </h2>
+          {/* The hero CTA and the nav footer both land here, so this paragraph is the
+              site's actual pitch. Facts come from layout.tsx's DESCRIPTION — the title is
+              "Engineering Lead on Mercor's Applied AI team", not an upgrade of it. */}
           <p className="text-muted text-lg max-w-2xl mx-auto text-legible">
-            I&apos;m always open to discussing new opportunities, interesting projects,
-            or just having a chat about technology. Feel free to reach out!
+            Engineering Lead on Mercor&apos;s Applied AI team, in San Francisco; evenings go to
+            things like the whale tracker above. If you&apos;re building data infrastructure,
+            want to argue about a leaderboard, or are in SF and want coffee — email is fastest.
           </p>
         </motion.div>
 

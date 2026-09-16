@@ -37,17 +37,6 @@ const countryNames: Record<string, string> = {
   PH: "Philippines", ID: "Indonesia", MY: "Malaysia", ZA: "South Africa", AE: "UAE", IL: "Israel", TR: "Turkey",
 };
 
-// Time period detection
-function getTimePeriod(hour: number): string {
-  if (hour >= 5 && hour < 9) return "early_morning";
-  if (hour >= 9 && hour < 12) return "morning";
-  if (hour >= 12 && hour < 14) return "midday";
-  if (hour >= 14 && hour < 17) return "afternoon";
-  if (hour >= 17 && hour < 21) return "evening";
-  if (hour >= 21 && hour < 24) return "night";
-  return "late_night";
-}
-
 export function proxy(request: NextRequest) {
   const response = NextResponse.next();
 
@@ -58,7 +47,6 @@ export function proxy(request: NextRequest) {
   const region = request.headers.get("x-vercel-ip-country-region") || "";
   const rawCity = request.headers.get("x-vercel-ip-city") || "";
   const city = rawCity ? decodeURIComponent(rawCity) : "";
-  const timezone = request.headers.get("x-vercel-ip-timezone") || "America/New_York";
 
   // Visitor's own IP + approximate coordinates (Vercel edge headers). Echoed back to
   // that visitor only (client-side) for the "how do you know that?!" delight moment —
@@ -69,27 +57,9 @@ export function proxy(request: NextRequest) {
   const lat = request.headers.get("x-vercel-ip-latitude") || "";
   const lon = request.headers.get("x-vercel-ip-longitude") || "";
 
-  // Calculate local hour based on timezone
-  let hour = new Date().getUTCHours();
-  try {
-    const formatter = new Intl.DateTimeFormat("en-US", {
-      timeZone: timezone,
-      hour: "numeric",
-      hour12: false,
-    });
-    const parts = formatter.formatToParts(new Date());
-    const hourPart = parts.find(p => p.type === "hour");
-    if (hourPart) {
-      hour = parseInt(hourPart.value, 10);
-      // Handle midnight (some locales return 24)
-      if (hour === 24) hour = 0;
-    }
-  } catch {
-    // Fallback to UTC if timezone is invalid
-  }
-
-  // Build location data
-  const timePeriod = getTimePeriod(hour);
+  // Build location data. No `timePeriod`: the edge used to read x-vercel-ip-timezone and
+  // build an Intl.DateTimeFormat on EVERY request to / to bucket the visitor's local hour,
+  // and nothing ever read the result — the card and the greeting both ignore it.
   const countryEmoji = countryEmojis[country] || "";
   const countryName = country === "US" ? "USA" : (countryNames[country] || country);
 
@@ -118,7 +88,6 @@ export function proxy(request: NextRequest) {
 
   // Send structured data as JSON for client-side greeting generation
   const greetingData = JSON.stringify({
-    timePeriod,
     location: locationString,
     city, // raw city (may be "") — lets the client tell "real city" from "country only"
     cc: country, // ISO country code — lets the card pick miles vs km before /api/geo answers

@@ -4,6 +4,7 @@ import { motion, useScroll, useTransform } from "framer-motion";
 import { useRef } from "react";
 import { MapPin, Calendar } from "lucide-react";
 import Image from "next/image";
+import { numberOf } from "./sections";
 
 interface Degree {
   degreeType: string;
@@ -220,7 +221,7 @@ export default function Education() {
           className="mb-12"
         >
           <div className="flex items-center gap-3 mb-3">
-            <span className="font-mono text-xs tracking-[0.25em] text-muted">02</span>
+            <span className="font-mono text-xs tracking-[0.25em] text-muted">{numberOf("education")}</span>
             <span className="h-px w-12 bg-border" />
           </div>
           <h2 className="text-3xl md:text-4xl font-bold tracking-tight heading-legible">Education</h2>

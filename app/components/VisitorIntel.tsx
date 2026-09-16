@@ -9,7 +9,9 @@ import { HOME, formatDistance, greatCircleKm, isLatLon } from "../lib/telemetry"
 
 // A browser-side geo lookup used as a FALLBACK when Vercel's edge geo headers come back
 // thin (common for VPNs / mobile carriers / IPv6 — you get an IP but no city). The visitor
-// resolves their OWN IP; nothing is stored.
+// resolves their OWN IP and nothing is stored here, but the lookup itself is third-party:
+// the IP reaches ip-api via /api/geo and then ipinfo / ipwho.is / geojs directly from the
+// browser, which is why the card's caption names them.
 interface ApiGeo {
   ip: string;
   location: string;
@@ -216,8 +218,12 @@ export default function VisitorIntel() {
       ? "triangulating…"
       : "classified \u{1F575}\u{FE0F}";
 
+  // The old caption ("no logs, just vibes") was true about THIS site and silent about the
+  // chain below it: resolving the city hands the visitor's IP to ip-api and, when that comes
+  // back thin, to ipinfo / ipwho.is / geojs. A card whose whole appeal is that it tells you
+  // the truth has to name them.
   const caption = hasCity
-    ? "no logs, just vibes \u{1F91D}"
+    ? "ip-api, ipinfo, ipwho or geojs resolved that — nothing stored here \u{1F91D}"
     : stillLooking
       ? "reading the tea leaves…"
       : "your city's playing hard to get — nice privacy \u{1F576}\u{FE0F}";
@@ -244,29 +250,29 @@ export default function VisitorIntel() {
       {/* Readout */}
       <dl className="space-y-1.5 text-xs">
         <div className="flex items-baseline gap-3">
-          <dt className="w-9 shrink-0 text-muted/60">IP</dt>
+          <dt className="w-9 shrink-0 text-legend">IP</dt>
           <dd className="min-w-0 break-all font-semibold text-accent">
             {ip ? (
               <ScrambleText text={ip} scrambleSpeed={18} revealSpeed={14} />
             ) : (
-              <span className="font-normal text-muted/70">hidden {"\u{1F575}\u{FE0F}"}</span>
+              <span className="font-normal text-legend">hidden {"\u{1F575}\u{FE0F}"}</span>
             )}
           </dd>
         </div>
         {isp && (
           <div className="flex items-baseline gap-3">
-            <dt className="w-9 shrink-0 text-muted/60">ISP</dt>
+            <dt className="w-9 shrink-0 text-legend">ISP</dt>
             <dd className="min-w-0 break-words text-foreground/85">{isp}</dd>
           </div>
         )}
         {org && org !== isp && (
           <div className="flex items-baseline gap-3">
-            <dt className="w-9 shrink-0 text-muted/60">ORG</dt>
+            <dt className="w-9 shrink-0 text-legend">ORG</dt>
             <dd className="min-w-0 break-words text-foreground/85">{org}</dd>
           </div>
         )}
         <div className="flex items-baseline gap-3">
-          <dt className="w-9 shrink-0 text-muted/60">NEAR</dt>
+          <dt className="w-9 shrink-0 text-legend">NEAR</dt>
           <dd className="min-w-0 break-words text-foreground/85">{cityDisplay}</dd>
         </div>
         {/* How far Wentao is from you — derived from the fix already in hand, so no extra
@@ -277,10 +283,10 @@ export default function VisitorIntel() {
             em dash once the probe is finished and empty — a gauge that reads "resolving"
             forever is a broken gauge. */}
         <div className="flex items-baseline gap-3">
-          <dt className="w-9 shrink-0 text-muted/60">DIST</dt>
+          <dt className="w-9 shrink-0 text-legend">DIST</dt>
           <dd className="min-w-0 text-foreground/85">
             {distance ?? (
-              <span className={stillLooking ? "text-muted/50" : "text-muted/40"}>—</span>
+              <span className="text-legend">—</span>
             )}
           </dd>
         </div>
@@ -303,7 +309,7 @@ export default function VisitorIntel() {
       )}
 
       {/* Disarming caption */}
-      <p className="mt-2 text-[11px] text-muted/60">{caption}</p>
+      <p className="mt-2 text-[11px] text-legend">{caption}</p>
     </div>
   );
 }

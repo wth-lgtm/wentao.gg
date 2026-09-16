@@ -108,6 +108,9 @@
   --color-card: var(--card);
   --color-card-hover: var(--card-hover);
   --color-border: var(--border);
+  --color-legend: var(--legend);
+  --color-gain: var(--gain);
+  --color-loss: var(--loss);
   --font-sans: var(--font-space-grotesk);
   --font-mono: var(--font-jetbrains-mono);
 }

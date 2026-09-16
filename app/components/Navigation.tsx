@@ -1,19 +1,15 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { X } from "lucide-react";
 import Link from "next/link";
 import ThemeToggle from "./ThemeToggle";
+import { SECTIONS } from "./sections";
 
-// One index, numbered — the overlay is the whole navigation (mobile + desktop).
-const sections = [
-  { n: "01", name: "About", href: "#about" },
-  { n: "02", name: "Experience", href: "#experience" },
-  { n: "03", name: "Education", href: "#education" },
-  { n: "04", name: "Projects", href: "#projects" },
-  { n: "05", name: "Connect", href: "#connect" },
-];
+// One index, numbered — the overlay is the whole navigation (mobile + desktop). The list
+// itself lives in sections.ts so the page eyebrows print the same numbers.
+const sections = SECTIONS.map((s) => ({ ...s, href: `#${s.id}` }));
 
 // Projects fold inline under 04 — no separate dropdown.
 const projects: { name: string; href: string; comingSoon?: boolean }[] = [
@@ -29,6 +25,9 @@ export default function Navigation() {
   const [open, setOpen] = useState(false);
   const [clock, setClock] = useState("");
   const reduce = useReducedMotion() ?? false;
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const closeBtnRef = useRef<HTMLButtonElement>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
 
   // Owner's local time (SF) as ambient metadata — refreshed each half-minute.
   useEffect(() => {
@@ -45,16 +44,43 @@ export default function Navigation() {
     return () => clearInterval(id);
   }, []);
 
-  // Body scroll-lock + Escape to close while the overlay is open.
+  // Body scroll-lock, Escape, and the modal focus contract (ARIA APG): move focus in on
+  // open, keep Tab inside the overlay — it used to walk straight past it into <main> behind
+  // the frosted layer — and hand focus back to the INDEX button on close (WCAG 2.4.3).
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+
+    // One frame of slack so framer-motion has committed the overlay's entrance styles.
+    const raf = requestAnimationFrame(() => closeBtnRef.current?.focus());
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setOpen(false);
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const overlay = overlayRef.current;
+      if (!overlay) return;
+      const focusables = overlay.querySelectorAll<HTMLElement>("a[href], button:not([disabled])");
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement;
+      const outside = !(active instanceof Node) || !overlay.contains(active);
+      if (e.shiftKey ? outside || active === first : outside || active === last) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+      }
+    };
+
     document.addEventListener("keydown", onKey);
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
+      cancelAnimationFrame(raf);
       document.removeEventListener("keydown", onKey);
       document.body.style.overflow = prevOverflow;
+      openerRef.current?.focus();
     };
   }, [open]);
 
@@ -76,7 +102,10 @@ export default function Navigation() {
           <div className="pointer-events-auto flex items-center gap-3 md:gap-4 text-legible">
             <ThemeToggle />
             <button
-              onClick={() => setOpen(true)}
+              onClick={(e) => {
+                openerRef.current = e.currentTarget;
+                setOpen(true);
+              }}
               aria-label="Open menu"
               aria-expanded={open}
               className="group flex items-center gap-2.5"
@@ -98,6 +127,7 @@ export default function Navigation() {
       <AnimatePresence>
         {open && (
           <motion.div
+            ref={overlayRef}
             role="dialog"
             aria-modal="true"
             aria-label="Site menu"
@@ -118,6 +148,7 @@ export default function Navigation() {
                   W.
                 </a>
                 <button
+                  ref={closeBtnRef}
                   onClick={() => setOpen(false)}
                   aria-label="Close menu"
                   className="group flex items-center gap-2.5"
@@ -153,8 +184,13 @@ export default function Navigation() {
                       <div className="pl-11 md:pl-16 mt-2 flex flex-wrap items-center gap-x-5 gap-y-1.5">
                         {projects.map((p) =>
                           p.comingSoon ? (
-                            <span key={p.name} className="text-sm text-muted/50">
-                              {p.name} <span className="text-[10px] uppercase tracking-wider">soon</span>
+                            /* Unavailable is carried by the chip's shape, not by fading the
+                               label: text-muted/50 measured 2.28:1 dark / 1.97:1 light. */
+                            <span key={p.name} className="text-sm text-muted">
+                              {p.name}{" "}
+                              <span className="rounded border border-border px-1 text-[10px] uppercase tracking-wider text-legend">
+                                soon
+                              </span>
                             </span>
                           ) : (
                             <Link
