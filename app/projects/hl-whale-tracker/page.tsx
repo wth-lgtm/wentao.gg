@@ -102,7 +102,9 @@ function settledSentence({
  *                             where SRC is still hidden and the fields fit)
  *   rack       48       48
  *   filter     32       44
- *   table     596      338   (three card skeletons vs. a thead and five rows)
+ *   table    3282     2253   (the arming frame: fifty berth cards vs. a thead and
+ *                             fifty berths — rank is knowable before the request
+ *                             answers, so the placeholder is the hull's true height)
  *   footer     20       20
  *
  * It states no value. A placeholder reading "SURFACED 0" or "AGE --:--" would be the
@@ -119,7 +121,7 @@ function HullPlaceholder() {
           here would be MORE visible than the thing it stands in for and would flash
           out at hydration. */}
       <div className="mb-4 h-8 sm:h-11" />
-      <div className="h-[596px] rounded-xl border border-border bg-card sm:h-[338px]" />
+      <div className="h-[3282px] rounded-xl border border-border bg-card sm:h-[2253px]" />
       <div className="mt-4 h-5" />
     </div>
   );
@@ -307,7 +309,11 @@ function WhaleTracker() {
             </div>
           )}
 
-          <div className="bg-card rounded-xl border border-border overflow-hidden">
+          {/* overflow-clip, not overflow-hidden: hidden makes the card a scroll container,
+              and a sticky header sticks to the nearest one of those — this card never
+              scrolls, so the header sat 46px down inside it and covered berth 01. clip
+              still cuts the last berth's fill to the rounded corners. */}
+          <div className="bg-card rounded-xl border border-border overflow-clip">
             <LeaderboardTable
               traders={displayTraders}
               sortField={sortField}
@@ -318,6 +324,8 @@ function WhaleTracker() {
               selectedAddress={focused}
               onSelect={selectTrader}
               registerRow={registerRow}
+              periods={periods}
+              timePeriod={timePeriod}
             />
           </div>
         </div>
@@ -383,13 +391,19 @@ function WhaleTracker() {
 }
 
 export default function HLWhaleTracker() {
+  // --hl-header-h is the header below as rendered: py-3 (24) + the 28px title line + the
+  // 1px border = 46.59px, rounded down so the board's sticky thead tucks under the header
+  // by a sub-pixel instead of opening a gap. It lives on <main> because a custom property
+  // only inherits downward and the thead is the header's cousin, not its child.
+  // Re-measure when the header's padding, type size or border change.
   return (
-    <main className="min-h-screen bg-background">
-      {/* Header. No backdrop-blur: a full-width backdrop-filter re-rasterises on
-          every scroll frame, and later phases put a live canvas underneath it.
+    <main className="min-h-screen bg-background [--hl-header-h:46px]">
+      {/* Header. Opaque, and no backdrop-blur: the board's rows now scroll under it and
+          a 95% fill let them ghost through; a full-width backdrop-filter re-rasterises
+          on every scroll frame, and later phases put a live canvas underneath it.
           Three-column grid so the title is optically centred at every width
           rather than balanced against a fixed-width spacer. */}
-      <header className="sticky top-0 z-50 border-b border-border bg-background/95">
+      <header className="sticky top-0 z-50 border-b border-border bg-background">
         <div className="max-w-4xl mx-auto px-4 py-3 grid grid-cols-[1fr_auto_1fr] items-center">
           <Link
             href="/#projects"

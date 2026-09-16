@@ -124,9 +124,12 @@ html {
 }
 
 /* Only ever scroll vertically — no left/right swipe on phones even if a scroll-driven
-   transform or wide element briefly extends past the viewport edge. */
+   transform or wide element briefly extends past the viewport edge.
+   clip, not hidden: hidden made body a scroll container, so every position: sticky on
+   the site stuck to body and never moved (the whale page's header measured top -556px
+   after a 556px scroll, in production). clip cuts the same overflow and scrolls nothing. */
 html, body {
-  overflow-x: hidden;
+  overflow-x: clip;
   max-width: 100%;
 }
 
@@ -870,8 +873,58 @@ input:focus {
   border-bottom: 1px solid var(--engrave-lo);
   box-shadow: inset 0 1px 0 var(--engrave-hi);
 }
+/* The header stays put while the board scrolls under it. Sticky on the cells, not the
+   <thead>: Safari positions a sticky <th> reliably and a sticky <thead> not. `top` is
+   the page header's measured height (46.6px in next dev at both 640 and 1440), rounded
+   DOWN so the subpixel overlap tucks under the z-50 header instead of opening a gap
+   that shows rows through. Opaque --card fill and no backdrop-filter — a stuck header
+   over fifty scrolling rows re-rasterises every frame, and the plan bans it here. The
+   engraved rule is unchanged: the groove stays on the cell, and whichever row is
+   passing beneath still carries its own lit lip, so the pair reads as one cut at any
+   scroll offset.
+
+   Sticky obeys the nearest scroll-container ancestor, and one that never scrolls is
+   worse than none: `top` still applies, and this header sat 46px down the card over
+   berth 01 while three of them stood between it and the viewport — the wrapper's
+   overflow-x-auto, the card's overflow-hidden (page.tsx) and body's overflow-x: hidden.
+   All three now clip or are gone, so the header answers to the viewport. */
 .hl-board thead th {
+  position: sticky;
+  /* Set on the page's <main> (page.tsx) next to the header it measures. No fallback on
+     purpose: an unset token makes `top` invalid, and sticky with top: auto simply does
+     not stick — better than a guessed number that hides the header under the real one. */
+  top: var(--hl-header-h);
+  z-index: 1;
+  background: var(--card);
   border-bottom: 1px solid var(--engrave-lo);
+}
+
+/* THE STRUCTURAL GATE. hooks/useSurfaceTier.ts writes the tier onto the hull wrapper
+   that holds BOTH the table and the phone's card stack (a first cut wrote it on the
+   <table> alone, and the phone's odometers rolled at `seat` exactly as at `commit`).
+   Below `commit` the board is the designed still: the odometer strips print at their
+   final digit with no roll and no travel between values. This is the half CSS can
+   carry, which is why it is right on the very first paint; the other half — rows not
+   registered for the re-seat — is the table's. Independent of the reduced-motion media
+   rule further down, which covers only the visitor who asked: this also covers the
+   tablet, which has the width for the table and no pointer to hover it with.
+
+   Specificity is load-bearing: the entrance rule `.hl-odo-track[data-enter="true"]
+   .hl-odo-strip` is (0,3,0) and declared later, so a (0,3,0) gate lost to it and the
+   roll still ran at `seat`. `.hl-odo-track` in the chain makes this (0,4,0). */
+[data-surface]:not([data-surface="commit"]) .hl-odo-track .hl-odo-strip {
+  animation: none;
+  transition: none;
+}
+
+/* ARMING: the berths before the request answers. Same height lock and engraved cells
+   as a data row (both come from .hl-board above); no pointer cursor and no hover fill,
+   because there is nothing to select yet. */
+.hl-board tr[data-arming="true"] {
+  cursor: default;
+}
+.hl-berth-card[data-arming="true"] {
+  cursor: default;
 }
 
 /* A row is a berth you can select. The whole row is the target for a pointer; the
@@ -928,6 +981,29 @@ input:focus {
 .hl-plate[data-tier="2"] { font-weight: 600; }
 .hl-plate[data-tier="3"] { font-weight: 500; }
 .hl-plate[data-tier="4"] { font-weight: 400; color: var(--legend); }
+
+/* The delta plate: berths moved since the next-shorter window. Same mono and tracking
+   as the rank plate so the two read as one instrument, but no berth around it — it is
+   a reading, not a seat. Direction rides on three channels at once (glyph, tone,
+   numeral; see LeaderboardRow DeltaPlate). Up and down take their colour from the
+   --gain / --loss tone classes on the element; the rest is here. */
+.hl-delta {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.2em;
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+}
+/* Zero is a rest, not a figure: a middle dot in --muted, quieter than either direction.
+   Never the em dash — this repo reads that as "unknown" (Instrument.tsx `dash`), and an
+   unmoved berth is a known zero. The unknown tone below IS the em dash: the 24H window
+   has no shorter window to compare against. */
+.hl-delta[data-tone="flat"],
+.hl-delta[data-tone="unknown"] {
+  color: var(--muted);
+}
 
 /* The same berth, folded for a phone. Below sm the board is a stack of these instead
    of a table, and the card used to be its own visual language: `bg-card rounded-xl
