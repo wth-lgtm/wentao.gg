@@ -151,6 +151,11 @@ export default function TraderCard({
           // Stop the card's select handler firing when the intent was the explorer.
           onClick={(e) => e.stopPropagation()}
           aria-label={`Open ${trader.address} in the Hyperliquid explorer`}
+          // Out of the tab sequence, the same rule as the desktop row's link: a card is
+          // ONE tab stop (the inspect button beside it), not two times fifty. The
+          // selected trader's explorer link is reachable from the Inspecting strip
+          // (page.tsx); this stays a 40px control for a thumb.
+          tabIndex={-1}
           className="-my-2.5 -mx-1 inline-grid h-10 w-10 shrink-0 place-items-center rounded text-muted transition-colors hover:text-accent"
         >
           <ExternalLink size={13} aria-hidden />

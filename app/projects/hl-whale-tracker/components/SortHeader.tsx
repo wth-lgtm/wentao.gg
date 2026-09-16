@@ -14,7 +14,7 @@ interface SortHeaderProps {
 
 // One chevron that TURNS, not two that swap colour. A direction toggle is not a travel
 // commit — reversing fifty rows says nothing the reader did not already have — so the
-// header is the whole of that moment: the chevron rotates through one 180ms settle
+// header is the whole of that moment: the chevron rotates through one 200ms settle
 // (globals.css .hl-chevron, gated on the commit tier) and the rows simply swap.
 //
 // The chevron's box keeps the stacked pair's 20px, so the header row — and with it the

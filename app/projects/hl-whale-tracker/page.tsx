@@ -194,11 +194,17 @@ function WhaleTracker() {
   // renders only for a trader tab with a selection, which is the commit after the URL
   // write lands, so measuring it any earlier finds nothing. Desktop rows are selected
   // with the top of the page in view and are left alone.
+  //
+  // The intent is the ADDRESS tapped, not a flag: the URL can move to something else
+  // before the write lands (the router dropped it, or a tab tap superseded it), and a
+  // bare flag would then survive to scroll a later trader-tab open for a reason that is
+  // no longer on screen. An intent that does not match the trader the URL settled on
+  // is cleared, not consumed.
   const stripRef = useRef<HTMLDivElement>(null);
-  const scrollToStripRef = useRef(false);
+  const scrollToStripRef = useRef<string | null>(null);
   const onSelectTrader = useCallback(
     (address: string, via: SelectSource) => {
-      scrollToStripRef.current = via === "card";
+      scrollToStripRef.current = via === "card" ? address : null;
       selectTrader(address);
     },
     [selectTrader]
@@ -211,8 +217,12 @@ function WhaleTracker() {
   // 0 after). A failed load ends the arming too, so the intent cannot outlive it.
   const panelArming = trader.positions.data === null && trader.positions.error === null;
   useEffect(() => {
-    if (!scrollToStripRef.current) return;
-    if (focused === null || !TRADER_TABS.includes(activeTab)) return;
+    const intended = scrollToStripRef.current;
+    if (intended === null) return;
+    if (focused !== intended || !TRADER_TABS.includes(activeTab)) {
+      scrollToStripRef.current = null;
+      return;
+    }
     const strip = stripRef.current;
     if (strip === null) return;
     // The strip lands at the top of the VISIBLE viewport: the header is sticky, and its
@@ -233,7 +243,7 @@ function WhaleTracker() {
     // the intent ends.
     const reachable = document.documentElement.scrollHeight - window.innerHeight >= top;
     if (!reachable && panelArming) return;
-    scrollToStripRef.current = false;
+    scrollToStripRef.current = null;
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     window.scrollTo({ top, behavior: reducedMotion ? "auto" : "smooth" });
   }, [activeTab, focused, panelArming]);

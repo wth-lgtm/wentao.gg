@@ -1,3 +1,5 @@
+"use client";
+
 import { useEffect, useState } from "react";
 import { formatAddress, formatAge, signGlyph, toneClass } from "../lib/formatters";
 import { elapsedMs, type ReceiptAge } from "../lib/servedAge";

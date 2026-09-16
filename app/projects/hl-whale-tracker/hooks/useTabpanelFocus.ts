@@ -16,11 +16,12 @@ import { FOCUSABLE, firstReachable } from "../lib/focusable";
 // Declaring it per panel got both wrong here, because focusability is a property of the
 // STATE, not the panel. Analytics has an explorer link per LeaderCard when it has rows
 // and nothing focusable in its loading and empty branches; Trades has the Orders/Tape
-// segmented control only in its loaded branch — five of its six branches (no address,
-// loading, error, no data, no fills) render no control at all, and a visitor can open
-// TAPE with no trader selected. Enumerating those branches in page.tsx also dates
-// instantly: a panel that gains a retry button in one of its error states would silently
-// keep a redundant stop.
+// segmented control in its loaded branch, the "the board" button in its no-address
+// branch and a Re-read in its failure branches — so only its loading and no-data
+// branches render no control at all, and a visitor can open TAPE with no trader
+// selected. Enumerating those branches in page.tsx also dates instantly — this very
+// sentence had to be rewritten when the no-address branch gained its button — and a
+// panel that gains a control in one state would otherwise silently keep a redundant stop.
 //
 // So: ask the DOM. The attribute is set imperatively rather than through React state
 // because it is a readout of the rendered result — routing it back through a render

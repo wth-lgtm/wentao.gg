@@ -129,19 +129,25 @@ export default function InteractiveEffects() {
         // than skipping the step inside a loop that keeps ticking, so an idle page costs
         // no frames at all — which is what the rAF count in the verification measures.
         // `paused` is ours, not read back off the handle, so a resume is one call and
-        // not one per pointermove.
+        // not one per pointermove. Both calls are guarded the way the destroy path is:
+        // an unpatched UMD resolution hands back a handle with no pause(), and a throw
+        // inside this timer would surface as an uncaught error on an idle home page.
         let paused = false;
+        const setPaused = (on: boolean) => {
+          const handle = fluidInstance;
+          if (handle !== null && typeof handle.pause === "function") handle.pause(on);
+        };
         const armIdle = () => {
           clearTimeout(idleTimer);
           idleTimer = setTimeout(() => {
             paused = true;
-            fluidInstance?.pause(true);
+            setPaused(true);
           }, IDLE_MS);
         };
         onPointer = () => {
           if (paused) {
             paused = false;
-            fluidInstance?.pause(false);
+            setPaused(false);
           }
           armIdle();
         };

@@ -55,11 +55,13 @@
 .light {
   --background: #ffffff;
   --foreground: #0a0a0b;
-  /* 4.70:1 on --card and 5.17:1 on --background. It was #6b7280, which measured 4.40:1
-     on the card — under AA for every 11-16px text-muted run on the whale page's cards
-     (fifty board addresses, the volumes, the tape's clocks, the Positions dashes) and
-     the home page's glass. One step darker along the same slate; --legend is untouched. */
-  --muted: #646e7c;
+  /* 4.84:1 on --card, 5.32:1 on --background and 4.51:1 on --card-hover — the surface
+     the board's text-muted addresses sit on while a row is hovered, which #646e7c
+     (4.70 / 5.17) still failed at 4.38. It was #6b7280, which measured 4.40:1 on the
+     card — under AA for every 11-16px text-muted run on the whale page's cards (fifty
+     board addresses, the volumes, the tape's clocks, the Positions dashes) and the home
+     page's glass. Two steps darker along the same slate; --legend is untouched. */
+  --muted: #626c7a;
   --accent: #2563eb;
   --accent-hover: #1d4ed8;
   --card: #f4f4f5;
@@ -1065,8 +1067,9 @@ input:focus {
   }
 }
 
-/* THE CHEVRON (SortHeader). A direction toggle is not a travel — it turns this, in one
-   180ms settle, and the rows swap under it. The box is the stacked pair's 20px so the
+/* THE CHEVRON (SortHeader, and the phone's SortSegments). A direction toggle is not a
+   travel — it turns this, in one 200ms settle (two 100ms beats; it was 180ms, which sat
+   on no beat), and the rows swap under it. The box is the stacked pair's 20px so the
    header row keeps its height. The settle runs at the commit tier only; the seat and
    the still get the turned chevron with no travel between. */
 .hl-chevron {
@@ -1082,7 +1085,7 @@ input:focus {
   transform: rotate(180deg);
 }
 [data-surface="commit"] .hl-chevron > svg {
-  transition: transform 0.18s var(--ease-entrance);
+  transition: transform 0.2s var(--ease-entrance);
 }
 
 /* The inspect affordance: hidden until the row is hovered or its control focused,

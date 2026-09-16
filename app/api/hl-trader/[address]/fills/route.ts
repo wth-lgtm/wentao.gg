@@ -137,10 +137,16 @@ export async function GET(
     },
     {
       headers: {
-        // An empty pair map is not a partial answer about this trader — the fills are
-        // all here, "@107" is upstream's own label and the body now says the names are
-        // missing — so unlike the sibling route there is no no-store branch to take.
-        "Cache-Control": "public, s-maxage=30, stale-while-revalidate=120",
+        // A body whose pair names are missing is not pinned at the edge, the sibling
+        // route's treatment for its partial body. The fills are all here and "@107" is
+        // upstream's own label, so the tape is honest either way — but the public
+        // header held such a body for s-maxage plus the SWR tail, 150 s, and the
+        // footnote outlived spotMeta's recovery by that much while a fresh read would
+        // have named every pair. no-store costs one upstream userFills per visitor for
+        // the length of the failed-spotMeta window, which lib/info already keeps short.
+        "Cache-Control": pairNamesPartial
+          ? "no-store"
+          : "public, s-maxage=30, stale-while-revalidate=120",
       },
     }
   );
