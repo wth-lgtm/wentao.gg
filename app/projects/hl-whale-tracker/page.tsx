@@ -153,7 +153,16 @@ export default function HLWhaleTracker() {
           )}
 
           {activeTab === "positions" && (
-            <div role="tabpanel" id="hl-panel-positions" aria-labelledby="hl-tab-positions">
+            // tabIndex 0 because this panel has no focusable content in ANY state —
+            // it is metrics and legends end to end — and the APG tabs pattern puts a
+            // tabpanel with nothing to focus into the tab sequence itself, or a
+            // keyboard reader leaving the tablist skips the panel entirely.
+            <div
+              role="tabpanel"
+              id="hl-panel-positions"
+              aria-labelledby="hl-tab-positions"
+              tabIndex={0}
+            >
               <PositionsPanel
                 address={focused}
                 data={trader.data}
@@ -177,7 +186,15 @@ export default function HLWhaleTracker() {
           )}
 
           {activeTab === "analytics" && (
-            <div role="tabpanel" id="hl-panel-analytics" aria-labelledby="hl-tab-analytics">
+            // Same reason, for two of this panel's three states: the loaded state has
+            // focusable explorer links in its LeaderCards, but the loading skeleton is
+            // aria-hidden divs and the empty state is a single <p>.
+            <div
+              role="tabpanel"
+              id="hl-panel-analytics"
+              aria-labelledby="hl-tab-analytics"
+              tabIndex={0}
+            >
               <AnalyticsPanel
                 periods={periods}
                 timePeriod={timePeriod}

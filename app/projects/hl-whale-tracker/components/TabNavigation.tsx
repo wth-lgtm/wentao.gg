@@ -99,10 +99,11 @@ export default function TabNavigation({
               active ? "text-white" : "text-[var(--legend)] hover:text-foreground"
             }`}
           >
-            {/* The lit plate is one plate per selected tab, seated on the 300ms beat.
-                It does not travel between tabs — it unmounts with the old tab and
-                seats at the new one, and the comment that used to sit here claimed
-                otherwise. */}
+            {/* Exactly one lit plate exists at a time, and it belongs to the selected
+                tab — which is what keeps the rack reading as a single control rather
+                than four independent buttons. Switching tabs therefore unmounts this
+                span and mounts another; hlPlateSeat seats it at its new berth on the
+                300ms beat. */}
             {active && <span aria-hidden className="hl-tab-plate" />}
             <Icon size={14} aria-hidden className="relative z-10 shrink-0" />
             {/* Both spans stay in the DOM — the hidden one is display:none, so it is

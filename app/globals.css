@@ -801,10 +801,11 @@ input:focus {
   box-shadow: inset 0 1px 0 var(--engrave-hi), inset 0 -1px 0 var(--engrave-lo);
 }
 
-/* The lit plate seats at the selected tab. It does NOT travel between them — it
-   unmounts with the old tab and plays this once at the new one; the comment that used
-   to sit here claimed a journey the DOM never makes. 0.3s, not the 0.34s it was: a
-   discrete state change lands on an N x 100ms beat. */
+/* The lit plate marks the selected tab, and only the selected tab renders one — so
+   switching tabs unmounts a plate and mounts another, and this animation is a plate
+   ARRIVING, not one sliding across the rack. A scaleX settle is the honest read of
+   that: it grows into its own berth from its own centre. 0.3s, because a discrete
+   state change lands on an N x 100ms beat. */
 .hl-tab-plate {
   position: absolute;
   inset: 0;
