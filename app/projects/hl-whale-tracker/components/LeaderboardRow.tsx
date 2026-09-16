@@ -77,6 +77,12 @@ export default function LeaderboardRow({
             rel="noopener noreferrer"
             // Stop the row's select handler firing when the intent was the explorer.
             onClick={(e) => e.stopPropagation()}
+            // Out of the tab sequence, still a link for pointer users. Fifty rows with a
+            // link and an inspect button each were ~100 tab stops between the rack and
+            // the footer; the inspect button below is the row's one stop, and the
+            // selected trader's explorer link is reachable from the Inspecting strip
+            // (page.tsx), where the address itself is the link.
+            tabIndex={-1}
             className="group flex min-w-0 items-center gap-1.5"
           >
             <span className="truncate font-mono text-xs text-muted group-hover:text-accent transition-colors">

@@ -3,8 +3,12 @@ import assert from "node:assert/strict";
 
 import {
   DEFAULT_WHALE_STATE,
+  composeWrite,
   readWhaleState,
+  sameWhaleState,
+  settlePending,
   whaleQuery,
+  type WhaleUrlState,
 } from "../app/projects/hl-whale-tracker/lib/urlState";
 
 // The five controls the whale tracker used to keep in useState. Every assertion below
@@ -170,4 +174,72 @@ test("whaleQuery then readWhaleState round-trips every state the board can hold"
       }
     }
   }
+});
+
+// The write/sync race, replayed. useTableControls composes every write from a base and
+// used to reset that base to the URL's reading whenever the params changed — including
+// when an EARLIER write's params landed. Three writes in quick succession then went
+// write1, write2, (write1 lands → base regresses to write1), write3 composed from the
+// stale base, and write2's change was gone from the URL for good. The hook now keeps the
+// queue of states it has written and composes from the newest until the URL reflects it.
+
+/** What the router reports after a write lands: the query, read back. */
+const landed = (state: WhaleUrlState) => readWhaleState(new URLSearchParams(whaleQuery(state)));
+
+test("settlePending: the three-write sequence keeps write2", () => {
+  const addr = "0x5b5d51201b134b0e0eeb1fd2d1e5a0d1f298c060";
+  let url = DEFAULT_WHALE_STATE;
+  let pending: WhaleUrlState[] = [];
+  const base = () => pending[pending.length - 1] ?? url;
+
+  const w1 = composeWrite(base(), { sort: "volume" });
+  pending = [...pending, w1];
+  const w2 = composeWrite(base(), { period: "30d" });
+  pending = [...pending, w2];
+  assert.equal(w2.sort, "volume", "write2 composes over write1 before either lands");
+
+  // write1's params land. The old hook set base = this state here.
+  url = landed(w1);
+  pending = settlePending(pending, url);
+  assert.deepEqual(pending, [w2], "write1 is settled, write2 is still in flight");
+
+  const w3 = composeWrite(base(), { trader: addr, tab: "positions" });
+  pending = [...pending, w3];
+  // This is the assertion the bug failed: composed from the regressed base, write3
+  // carried sort=volume and the default window, and 30d was never written again.
+  assert.equal(w3.period, "30d");
+  assert.equal(w3.sort, "volume");
+  assert.equal(w3.trader, addr);
+
+  url = landed(w2);
+  pending = settlePending(pending, url);
+  assert.deepEqual(pending, [w3]);
+  url = landed(w3);
+  pending = settlePending(pending, url);
+  assert.deepEqual(pending, []);
+  assert.deepEqual(base(), landed(w3), "with nothing in flight the URL is the base again");
+});
+
+test("settlePending: a landing that matches no write is a navigation, and clears the queue", () => {
+  // Back, Forward, a deep link: the URL moved for a reason we did not cause, so the
+  // queue is stale and the URL's reading is the only honest base.
+  const w1 = composeWrite(DEFAULT_WHALE_STATE, { sort: "volume" });
+  const back = { ...DEFAULT_WHALE_STATE, period: "1d" as const };
+  assert.deepEqual(settlePending([w1], back), []);
+  // A landing of the NEWEST write settles everything before it too.
+  const w2 = composeWrite(w1, { period: "30d" });
+  assert.deepEqual(settlePending([w1, w2], landed(w2)), []);
+  // Nothing pending is nothing to settle.
+  assert.deepEqual(settlePending([], landed(w1)), []);
+});
+
+test("sameWhaleState and composeWrite are the pure halves the hook composes from", () => {
+  assert.equal(sameWhaleState(DEFAULT_WHALE_STATE, { ...DEFAULT_WHALE_STATE }), true);
+  assert.equal(sameWhaleState(DEFAULT_WHALE_STATE, { ...DEFAULT_WHALE_STATE, dir: "asc" }), false);
+  const next = composeWrite(DEFAULT_WHALE_STATE, { trader: null, tab: "leaderboard" });
+  assert.deepEqual(next, DEFAULT_WHALE_STATE);
+  // A patch never reaches into its base.
+  const frozen = Object.freeze({ ...DEFAULT_WHALE_STATE });
+  assert.notEqual(composeWrite(frozen, { dir: "asc" }), frozen);
+  assert.equal(frozen.dir, "desc");
 });

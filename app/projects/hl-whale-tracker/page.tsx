@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, ExternalLink } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image";
 
@@ -279,12 +279,20 @@ function WhaleTracker() {
   });
 
   const [announcement, setAnnouncement] = useState("");
+  // The last SENTENCE spoken, without any refresh head. A state that merely recurred —
+  // a wake refetch that changed nothing, a sort reversed and reversed again — says
+  // nothing, and that used to rest on the region ignoring an identical string. But the
+  // stored text was the whole utterance: after "Refresh complete. <sentence>" the next
+  // wake refetch set the bare <sentence>, which differed by its head alone, and the
+  // same board was announced twice. The comparison is against the sentence, and the
+  // head is only ever spoken, never compared.
+  const spokenRef = useRef<string | null>(null);
   // Alternated when the visitor ASKED for the commit. A live region does not re-announce
   // text identical to what it already holds, which is right for a state that merely
-  // recurred — a wake refetch that changed nothing, a sort reversed and reversed again —
-  // and wrong for an action just taken: two presses of Refresh over an unchanged
-  // snapshot produce the same sentence, and the second one said nothing at all. A
-  // zero-width space makes the text node differ without adding a spoken character.
+  // recurred and wrong for an action just taken: two presses of Refresh over an
+  // unchanged snapshot produce the same sentence, and the second one said nothing at
+  // all. A zero-width space makes the text node differ without adding a spoken
+  // character.
   const nonceRef = useRef(false);
   useEffect(() => {
     const id = window.setTimeout(() => {
@@ -293,48 +301,41 @@ function WhaleTracker() {
       if (loading) return;
       const settled = askedRef.current && !refreshing;
       if (settled) askedRef.current = false;
-      const speak = (text: string) => {
-        if (!settled) {
-          setAnnouncement(text);
-          return;
-        }
-        nonceRef.current = !nonceRef.current;
-        setAnnouncement(nonceRef.current ? `${text}\u200B` : text);
-      };
-      // An identical string is not written back to the DOM, which is what keeps a
-      // repeated state (a wake refetch that changed nothing, a sort that reverses and
-      // reverses again) from announcing twice.
-      //
+
+      // Only a REQUEST failure is a failed refresh. The hook composes one `error` string
+      // from a thrown request and from a 200 whose rows could not be read, and an
+      // earlier version called both a failure: a click that completed and came back
+      // with an unreadable board announced "Refresh failed", and the unreadable message
+      // — which already opens "Leaderboard unreadable:" — was prefixed with a second
+      // "Leaderboard unavailable:". errorKind is what tells them apart.
+      const failed = errorKind === "request";
+      // The sentence as a wake refetch or a sort would say it — the plain statement of
+      // what the page shows, failure included.
+      const plain =
+        error === null ? sentence : failed ? `Leaderboard unavailable: ${error}` : error;
+
+      if (!settled) {
+        if (plain === spokenRef.current) return;
+        spokenRef.current = plain;
+        setAnnouncement(plain);
+        return;
+      }
+
       // A refresh that FAILED gets its own sentence rather than the completion head
       // over the failure: "Refresh complete. Leaderboard unavailable: …" both
       // contradicts itself and, because the error string is usually the same one
       // already showing, was the only way a failed click could announce nothing at all.
-      //
-      // But only a REQUEST failure is a failed refresh. The hook composes one `error`
-      // string from a thrown request and from a 200 whose rows could not be read, and
-      // this branch called both a failure: a click that completed and came back with an
-      // unreadable board announced "Refresh failed", and the unreadable message — which
-      // already opens "Leaderboard unreadable:" — was prefixed with a second
-      // "Leaderboard unavailable:". errorKind is what tells them apart.
-      if (error !== null) {
-        const failed = errorKind === "request";
-        speak(
-          settled
-            ? failed
-              ? `Refresh failed: ${error}`
-              : `Refresh complete. ${error}`
-            : failed
-              ? `Leaderboard unavailable: ${error}`
-              : error
-        );
-        return;
-      }
-      const head = settled
-        ? unchangedRef.current
-          ? "Refresh complete, the snapshot has not changed. "
-          : "Refresh complete. "
-        : "";
-      speak(head + sentence);
+      spokenRef.current = plain;
+      const text =
+        error !== null
+          ? failed
+            ? `Refresh failed: ${error}`
+            : `Refresh complete. ${error}`
+          : (unchangedRef.current
+              ? "Refresh complete, the snapshot has not changed. "
+              : "Refresh complete. ") + sentence;
+      nonceRef.current = !nonceRef.current;
+      setAnnouncement(nonceRef.current ? `${text}\u200B` : text);
     }, ANNOUNCE_DEBOUNCE_MS);
     return () => window.clearTimeout(id);
   }, [sentence, error, errorKind, loading, refreshing]);
@@ -386,9 +387,26 @@ function WhaleTracker() {
           <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--legend)]">
             Inspecting
           </span>
-          <span className="truncate font-mono text-xs text-foreground">
-            {formatAddress(focused, 8)}
-          </span>
+          {/* The address IS the explorer link, once, here. The fifty row links left the
+              tab sequence (LeaderboardRow) so the desktop journey is one stop per row,
+              and this is where the selected trader's link is reachable by keyboard —
+              in the strip's own type, with the glyph the desktop row shows on hover.
+              min-w-0 so the hex truncates at 390 rather than pushing Clear off the
+              strip. */}
+          <a
+            href={`https://app.hyperliquid.xyz/explorer/address/${focused}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={`Open ${focused} in the Hyperliquid explorer`}
+            className="group inline-flex min-w-0 items-center gap-1.5 font-mono text-xs text-foreground hover:text-accent"
+          >
+            <span className="truncate">{formatAddress(focused, 8)}</span>
+            <ExternalLink
+              size={11}
+              aria-hidden
+              className="shrink-0 text-muted transition-colors group-hover:text-accent"
+            />
+          </a>
           <button
             type="button"
             onClick={clearTrader}

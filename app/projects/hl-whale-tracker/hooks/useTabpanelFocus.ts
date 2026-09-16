@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
+import { FOCUSABLE, firstReachable } from "../lib/focusable";
 
 // Whether a tabpanel belongs in the tab sequence is a question about what it currently
 // CONTAINS, so it is measured rather than declared.
@@ -25,10 +26,11 @@ import { useCallback, useEffect, useRef } from "react";
 // because it is a readout of the rendered result — routing it back through a render
 // would mean re-rendering the panel to describe the panel. React never sets `tabIndex`
 // on these wrappers, so nothing fights over the attribute.
-
-/** What the browser puts in the tab sequence without being asked. */
-const FOCUSABLE =
-  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+//
+// Asked with a filter, not the bare selector: the board's commit engine mounts an
+// `inert aria-hidden` ghost of the outgoing table for the length of a period commit's
+// fade, fifty cloned inspect buttons included, and the selector counted them. What a
+// reader can reach is lib/focusable's question.
 
 /**
  * Returns a ref for the active tabpanel wrapper. Attach the same ref to every panel —
@@ -48,7 +50,8 @@ export function useTabpanelFocus() {
       return;
     }
     const measure = () => {
-      if (panel.querySelector(FOCUSABLE) === null) {
+      const first = firstReachable(panel.querySelectorAll<HTMLElement>(FOCUSABLE));
+      if (first === null) {
         panel.setAttribute("tabindex", "0");
         return;
       }
@@ -63,7 +66,7 @@ export function useTabpanelFocus() {
       // is already where we would be sending them.
       const parked = document.activeElement === panel;
       panel.removeAttribute("tabindex");
-      if (parked) panel.querySelector<HTMLElement>(FOCUSABLE)?.focus();
+      if (parked) first.focus();
     };
     measure();
     // A panel's focusability changes when its CONTENT does — a fetch resolving, a

@@ -3,7 +3,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { TraderMetrics, SortField, TimePeriod } from "../lib/types";
-import { readWhaleState, whaleQuery, type WhaleUrlState } from "../lib/urlState";
+import {
+  composeWrite,
+  readWhaleState,
+  settlePending,
+  whaleQuery,
+  type WhaleUrlState,
+} from "../lib/urlState";
 import { withCanonicalRank, type RankedTrader } from "../lib/rank";
 import { changeKind, NO_CHANGE, type BoardChange } from "../lib/commitPlan";
 import type { Tab, TabActivation } from "../components/TabNavigation";
@@ -20,9 +26,9 @@ import type { Tab, TabActivation } from "../components/TabNavigation";
 // ONE hook writes the query, not one per concern. Every write has to compose the WHOLE
 // state — two hooks each writing their own subset would drop each other's params — and
 // useSearchParams does not report a write back until the router transition lands, so
-// two writes in the same tick would both compose from the pre-write query. The ref
-// below is therefore the authoritative base; the params are how state arrives from a
-// deep link, a reload, Back or Forward.
+// two writes in the same tick would both compose from the pre-write query. The queue
+// of writes in flight (below) is therefore the authoritative base; the params are how
+// state arrives from a deep link, a reload, Back or Forward.
 
 /**
  * `push` for a destination (tab, trader), so the phone's Back gesture returns to the
@@ -57,12 +63,20 @@ export function useTableControls() {
 
   const state = useMemo(() => readWhaleState(params), [params]);
 
+  // The states this hook has WRITTEN whose params have not come back yet, newest last,
+  // and the base a write composes from: the newest in flight, else the URL's reading.
+  // The base used to be reset to `state` on EVERY params change, which included an
+  // earlier write's params landing: write1, write2, (write1 lands → base regresses to
+  // write1), write3 composed from the stale base, and write2's change was gone from the
+  // URL for good. settlePending is the pure half (lib/urlState, with the sequence
+  // replayed in tests/urlState.test.ts): a landing settles the write it reflects and
+  // everything before it, and a landing that matches no write — Back, Forward, a deep
+  // link — clears the queue, so the URL is the base again.
+  const pending = useRef<WhaleUrlState[]>([]);
   const base = useRef<WhaleUrlState>(state);
-  // Syncs only when the URL changes for a reason we did not cause — a deep link, a
-  // reload, Back or Forward. Our own writes land here first (below), and the params
-  // catch up to the same value, so this is a no-op for them.
   useEffect(() => {
-    base.current = state;
+    pending.current = settlePending(pending.current, state);
+    base.current = pending.current[pending.current.length - 1] ?? state;
   }, [state]);
 
   // The KIND of the last change — period, sort field or sort direction — for the
@@ -88,7 +102,8 @@ export function useTableControls() {
 
   const commit = useCallback(
     (patch: Partial<WhaleUrlState>, mode: Mode) => {
-      const next = { ...base.current, ...patch };
+      const next = composeWrite(base.current, patch);
+      pending.current = [...pending.current, next];
       base.current = next;
       const query = whaleQuery(next);
       const href = query === "" ? pathname : `${pathname}?${query}`;
