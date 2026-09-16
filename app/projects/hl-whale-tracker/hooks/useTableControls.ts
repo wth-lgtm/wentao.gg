@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { TraderMetrics, SortField, TimePeriod } from "../lib/types";
 import { readWhaleState, whaleQuery, type WhaleUrlState } from "../lib/urlState";
+import { withCanonicalRank, type RankedTrader } from "../lib/rank";
 import type { Tab, TabActivation } from "../components/TabNavigation";
 
 // Was useSortAndFilter, then a bag of plain useStates. Renamed once already because it
@@ -28,6 +29,25 @@ import type { Tab, TabActivation } from "../components/TabNavigation";
  * window), so fifty sort clicks do not bury the page the visitor arrived from.
  */
 type Mode = "push" | "replace";
+
+// canonicalRank, computed once per window. Keyed on the rows array itself: useLeaderboard
+// holds one array per window for the life of a fetch, so a sort click, a tab switch or
+// a re-render finds the ranks already made, and a refetch — a new array — makes new
+// ones. A WeakMap rather than a ref because sortRows runs during render, and a memo
+// keyed on identity is a pure function of its input where a ref write during render is
+// not. Entries die with the arrays they key.
+const CANONICAL = new WeakMap<readonly TraderMetrics[], RankedTrader[]>();
+function canonical(rows: readonly TraderMetrics[]): RankedTrader[] {
+  // `periods[timePeriod] ?? []` hands over a fresh empty array every render while the
+  // board is arming; nothing to rank and nothing worth caching.
+  if (rows.length === 0) return [];
+  let ranked = CANONICAL.get(rows);
+  if (ranked === undefined) {
+    ranked = withCanonicalRank(rows);
+    CANONICAL.set(rows, ranked);
+  }
+  return ranked;
+}
 
 export function useTableControls() {
   const router = useRouter();
@@ -105,8 +125,11 @@ export function useTableControls() {
     [commit]
   );
 
+  // Returns rows that carry their canonicalRank, so the plate reads the window's PnL
+  // rank while the row's position is whatever this sort says. The plate used to be
+  // `index + 1` of this very output, which renumbered it on every click.
   const sortRows = useCallback(
-    (rows: TraderMetrics[]): TraderMetrics[] => {
+    (rows: TraderMetrics[]): RankedTrader[] => {
       const key: Record<SortField, (t: TraderMetrics) => number> = {
         pnl: (t) => t.pnl,
         winRate: (t) => t.winRate,
@@ -115,7 +138,7 @@ export function useTableControls() {
       const read = key[state.sort];
       // Deterministic tiebreak on pnl: sixteen of the top fifty have a volume of
       // exactly 0.00, and without this they'd shuffle between renders.
-      return [...rows].sort((a, b) => {
+      return [...canonical(rows)].sort((a, b) => {
         const diff = read(a) - read(b);
         const primary = state.dir === "desc" ? -diff : diff;
         return primary !== 0 ? primary : b.pnl - a.pnl;
