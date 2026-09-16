@@ -25,6 +25,7 @@ import { CAMERA, WORLD, capsFor, fitCamera, mouthFor, type CameraFit } from "../
 import { KEY_POSITION, SHADOW_AABB, shadowBoundsFor } from "../lib/pileShadow";
 import { jitterShade, roughnessFor, shadeFor } from "../lib/pileLook";
 import { createPointerRig, type PointerRig } from "../lib/pointerRig";
+import { createSampler, sampleFrame } from "../lib/pilePerf";
 
 // ───────────────────────────── the tray ─────────────────────────────
 // World-fixed (see pileScene.WORLD); only the camera moves with the canvas. The visible tray
@@ -500,7 +501,7 @@ function Pile({ pieces, accent, card, light, visible, pour, rig, contact, onDegr
   const nextBeat = useRef(0);
   const pourDone = useRef(false);
   const frames = useRef(0);
-  const perf = useRef({ n: 0, sum: 0 });
+  const perf = useMemo(() => createSampler(), []);
 
   const active = useRef(false);
   // When the pointer last MOVED: after POINTER_IDLE_MS of stillness the pile is allowed to
@@ -767,22 +768,16 @@ function Pile({ pieces, accent, card, light, visible, pour, rig, contact, onDegr
     if (!gb.length || homeX.current.length !== layout.groups.length) return;
     sinceSpawn.current += Math.min(delta, 0.5);
 
-    // Frame budget during the pour: if twenty consecutive frames average over 20 ms the
-    // canvas steps down (DPR 2 → 1, then no ContactShadows). Only continuous frames count —
-    // the first frame after an idle carries the idle as its delta, and the first frames of
-    // the pour compile shaders (~150 ms each), which is not the GPU's steady state.
-    if (nextBeat.current > 0 && !captured.current && delta < 0.1) {
-      const p = perf.current;
-      p.n++;
-      p.sum += delta;
-      if (p.n >= 20) {
-        // not under ?pileDebug: software GL always trips the step-down, and a capture
-        // without ContactShadows would measure a scene no real GPU shows
-        if (p.sum / p.n > 0.02 && !debug) onDegrade();
-        p.n = 0;
-        p.sum = 0;
-      }
-    }
+    // Frame budget during the pour (pileScene has the camera; pilePerf has this rule): the
+    // canvas steps down — DPR 2 → 1, then no ContactShadows — on either of two triggers.
+    // Twenty frames under 100 ms averaging over 20 ms catches the GPU that only just keeps
+    // up; twelve frames at or over 100 ms catches the GPU that never produces a frame under
+    // it, which the mean alone could never see (a shader-compile blip at the first beat is
+    // two or three such frames, kept out of the mean and short of the count). Runs only
+    // while the pour is live and until the homes are captured, and not under ?pileDebug:
+    // software GL always trips it, and a capture without ContactShadows would measure a
+    // scene no real GPU shows.
+    if (nextBeat.current > 0 && !captured.current && !debug && sampleFrame(perf, delta)) onDegrade();
 
     // 1) cursor follower (field centre) + its RAW velocity, on the plane y = HIT_Y. Sampling
     //    speed from the raw hit point — not the low-passed follower — means fast flicks
