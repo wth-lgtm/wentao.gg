@@ -185,7 +185,13 @@ export default function LeaderboardTable({
           </div>
         ) : (
           traders.map((trader, index) => (
-            <TraderCard key={trader.address} trader={trader} rank={index + 1} />
+            <TraderCard
+              key={trader.address}
+              trader={trader}
+              rank={index + 1}
+              selected={trader.address === selectedAddress}
+              onSelect={onSelect}
+            />
           ))
         )}
       </div>
