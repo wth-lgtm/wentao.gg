@@ -18,6 +18,7 @@ import { useLeaderboard } from "./hooks/useLeaderboard";
 import { useTableControls } from "./hooks/useTableControls";
 import { useTrader } from "./hooks/useTrader";
 import { useReSeat } from "./hooks/useReSeat";
+import { useTabpanelFocus } from "./hooks/useTabpanelFocus";
 import { formatAddress } from "./lib/formatters";
 
 export default function HLWhaleTracker() {
@@ -54,6 +55,9 @@ export default function HLWhaleTracker() {
   // The re-seat animates rows to new berths whenever the sorted ORDER changes.
   const order = displayTraders.map((t) => t.address);
   const registerRow = useReSeat(order.join("|"), order);
+  // Whether the open panel needs its own tab stop depends on what it currently holds,
+  // so it is measured after render rather than declared per panel. See the hook.
+  const tabpanelRef = useTabpanelFocus();
 
   return (
     <main className="min-h-screen bg-background">
@@ -124,7 +128,7 @@ export default function HLWhaleTracker() {
           )}
 
           {activeTab === "leaderboard" && (
-            <>
+            <div ref={tabpanelRef} role="tabpanel" id="hl-panel-leaderboard" aria-labelledby="hl-tab-leaderboard">
               <div className="flex items-center justify-between mb-4">
                 <TimeFilter value={timePeriod} onChange={setTimePeriod} />
                 <RefreshButton onRefresh={refresh} refreshing={refreshing} />
@@ -149,36 +153,42 @@ export default function HLWhaleTracker() {
                   registerRow={registerRow}
                 />
               </div>
-            </>
+            </div>
           )}
 
           {activeTab === "positions" && (
-            <PositionsPanel
-              address={focused}
-              data={trader.data}
-              loading={trader.loading}
-              error={trader.error}
-              onRetry={trader.reload}
-            />
+            <div ref={tabpanelRef} role="tabpanel" id="hl-panel-positions" aria-labelledby="hl-tab-positions">
+              <PositionsPanel
+                address={focused}
+                data={trader.data}
+                loading={trader.loading}
+                error={trader.error}
+                onRetry={trader.reload}
+              />
+            </div>
           )}
 
           {activeTab === "trades" && (
-            <TradesPanel
-              address={focused}
-              data={trader.data}
-              loading={trader.loading}
-              error={trader.error}
-              onRetry={trader.reload}
-            />
+            <div ref={tabpanelRef} role="tabpanel" id="hl-panel-trades" aria-labelledby="hl-tab-trades">
+              <TradesPanel
+                address={focused}
+                data={trader.data}
+                loading={trader.loading}
+                error={trader.error}
+                onRetry={trader.reload}
+              />
+            </div>
           )}
 
           {activeTab === "analytics" && (
-            <AnalyticsPanel
-              periods={periods}
-              timePeriod={timePeriod}
-              loading={loading}
-              error={error}
-            />
+            <div ref={tabpanelRef} role="tabpanel" id="hl-panel-analytics" aria-labelledby="hl-tab-analytics">
+              <AnalyticsPanel
+                periods={periods}
+                timePeriod={timePeriod}
+                loading={loading}
+                error={error}
+              />
+            </div>
           )}
 
           <p className="mt-4 flex items-center justify-center gap-1 flex-wrap text-center text-xs text-muted">

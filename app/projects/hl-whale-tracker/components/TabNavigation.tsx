@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef } from "react";
 import { Activity, TrendingUp, Trophy, Wallet } from "lucide-react";
 
 export type Tab = "leaderboard" | "positions" | "trades" | "analytics";
@@ -9,11 +10,19 @@ export type Tab = "leaderboard" | "positions" | "trades" | "analytics";
 // mangled the hex into 0XA822...D748, and at flex-1 the extra text wrapped to a
 // second line and grew the whole bar. The focused address now lives once, in its own
 // strip below, where it can't fight the tab layout.
-const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
-  { id: "leaderboard", label: "Leaderboard", icon: Trophy },
-  { id: "positions", label: "Positions", icon: Wallet },
-  { id: "trades", label: "Trades", icon: Activity },
-  { id: "analytics", label: "Analytics", icon: TrendingUp },
+//
+// `short` is the phone form. At 390px each of the four cells is 84px wide; a 14px
+// icon, its 6px gap and an 11px mono label tracked at 0.16em leave room for five
+// glyphs, and "LEADERBOARD" measures ~92px on its own. The old fix for that was
+// `truncate`, which ellipsised three of the four labels ("LEADER… / POSITI… /
+// ANALYT…") — a primary nav control must never ellipsize its own name. So the phone
+// gets a deliberately chosen abbreviation instead of a cut string, and `aria-label`
+// carries the full word so the accessible name never shortens.
+const TABS: { id: Tab; label: string; short: string; icon: React.ElementType }[] = [
+  { id: "leaderboard", label: "Leaderboard", short: "BOARD", icon: Trophy },
+  { id: "positions", label: "Positions", short: "POSNS", icon: Wallet },
+  { id: "trades", label: "Trades", short: "TAPE", icon: Activity },
+  { id: "analytics", label: "Analytics", short: "STATS", icon: TrendingUp },
 ];
 
 export default function TabNavigation({
@@ -23,31 +32,85 @@ export default function TabNavigation({
   activeTab: Tab;
   onChange: (tab: Tab) => void;
 }) {
+  const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  // A tablist is ONE tab stop, not four: the selected tab holds tabIndex 0 and the
+  // arrows move between them (WAI-ARIA APG, tabs pattern). Before this, Tab walked
+  // every tab individually and the arrows did nothing at all.
+  const onKeyDown = (event: React.KeyboardEvent, index: number) => {
+    const last = TABS.length - 1;
+    let next: number;
+    switch (event.key) {
+      case "ArrowRight":
+        next = index === last ? 0 : index + 1;
+        break;
+      case "ArrowLeft":
+        next = index === 0 ? last : index - 1;
+        break;
+      case "Home":
+        next = 0;
+        break;
+      case "End":
+        next = last;
+        break;
+      default:
+        return;
+    }
+    // Home/End otherwise scroll the page out from under the control.
+    event.preventDefault();
+    // Automatic activation: selection follows focus, which is what a click already
+    // does — there is no confirm step on the pointer path, so adding one on the
+    // keyboard path would make the two disagree. Positions and Trades do fetch, but
+    // they render their own loading state exactly as they do for a click.
+    onChange(TABS[next].id);
+    tabRefs.current[next]?.focus();
+  };
+
   return (
     <div
       role="tablist"
       aria-label="Whale tracker views"
       className="hl-rack mb-3 grid grid-cols-4 gap-1 rounded-xl border border-border bg-card p-1"
     >
-      {TABS.map((tab) => {
+      {TABS.map((tab, index) => {
         const Icon = tab.icon;
         const active = activeTab === tab.id;
         return (
           <button
             key={tab.id}
+            ref={(el) => {
+              tabRefs.current[index] = el;
+            }}
+            id={`hl-tab-${tab.id}`}
             role="tab"
             aria-selected={active}
+            // page.tsx mounts only the selected panel, so this IDREF resolves for the
+            // selected tab and dangles for the other three. That is the trade for not
+            // mounting four panels of live data at once, and it is the only tab whose
+            // "go to controlled element" gesture has anywhere to go.
+            aria-controls={`hl-panel-${tab.id}`}
+            // The visible text is the abbreviation below sm, so the name is stated
+            // here and stays the full word at every width.
+            aria-label={tab.label}
+            tabIndex={active ? 0 : -1}
             onClick={() => onChange(tab.id)}
+            onKeyDown={(event) => onKeyDown(event, index)}
             className={`hl-tab relative flex min-w-0 items-center justify-center gap-1.5 overflow-hidden rounded-lg py-2.5 font-mono text-[11px] uppercase tracking-[0.16em] whitespace-nowrap transition-colors ${
               active ? "text-white" : "text-[var(--legend)] hover:text-foreground"
             }`}
           >
-            {/* The lit plate travels between tabs instead of each tab flipping its
-                own background — one moving part, so the control reads as a
-                mechanism rather than four independent buttons. */}
+            {/* Exactly one lit plate exists at a time, and it belongs to the selected
+                tab — which is what keeps the rack reading as a single control rather
+                than four independent buttons. Switching tabs therefore unmounts this
+                span and mounts another; hlPlateSeat seats it at its new berth on the
+                300ms beat. */}
             {active && <span aria-hidden className="hl-tab-plate" />}
             <Icon size={14} aria-hidden className="relative z-10 shrink-0" />
-            <span className="relative z-10 truncate">{tab.label}</span>
+            {/* Both spans stay in the DOM — the hidden one is display:none, so it is
+                out of the accessibility tree and out of the layout, and whichever
+                survives is the name if aria-label ever goes missing. */}
+            <span className="relative z-10 sm:hidden">{tab.short}</span>
+            <span className="relative z-10 hidden sm:inline">{tab.label}</span>
           </button>
         );
       })}
