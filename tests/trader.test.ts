@@ -154,12 +154,27 @@ test("parseMargin: null on a failed perp call, numbers on a real answer", () => 
         totalMarginUsed: "28850000",
       },
       withdrawable: "98765.4",
+      // A SIBLING of marginSummary, not a member of it — the live payload for the
+      // 7d #1 address carries crossMaintenanceMarginUsed at the top level alongside
+      // withdrawable, and reading it off marginSummary would silently yield null.
+      crossMaintenanceMarginUsed: "16832367.54",
     }),
     {
       accountValue: 1234567.89,
       totalNtlPos: 577000000,
       totalMarginUsed: 28850000,
       withdrawable: 98765.4,
+      crossMaintenanceMarginUsed: 16832367.54,
     }
   );
+});
+
+test("parseMargin: an absent maintenance figure is null, so the panel prints no percent", () => {
+  // Maintenance margin is what the Positions header divides by account value to say
+  // how close the account sits to liquidation. An isolated-margin-only account has no
+  // cross figure, and a 0 there would read as "nothing at risk" — the one claim the
+  // data does not support.
+  const m = parseMargin({ marginSummary: { accountValue: "10" }, withdrawable: "1" });
+  assert.ok(m !== null);
+  assert.equal(m.crossMaintenanceMarginUsed, null);
 });
