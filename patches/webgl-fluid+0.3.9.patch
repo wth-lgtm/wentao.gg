@@ -1,5 +1,5 @@
 diff --git a/node_modules/webgl-fluid/dist/webgl-fluid.mjs b/node_modules/webgl-fluid/dist/webgl-fluid.mjs
-index 5b24431..43132c8 100644
+index 5b24431..e024630 100644
 --- a/node_modules/webgl-fluid/dist/webgl-fluid.mjs
 +++ b/node_modules/webgl-fluid/dist/webgl-fluid.mjs
 @@ -964,6 +964,7 @@
@@ -10,7 +10,7 @@ index 5b24431..43132c8 100644
    g(), _ = {
      IMMEDIATE: !0,
      TRIGGER: "hover",
-@@ -1581,14 +1582,18 @@ function ft(V, _) {
+@@ -1581,14 +1582,31 @@ function ft(V, _) {
    }
    t(), C(), _.IMMEDIATE && je(_.SPLAT_COUNT);
    function i() {
@@ -19,18 +19,32 @@ index 5b24431..43132c8 100644
      _.AUTO && _.INTERVAL && !_.PAUSED && me.push(_.SPLAT_COUNT), setTimeout(i, _.INTERVAL);
    }
    setTimeout(i, _.INTERVAL);
-   let r = Date.now(), u = 0;
+-  let r = Date.now(), u = 0;
++  let r = Date.now(), u = 0, looping = false;
    c();
    function c() {
 +    if (!alive)
 +      return;
++    if (_.PAUSED) {
++      looping = false;
++      return;
++    }
++    looping = true;
      const o = h();
 -    g() && C(), b(o), v(), _.PAUSED || S(o), T(null), requestAnimationFrame(c);
-+    g() && C(), b(o), v(), _.PAUSED || (S(o), T(null)), requestAnimationFrame(c);
++    g() && C(), b(o), v(), S(o), T(null), requestAnimationFrame(c);
++  }
++  function pause(o) {
++    _.PAUSED = o;
++    if (!o && alive && !looping) {
++      looping = true;
++      r = Date.now();
++      requestAnimationFrame(c);
++    }
    }
    function h() {
      const o = Date.now();
-@@ -1692,9 +1697,7 @@ function ft(V, _) {
+@@ -1692,9 +1710,7 @@ function ft(V, _) {
        const s = $(o.offsetX), a = $(o.offsetY);
        ot(U[0], s, a);
      });
@@ -41,7 +55,7 @@ index 5b24431..43132c8 100644
      o.preventDefault();
      const s = o.targetTouches;
      for (; s.length >= U.length; )
-@@ -1710,15 +1713,20 @@ function ft(V, _) {
+@@ -1710,15 +1726,20 @@ function ft(V, _) {
        const f = $(s[a].pageX), p = $(s[a].pageY);
        ot(U[a + 1], f, p);
      }
@@ -57,15 +71,25 @@ index 5b24431..43132c8 100644
        nt(f);
      }
 -  }), window.addEventListener("keydown", (o) => {
+-    o.code === "KeyP" && (_.PAUSED = !_.PAUSED), o.key === " " && me.push(Number.parseInt(Math.random() * 20) + 5);
+-  });
 +  }
 +  function onKey(o) {
-     o.code === "KeyP" && (_.PAUSED = !_.PAUSED), o.key === " " && me.push(Number.parseInt(Math.random() * 20) + 5);
--  });
++    o.code === "KeyP" && pause(!_.PAUSED), o.key === " " && me.push(Number.parseInt(Math.random() * 20) + 5);
 +  }
    function it(o, s, a, f) {
      o.id = s, o.down = !0, o.moved = !1, o.texcoordX = a / D.width, o.texcoordY = 1 - f / D.height, o.prevTexcoordX = o.texcoordX, o.prevTexcoordY = o.texcoordY, o.deltaX = 0, o.deltaY = 0, o.color = tt();
    }
-@@ -1804,6 +1812,18 @@ function ft(V, _) {
+@@ -1793,7 +1814,7 @@ function ft(V, _) {
+     };
+   }
+   function $(o) {
+-    const s = window.devicePixelRatio || 1;
++    const s = Math.min(window.devicePixelRatio || 1, 1.5);
+     return Math.floor(o * s);
+   }
+   function dt(o) {
+@@ -1804,6 +1825,16 @@ function ft(V, _) {
        s = (s << 5) - s + o.charCodeAt(a), s |= 0;
      return s;
    }
@@ -77,9 +101,7 @@ index 5b24431..43132c8 100644
 +      const o = n.getExtension("WEBGL_lose_context");
 +      o && o.loseContext();
 +    },
-+    pause(o) {
-+      _.PAUSED = o;
-+    }
++    pause
 +  };
  }
  export {

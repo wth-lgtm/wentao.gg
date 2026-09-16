@@ -4,7 +4,14 @@ import { motion } from "framer-motion";
 import { Mail, Github, Linkedin } from "lucide-react";
 import { numberOf } from "./sections";
 
+// Email first: the paragraph above the tiles ends "email is fastest", and the tile it
+// points at was the last of three.
 const socialLinks = [
+  {
+    name: "Email",
+    href: "mailto:me@wentao.gg",
+    icon: Mail,
+  },
   {
     name: "LinkedIn",
     href: "https://linkedin.com/in/wentaohe",
@@ -14,11 +21,6 @@ const socialLinks = [
     name: "GitHub",
     href: "https://github.com/wth-lgtm",
     icon: Github,
-  },
-  {
-    name: "Email",
-    href: "mailto:me@wentao.gg",
-    icon: Mail,
   },
 ];
 
@@ -73,7 +75,9 @@ export default function Connect() {
                 transition: { type: "spring", stiffness: 300, damping: 20 }
               }}
               whileTap={{ scale: 0.96, transition: { type: "spring", stiffness: 400, damping: 22 } }}
-              className="group glass p-5 hover:border-muted/40 pointer-events-auto"
+              className="group glass flex flex-col items-center gap-2.5 p-5 hover:border-muted/40 pointer-events-auto"
+              // The same word as the visible label below, so the name a screen reader
+              // gets and the name a sighted visitor reads cannot drift apart.
               aria-label={link.name}
             >
               <div className="flex items-center justify-center w-12 h-12 bg-background rounded-xl group-hover:bg-accent/10 transition-colors">
@@ -82,6 +86,12 @@ export default function Connect() {
                   className="text-muted group-hover:text-accent transition-colors"
                 />
               </div>
+              {/* Icon-only tiles asked the visitor to recognise three glyphs; the mail
+                  envelope reads, a lower-case "in" and an octocat less so. The name is
+                  printed, in the etched legend the rest of the site labels things with. */}
+              <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--legend)]">
+                {link.name}
+              </span>
             </motion.a>
           ))}
         </motion.div>

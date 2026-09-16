@@ -18,6 +18,14 @@ import { useEffect, useState, useRef } from "react";
 // return, which is what removed the `as unknown as FluidHandle` this file used to need.
 import type { FluidHandle } from "webgl-fluid";
 
+// The idle gate. The fluid is driven by the pointer alone (TRIGGER: "hover") and the dye
+// is gone within a couple of seconds of the last movement (DENSITY_DISSIPATION 2.2), so
+// a loop still stepping the simulation after that advects, pressure-solves and composites
+// a field that is already empty — ~60 frames/s of GPU work for nothing, on a page a
+// reader may leave open in the foreground for an hour. Three seconds of no pointer input
+// pauses it; the next pointer event resumes it before its own splat is applied.
+const IDLE_MS = 3000;
+
 export default function InteractiveEffects() {
   const [mounted, setMounted] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
@@ -41,6 +49,10 @@ export default function InteractiveEffects() {
     let fluidInstance: FluidHandle | null = null;
     let cancelled = false;
     let timeoutId: ReturnType<typeof setTimeout>;
+    // The idle gate's timer and listener, declared here so the one cleanup below can
+    // reach them whether or not the async init ever armed them.
+    let idleTimer: ReturnType<typeof setTimeout> | undefined;
+    let onPointer: (() => void) | null = null;
 
     const initFluid = async () => {
       try {
@@ -111,6 +123,34 @@ export default function InteractiveEffects() {
               "a route change off this page."
           );
         }
+
+        // Armed at init, re-armed on every pointer event. pause(true) STOPS the rAF loop
+        // (the patch: the loop returns when paused and pause(false) restarts it) rather
+        // than skipping the step inside a loop that keeps ticking, so an idle page costs
+        // no frames at all — which is what the rAF count in the verification measures.
+        // `paused` is ours, not read back off the handle, so a resume is one call and
+        // not one per pointermove.
+        let paused = false;
+        const armIdle = () => {
+          clearTimeout(idleTimer);
+          idleTimer = setTimeout(() => {
+            paused = true;
+            fluidInstance?.pause(true);
+          }, IDLE_MS);
+        };
+        onPointer = () => {
+          if (paused) {
+            paused = false;
+            fluidInstance?.pause(false);
+          }
+          armIdle();
+        };
+        // Pointer events, so a touch resumes it too — on mobile the canvas is
+        // pointer-events-none and its input arrives as forwarded mouse events (below),
+        // but the window still sees the pointer.
+        window.addEventListener("pointermove", onPointer, { passive: true });
+        window.addEventListener("pointerdown", onPointer, { passive: true });
+        armIdle();
       } catch (error) {
         console.error("Failed to initialize WebGL Fluid:", error);
       }
@@ -127,14 +167,21 @@ export default function InteractiveEffects() {
       timeoutId = setTimeout(initFluid, 2000);
     }
 
-    // One cleanup for both scheduling paths: cancel whatever is still pending, then stop the
-    // simulation. destroy() clears the `alive` flag the patch guards the rAF loop and the
-    // auto-splat timer with, removes the three window listeners the library leaks, and calls
+    // One cleanup for both scheduling paths and the idle gate: cancel whatever is still
+    // pending, drop the gate's timer and listeners, then stop the simulation. destroy()
+    // clears the `alive` flag the patch guards the rAF loop and the auto-splat timer
+    // with, removes the three window listeners the library leaks, and calls
     // WEBGL_lose_context so the GPU buffers go with it.
     return () => {
       cancelled = true;
       if (idleId !== undefined) window.cancelIdleCallback(idleId);
       clearTimeout(timeoutId);
+      clearTimeout(idleTimer);
+      if (onPointer !== null) {
+        window.removeEventListener("pointermove", onPointer);
+        window.removeEventListener("pointerdown", onPointer);
+        onPointer = null;
+      }
       fluidInstance?.destroy();
       fluidInstance = null;
     };
