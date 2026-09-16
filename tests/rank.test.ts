@@ -88,7 +88,7 @@ test("rankDelta: the same berth in both windows is a real zero", () => {
 test("rankDelta: a trader absent from the previous board is unknown, not zero", () => {
   // The previous window's payload is a top-50; a trader outside it has SOME rank we
   // never saw. null is the "unknown" the row renders as a legend, and it must never
-  // collapse into the em-dash that means "did not move".
+  // collapse into the middle dot that means "did not move".
   const current = new Map([["0xa", 1]]);
   assert.equal(rankDelta(current, new Map(), "0xa"), null);
 });

@@ -2,7 +2,7 @@
 
 import { ChevronRight, ExternalLink } from "lucide-react";
 import Odometer from "./Odometer";
-import { Legend } from "./Instrument";
+import { Legend, dash } from "./Instrument";
 import { TraderMetrics } from "../lib/types";
 import {
   formatAddress,
@@ -24,7 +24,7 @@ interface LeaderboardRowProps {
   /**
    * Berths moved since the next-shorter window. A number is a reading (0 included);
    * `null` means the trader was not on that window's board; `undefined` means there is
-   * no window to compare against (24H), and the cell stays empty.
+   * no window to compare against (24H), which renders as the unknown.
    */
   delta?: number | null;
   selected?: boolean;
@@ -32,25 +32,36 @@ interface LeaderboardRowProps {
   registerRow?: (key: string, el: HTMLElement | null) => void;
 }
 
+// An unmoved berth is a KNOWN zero, so it may not share a glyph with the unknown: this
+// repo reads the em dash as "unknown" (Instrument.tsx `dash`, used that way across the
+// panels), and the delta column has a genuine unknown of its own — the 24H window has
+// no shorter window to compare against. The middle dot is signGlyph's own zero.
+const UNMOVED = "·";
+
 /**
  * The delta plate. Direction is carried three ways at once — the glyph, the tone token
  * and the numeral — so no single channel is load-bearing: the glyph survives a
- * monochrome print, the tone survives a glance, the numeral survives both. Zero is an
- * em-dash in --muted rather than "· 0": a berth that did not move is a designed rest,
- * not a reading of nought. The sr-only words are what a screen reader gets instead of
- * "black up-pointing triangle".
+ * monochrome print, the tone survives a glance, the numeral survives both. The sr-only
+ * words are what a screen reader gets instead of "black up-pointing triangle".
  */
 function DeltaPlate({ delta }: { delta: number | null | undefined }) {
-  if (delta === undefined) return null;
+  if (delta === undefined) {
+    // No reference window (24H): the reading is unknown, and the unknown is the em dash.
+    return (
+      <span className="hl-delta" data-tone="unknown">
+        {dash}
+      </span>
+    );
+  }
   if (delta === null) {
-    // Not on the previous board. Unknown, in the same etched legend the volume column
-    // uses for its designed absence — never the em-dash, which here means "unmoved".
+    // Not on the previous board. Unknown too, but a specific one — the trader arrived —
+    // so it gets the etched legend the volume column uses for its designed absence.
     return <Legend>new</Legend>;
   }
   if (delta === 0) {
     return (
       <span className="hl-delta" data-tone="flat">
-        <span aria-hidden>—</span>
+        <span aria-hidden>{UNMOVED}</span>
         <span className="sr-only">unchanged</span>
       </span>
     );

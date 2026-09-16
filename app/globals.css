@@ -124,9 +124,12 @@ html {
 }
 
 /* Only ever scroll vertically — no left/right swipe on phones even if a scroll-driven
-   transform or wide element briefly extends past the viewport edge. */
+   transform or wide element briefly extends past the viewport edge.
+   clip, not hidden: hidden made body a scroll container, so every position: sticky on
+   the site stuck to body and never moved (the whale page's header measured top -556px
+   after a 556px scroll, in production). clip cuts the same overflow and scrolls nothing. */
 html, body {
-  overflow-x: hidden;
+  overflow-x: clip;
   max-width: 100%;
 }
 
@@ -880,18 +883,17 @@ input:focus {
    passing beneath still carries its own lit lip, so the pair reads as one cut at any
    scroll offset.
 
-   Gated on data-sticky, which LeaderboardTable writes after checking that no ancestor
-   up to the root is a scroll container — sticky inside one that never scrolls still
-   applies `top`, which pushed this header 46px down the card and over berth 01. The
-   fill is unconditional: it is what the header wears whether or not it moves. */
+   Sticky obeys the nearest scroll-container ancestor, and one that never scrolls is
+   worse than none: `top` still applies, and this header sat 46px down the card over
+   berth 01 while three of them stood between it and the viewport — the wrapper's
+   overflow-x-auto, the card's overflow-hidden (page.tsx) and body's overflow-x: hidden.
+   All three now clip or are gone, so the header answers to the viewport. */
 .hl-board thead th {
-  background: var(--card);
-  border-bottom: 1px solid var(--engrave-lo);
-}
-.hl-board[data-sticky="true"] thead th {
   position: sticky;
   top: 46px;
   z-index: 1;
+  background: var(--card);
+  border-bottom: 1px solid var(--engrave-lo);
 }
 
 /* THE STRUCTURAL GATE. hooks/useSurfaceTier.ts writes the tier onto the table, and
@@ -985,8 +987,12 @@ input:focus {
   font-size: 0.6875rem;
   letter-spacing: 0.08em;
 }
-/* Zero is a rest, not a figure: an em-dash in --muted, quieter than either direction. */
-.hl-delta[data-tone="flat"] {
+/* Zero is a rest, not a figure: a middle dot in --muted, quieter than either direction.
+   Never the em dash — this repo reads that as "unknown" (Instrument.tsx `dash`), and an
+   unmoved berth is a known zero. The unknown tone below IS the em dash: the 24H window
+   has no shorter window to compare against. */
+.hl-delta[data-tone="flat"],
+.hl-delta[data-tone="unknown"] {
   color: var(--muted);
 }
 

@@ -24,7 +24,8 @@ export interface RankedTrader extends TraderMetrics {
 
 /**
  * The window a delta plate compares against: the next-shorter one. 24H has no shorter
- * window, so its plate has no reference and renders nothing — not a zero.
+ * window, so its plate has no reference and renders the unknown (Instrument.tsx
+ * `dash`) — not a zero.
  */
 export const PREVIOUS_WINDOW: Record<TimePeriod, TimePeriod | null> = {
   "1d": null,

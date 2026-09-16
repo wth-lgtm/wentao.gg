@@ -103,7 +103,9 @@ function settledSentence({
  *                             where SRC is still hidden and the fields fit)
  *   rack       48       48
  *   filter     32       44
- *   table     596      338   (three card skeletons vs. a thead and five rows)
+ *   table    3282     2253   (the arming frame: fifty berth cards vs. a thead and
+ *                             fifty berths — rank is knowable before the request
+ *                             answers, so the placeholder is the hull's true height)
  *   footer     20       20
  *
  * It states no value. A placeholder reading "SURFACED 0" or "AGE --:--" would be the
@@ -120,7 +122,7 @@ function HullPlaceholder() {
           here would be MORE visible than the thing it stands in for and would flash
           out at hydration. */}
       <div className="mb-4 h-8 sm:h-11" />
-      <div className="h-[596px] rounded-xl border border-border bg-card sm:h-[338px]" />
+      <div className="h-[3282px] rounded-xl border border-border bg-card sm:h-[2253px]" />
       <div className="mt-4 h-5" />
     </div>
   );
@@ -288,7 +290,11 @@ function WhaleTracker() {
             </div>
           )}
 
-          <div className="bg-card rounded-xl border border-border overflow-hidden">
+          {/* overflow-clip, not overflow-hidden: hidden makes the card a scroll container,
+              and a sticky header sticks to the nearest one of those — this card never
+              scrolls, so the header sat 46px down inside it and covered berth 01. clip
+              still cuts the last berth's fill to the rounded corners. */}
+          <div className="bg-card rounded-xl border border-border overflow-clip">
             <LeaderboardTable
               traders={displayTraders}
               sortField={sortField}
@@ -299,6 +305,8 @@ function WhaleTracker() {
               selectedAddress={focused}
               onSelect={selectTrader}
               registerRow={registerRow}
+              periods={periods}
+              timePeriod={timePeriod}
             />
           </div>
         </div>

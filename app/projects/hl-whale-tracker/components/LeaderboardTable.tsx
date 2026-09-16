@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useMemo } from "react";
 import { TraderMetrics, SortField, SortDirection, TimePeriod } from "../lib/types";
 import { PREVIOUS_WINDOW, rankByPnl, rankDelta, type RankedTrader } from "../lib/rank";
 import { tierOf } from "../lib/tier";
@@ -147,31 +147,6 @@ export default function LeaderboardTable({
 
   const tier = useSurfaceTier();
 
-  // Whether the header may stick. `position: sticky` obeys the nearest ancestor that is
-  // a scroll container, and an ancestor that is one but never scrolls is worse than no
-  // sticky at all: the `top` offset still applies, so the header sat 46px down inside
-  // the card and hid berth 01 (measured). Two such ancestors exist today, neither in
-  // this file — the card's overflow-hidden (page.tsx) and body's overflow-x: hidden
-  // (globals.css `html, body`), the second of which is also why the page's own sticky
-  // header has never stuck in production. `overflow: clip` is the one non-visible value
-  // that clips without becoming a scroll container. Checked once after mount and written
-  // straight onto the element, so the CSS engages the moment the chain is clear and
-  // costs nothing until then.
-  const tableRef = useRef<HTMLTableElement>(null);
-  useEffect(() => {
-    const table = tableRef.current;
-    if (!table) return;
-    let clear = true;
-    for (let el = table.parentElement; el && el !== document.documentElement; el = el.parentElement) {
-      const { overflowX, overflowY } = getComputedStyle(el);
-      if (![overflowX, overflowY].every((v) => v === "visible" || v === "clip")) {
-        clear = false;
-        break;
-      }
-    }
-    table.dataset.sticky = clear ? "true" : "false";
-  }, []);
-
   // The delta plate's reference window. `deltaColumn` is whether the caller wired the
   // windows at all; `reference` is which one this window compares against (24H: none).
   const deltaColumn = periods !== undefined && timePeriod !== undefined;
@@ -200,7 +175,6 @@ export default function LeaderboardTable({
             odometer strips do not roll (CSS) and the rows are not registered for travel
             (below). aria-busy while arming: fifty empty berths are a frame, not content. */}
         <table
-          ref={tableRef}
           className="hl-board"
           data-surface={tier}
           aria-busy={loading ? true : undefined}
@@ -228,7 +202,10 @@ export default function LeaderboardTable({
                 <span className={legend}>Rank</span>
               </th>
               {deltaColumn && (
-                <th scope="col" className="py-3 px-2 text-left">
+                // nowrap: "Δ 24H" fits the 64px column in JetBrains Mono with 6px to spare
+                // and wraps in the wider fallback face while the webfont is still loading,
+                // which grew the header a line and shifted every row by 25px when it landed.
+                <th scope="col" className="whitespace-nowrap py-3 px-2 text-left">
                   {reference === null ? (
                     <span className={legend}>
                       <span aria-hidden>Δ</span>
