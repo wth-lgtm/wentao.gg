@@ -1,13 +1,19 @@
 import { NextResponse } from "next/server";
 import {
+  info,
+  payloadFresh,
+  type CachedPayload,
+} from "@/app/projects/hl-whale-tracker/lib/info";
+import {
   ADDRESS_RE,
-  parseFills,
   parseMargin,
   parsePositions,
   parseSpot,
+  priceSpot,
 } from "@/app/projects/hl-whale-tracker/lib/trader";
 
-// Per-trader snapshot for the Positions and Trades tabs.
+// Margin, perp positions and priced spot balances for one trader — what the Positions
+// tab reads, and nothing else.
 //
 // The address is the only user-controlled value in this feature, so it is gated on
 // an exact 40-hex pattern BEFORE any outbound request happens — which also means
@@ -18,75 +24,72 @@ import {
 // Positions move, so the cache window is short. It exists to stop repeated row
 // clicks fanning out onto the upstream from a shared egress IP, not to serve
 // stale data.
+//
+// WHY THE FILLS LEFT. This used to answer with userFills too, and the Positions tab
+// therefore waited on it: timed against api.hyperliquid.xyz, clearinghouseState comes
+// back in 0.39-0.49s and spotClearinghouseState in 0.38-0.41s, while userFills takes
+// 1.16-1.38s for 658-745KB that only the Trades tab reads. One JSON object meant one
+// wait, so a row click held the Positions skeleton for the slowest call in the set.
+// Fills now have their own route (./fills) and the client fires both in parallel, so
+// each panel waits for its own upstream. Firing fills LAZILY on Trades-tab open was
+// the other option and is worse: the Trades tab is instant today once the snapshot
+// lands, and lazy loading would put a fresh ~1s skeleton in front of it.
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const INFO_URL = "https://api.hyperliquid.xyz/info";
-const TIMEOUT_MS = 10_000;
-const FILL_LIMIT = 100;
-
-async function info(body: Record<string, unknown>): Promise<unknown | null> {
-  try {
-    const res = await fetch(INFO_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      cache: "no-store",
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
-    return res.ok ? await res.json() : null;
-  } catch {
-    return null;
-  }
-}
-
-// Spot pair names.
+// What it takes to put a dollar figure on a spot balance.
 //
-// Spot fills identify their market by INDEX, not ticker: upstream sends coin "@107",
-// which is unreadable on screen and appeared on 5.4% of sampled fills — 52% for one
-// address. `spotMeta` maps it to "HYPE/USDC".
+// Neither payload is about this trader, so both are cached in module scope and cost
+// one upstream call per cold lambda rather than one per visitor. They are bounded by
+// construction — two payloads, replaced wholesale, keyed only on upstream-supplied
+// names, so nothing a visitor sends can grow them.
 //
-// The trap, verified against live data: the name is NOT the array position.
-// universe[107].name === "@109". Building this map by index silently mislabels
-// almost every spot fill, so it is built by matching the `name` field.
+// The GOOD windows differ because the data does: the pair list is near-static (1h), the
+// mids are a live market (30s). What that does NOT buy is a mid as fresh as the reading
+// it prices, which an earlier version of this comment claimed. A mid can be 30s old when
+// the body is generated, and the body is then served from the edge for another 30s —
+// 120s more inside stale-while-revalidate — so a value on screen can trail the market by
+// roughly a minute, and by up to two and a half in the SWR tail. That is why the panel
+// says "valued at the current spot mid … an estimate, not a settled balance" and prints
+// the roll-up with a "≈".
 //
-// Cached in module scope because the pair list is near-static and this is one extra
-// upstream call per cold lambda, not per visitor. It is bounded by construction —
-// one map of ~316 entries, replaced wholesale — and keyed only on upstream-supplied
-// names, so nothing a visitor sends can grow it.
-const SPOT_TTL_MS = 60 * 60 * 1000;
-let spotCache: { map: Map<string, string>; at: number } | null = null;
+// A FAILED read gets a much shorter window than a good one, which lib/info's
+// payloadFresh owns and tests. Caching a null spotMeta for the full hour meant one
+// transient 429 — which Hyperliquid returns on a second sequential call from a shared
+// egress IP — cost an HOUR of dash-only USD values, and because missing pricing also
+// sets `no-store` below, an hour with no edge cache either: exactly the wrong response
+// to being rate-limited. Unpriced balances render the em dash meanwhile, which is
+// honest; the coin counts are still exactly what upstream said.
+//
+// Cost, stated because it is the one thing the split above gave back: on a COLD
+// lambda these two calls (spotMeta 0.58-0.81s, allMids 0.65s) are now the route's
+// critical path instead of userFills', so a first-ever click is ~0.8s rather than the
+// ~0.5s the two state calls alone would allow. Warm — which every click after the
+// first on that instance is — they are free and the route answers in ~0.5s. An
+// unpriced spot list was not worth protecting 0.3s of a cold start for: the whole
+// point is that 2,331,863 UBONK is $5.90 and 556,416 HYPE is $43.25M.
+const META_TTL_MS = 60 * 60 * 1000;
+const MIDS_TTL_MS = 30 * 1000;
 
-async function spotNameMap(): Promise<Map<string, string>> {
-  if (spotCache && Date.now() - spotCache.at < SPOT_TTL_MS) return spotCache.map;
+let metaCache: CachedPayload | null = null;
+let midsCache: CachedPayload | null = null;
 
-  const map = new Map<string, string>();
-  const meta = await info({ type: "spotMeta" });
-  const universe = (meta as { universe?: unknown })?.universe;
-  const tokens = (meta as { tokens?: unknown })?.tokens;
+async function spotPricing(): Promise<{ spotMeta: unknown; allMids: unknown }> {
+  const now = Date.now();
+  // payloadFresh is what applies the short window to a null — see lib/info and
+  // tests/info.test.ts.
+  const metaFresh = payloadFresh(metaCache, META_TTL_MS, now);
+  const midsFresh = payloadFresh(midsCache, MIDS_TTL_MS, now);
 
-  if (Array.isArray(universe) && Array.isArray(tokens)) {
-    const tokenName = (i: unknown): string | null => {
-      if (typeof i !== "number") return null;
-      const name = (tokens[i] as { name?: unknown })?.name;
-      return typeof name === "string" && name ? name : null;
-    };
-    for (const entry of universe) {
-      const name = (entry as { name?: unknown })?.name;
-      const pair = (entry as { tokens?: unknown })?.tokens;
-      if (typeof name !== "string" || !Array.isArray(pair)) continue;
-      const base = tokenName(pair[0]);
-      const quote = tokenName(pair[1]);
-      if (base && quote) map.set(name, `${base}/${quote}`);
-    }
-  }
+  const [spotMeta, allMids] = await Promise.all([
+    metaFresh ? metaCache!.value : info({ type: "spotMeta" }),
+    midsFresh ? midsCache!.value : info({ type: "allMids" }),
+  ]);
 
-  // An empty map is cached too, so a bad upstream answer costs one call an hour
-  // rather than one per request. Unresolved fills fall back to the raw "@107",
-  // which is honest — hiding the row would lose a real trade.
-  spotCache = { map, at: Date.now() };
-  return map;
+  if (!metaFresh) metaCache = { value: spotMeta, at: now };
+  if (!midsFresh) midsCache = { value: allMids, at: now };
+  return { spotMeta, allMids };
 }
 
 export async function GET(
@@ -103,48 +106,38 @@ export async function GET(
 
   // Independent requests: one failing must not fail the others, because a trader
   // with no spot balances is a normal case, not an error.
-  const [perp, spotState, fills, spotNames] = await Promise.all([
+  const [perp, spotState, pricing] = await Promise.all([
     info({ type: "clearinghouseState", user }),
     info({ type: "spotClearinghouseState", user }),
-    info({ type: "userFills", user }),
-    spotNameMap(),
+    spotPricing(),
   ]);
 
-  if (perp === null && spotState === null && fills === null) {
+  if (perp === null && spotState === null) {
     return NextResponse.json({ error: "Trader data unavailable" }, { status: 502 });
   }
 
-  // Resolve here rather than shipping the whole 316-pair table to the browser.
-  const parsed = fills === null ? null : parseFills(fills, FILL_LIMIT);
-  const parsedFills =
-    parsed === null
-      ? null
-      : parsed.map((f) => {
-          const label = spotNames.get(f.coin);
-          return label ? { ...f, label } : f;
-        });
-
   // One upstream failing is a partial answer, and it goes out as nulls rather than
-  // empty arrays so the panels can say "unavailable" instead of "flat". A partial
+  // empty arrays so the panel can say "unavailable" instead of "flat". A partial
   // body must also not be pinned at the edge: the public header below served that
   // answer to every visitor of the address for up to 150 s, turning one 429 — which
   // Hyperliquid returns on a second sequential call from a shared egress IP — into
-  // two and a half minutes of a confident, wrong empty state.
-  const partial = perp === null || spotState === null || fills === null;
+  // two and a half minutes of a confident, wrong empty state. Missing PRICING counts
+  // too: a spot list whose every value is an em dash is a degraded body, and pinning
+  // it would outlive the 30 s window the mids cache is meant to hold it for.
+  const partial =
+    perp === null ||
+    spotState === null ||
+    pricing.spotMeta === null ||
+    pricing.allMids === null;
 
   return NextResponse.json(
     {
       address: user,
       margin: parseMargin(perp),
       positions: parsePositions(perp),
-      spot: parseSpot(spotState),
-      // Trimmed deliberately, but not indiscriminately: hash/tid/cloid stay behind
-      // as internals the UI never renders. `oid` and `twapId` do ride along — they
-      // identify an ORDER, not a wallet (the wallet is already the URL), and they are
-      // what lets the tape say "one order" truthfully: the 7d #1 address's hundred
-      // most recent fills carry 73 distinct oids, which the time heuristic that stood
-      // in for them collapsed into ten rows.
-      fills: parsedFills,
+      // Priced here rather than in the browser: the pair map is a 136KB table of 328
+      // entries and the mids another 1,079 keys, for eleven rows on screen.
+      spot: priceSpot(parseSpot(spotState), pricing.spotMeta, pricing.allMids),
       fetchedAt: Date.now(),
     },
     {

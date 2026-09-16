@@ -3,7 +3,7 @@
 import { Fragment, useMemo, useState } from "react";
 import { AddressLegend, Legend, dash } from "./Instrument";
 import { formatCurrency, toneClass } from "../lib/formatters";
-import { FILL_LIMIT, TraderSnapshot } from "../lib/trader";
+import { FILL_LIMIT, TraderFills } from "../lib/trader";
 import {
   DirFacets,
   LabelledFill,
@@ -185,10 +185,10 @@ export default function TradesPanel({
   onRetry,
 }: {
   address: string | null;
-  data: TraderSnapshot | null;
+  data: TraderFills | null;
   loading: boolean;
   error: string | null;
-  /** Re-runs the snapshot fetch for this address (useTrader's reload). */
+  /** Re-reads this trader, both slices (useTrader's reload). */
   onRetry?: () => void;
 }) {
   const [grouped, setGrouped] = useState(true);
@@ -245,10 +245,13 @@ export default function TradesPanel({
 
   if (!data) return null;
 
-  // Absent before empty. The route answers 200 with `fills: null` when the userFills
-  // call alone fails, and the copy below asserts "that is a real state, not an error"
-  // — a literal falsehood over a call that never answered. It is only ever correct
-  // for a genuine [].
+  // Absent before empty. The copy below asserts "that is a real state, not an error",
+  // which is a literal falsehood over a call that never answered — it is only ever
+  // correct for a genuine []. Since the split, an absent tape is the whole of this
+  // route's answer being absent, so it arrives as a 502 and the error branch above
+  // catches it; this stays as the guard for a `fills: null` that a shape change could
+  // still produce, because the state it describes is the one that must never be
+  // dressed as "no trades".
   if (data.fills === null) {
     return (
       <Panel>
@@ -256,9 +259,9 @@ export default function TradesPanel({
         <p className="mt-2 font-mono text-xs uppercase tracking-[0.16em] text-[var(--loss)]">
           Upstream did not answer for this address
         </p>
-        {/* The tab, the selection and the rest of the snapshot survive the retry.
-            Disabled while a request is in flight, since a partial 200 leaves `data`
-            populated and nothing else on screen would say the click landed. */}
+        {/* The tab, the selection and the positions reading all survive the retry.
+            Disabled while a request is in flight, since a retry over a body that is
+            still on screen changes nothing else to say the click landed. */}
         {onRetry && <Retry onRetry={onRetry} loading={loading} />}
       </Panel>
     );

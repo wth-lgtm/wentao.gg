@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { TraderMetrics, TimePeriod } from "../lib/types";
 import { TTL_S } from "../lib/config";
+import { isUnreadableBoard, unreadableBoardMessage } from "../lib/boardHealth";
 
 // Fetches /api/hl-leaderboard and keeps all four periods in memory, so changing the
 // time filter is instant and costs no network. Previously this re-downloaded the entire
@@ -70,6 +71,19 @@ export function nextWakeAt({
   return Math.max(floor, snapshot.receivedAt + ttlMs - snapshot.ageAtReceipt);
 }
 
+/** Per-window counts, keeping only the entries that are actually numbers: an absent or
+ * unreadable figure is null on the rail, never a confident 0. */
+function readRowsPartial(raw: unknown): Partial<Record<TimePeriod, number>> {
+  if (raw === null || typeof raw !== "object") return {};
+  const out: Partial<Record<TimePeriod, number>> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      out[key as TimePeriod] = value;
+    }
+  }
+  return out;
+}
+
 export function useLeaderboard(timePeriod: TimePeriod) {
   const [periods, setPeriods] = useState<Periods>({});
   // `loading` means "there is nothing to show yet"; `refreshing` means "a fetch is
@@ -80,10 +94,17 @@ export function useLeaderboard(timePeriod: TimePeriod) {
   const [error, setError] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState<LeaderboardSnapshot | null>(null);
   const [rowsSeen, setRowsSeen] = useState<number | null>(null);
+  // Rows upstream returned that could not be read completely, PER WINDOW — the figure
+  // lib/hyperliquid.ts has published since PR #53 with nothing to consume it. It is
+  // what lets the rail explain a board that is short instead of the route answering
+  // 502 the moment one field is renamed. See app/api/hl-leaderboard/route.ts.
+  const [rowsPartial, setRowsPartial] = useState<Partial<Record<TimePeriod, number>>>({});
   const [ttlSeconds, setTtlSeconds] = useState<number | null>(null);
   // A refresh that came back byte-identical. Transient: the rail's STATE field and the
   // button label say so for UNCHANGED_MS and then return to IDLE / Refresh.
   const [unchanged, setUnchanged] = useState(false);
+  // The body arrived and held no readable row in any window. See lib/boardHealth.
+  const [unreadable, setUnreadable] = useState(false);
   // Bumped whenever a load SETTLES, success or failure. The wake effect below keys on
   // it: a failed refetch leaves `snapshot` untouched, so without this the effect never
   // re-ran and the expiry timer was never rescheduled — one failure and the page
@@ -108,6 +129,7 @@ export function useLeaderboard(timePeriod: TimePeriod) {
     attemptedAtRef.current = Date.now();
     setRefreshing(true);
     setError(null);
+    setUnreadable(false);
     window.clearTimeout(unchangedTimer.current);
     setUnchanged(false);
 
@@ -139,13 +161,27 @@ export function useLeaderboard(timePeriod: TimePeriod) {
       const previous = updatedAtRef.current;
       updatedAtRef.current = updatedAt;
 
+      const partialRows = readRowsPartial(body.rowsPartial);
+
       setPeriods(body.periods as Periods);
       setSnapshot({ receivedAt: Date.now(), ageAtReceipt });
       setRowsSeen(typeof body.rowsSeen === "number" ? body.rowsSeen : null);
+      setRowsPartial(partialRows);
       setTtlSeconds(typeof body.ttlSeconds === "number" ? body.ttlSeconds : null);
       setLoading(false);
       setRefreshing(false);
       setAttempts((n) => n + 1);
+
+      // A 200 that is not a board. The route now serves a payload whose rows all landed
+      // incomplete rather than answering 502 — the right call, since it can say how many
+      // and the rail shows it — but `periods` is then empty in every window and
+      // LeaderboardTable reads no rows with no error as EMPTY: "No traders found with
+      // activity in this period", a fact about the market that nothing measured. The
+      // flag is recorded rather than the sentence because the sentence names the window
+      // the visitor is ON, which this callback cannot read (empty deps, by design); it
+      // is composed at the return below so switching the filter re-states it with that
+      // window's own count — the same number the rail's DROPPED field shows.
+      setUnreadable(isUnreadableBoard(body));
 
       // Only the button's own action reports this. `stale-while-revalidate=900` means
       // even the first click AFTER the TTL is answered from the same CDN snapshot, so
@@ -245,9 +281,20 @@ export function useLeaderboard(timePeriod: TimePeriod) {
     periods,
     loading,
     refreshing,
-    error,
+    // A thrown request wins: it is the more specific failure, and one sentence per
+    // failure is the rule the announcement effect in page.tsx depends on.
+    error:
+      error ??
+      (unreadable
+        ? unreadableBoardMessage(rowsPartial[timePeriod] ?? null)
+        : null),
     snapshot,
     rowsSeen,
+    // Scoped to the window on screen, because the figures pnl/roi/vlm are: a row whose
+    // 7d volume is missing is dropped from the 7d board alone. `?? null` keeps the
+    // distinction the payload makes — 0 is "every row read cleanly", null is "the body
+    // did not say".
+    rowsPartial: rowsPartial[timePeriod] ?? null,
     ttlSeconds,
     unchanged,
     refresh,

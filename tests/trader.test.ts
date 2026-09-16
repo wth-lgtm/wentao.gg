@@ -100,7 +100,12 @@ test("parseSpot: a populated wallet keeps its counts", () => {
   });
 
   assert.ok(parsed !== null);
-  assert.deepEqual(parsed, [{ coin: "HYPE", total: 4321.5678, hold: 12.5 }]);
+  // usdValue starts null because it is not in this payload: pricing needs spotMeta and
+  // allMids, which are separate calls. A parser cannot price — see priceSpot and
+  // tests/priceSpot.test.ts.
+  assert.deepEqual(parsed, [
+    { coin: "HYPE", total: 4321.5678, hold: 12.5, usdValue: null },
+  ]);
 });
 
 test("parseFills: null upstream is absent, an answered empty tape is empty", () => {

@@ -21,6 +21,40 @@ import { useReducedMotion } from "framer-motion";
 
 const DIGITS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
 
+export interface OdometerCell {
+  /** Distance from the RIGHT end, so it survives a change of length. Always negative. */
+  key: number;
+  ch: string;
+  /** Digits roll on a strip; every other character is a static span. */
+  digit: boolean;
+}
+
+/**
+ * One cell per character, keyed from the right.
+ *
+ * The columns used to be keyed by string index, which only holds identity while the
+ * figure's LENGTH holds. On "$9.79M" -> "$10.06M" every column after the first was
+ * re-keyed to a different character: the index that had held the decimal point now
+ * held a digit, so React reused that node and a static '.' span became a digit strip,
+ * while the strips either side rolled to whatever character had shifted into their
+ * index. The "a figure that falls rolls DOWN" claim above only ever held for
+ * same-length updates.
+ *
+ * From the right, a carry adds a drum on the LEFT and the units, tenths and hundredths
+ * keep their identity — which is how a physical odometer behaves. See
+ * tests/odometer.test.ts.
+ */
+export function odometerCells(formatted: string): OdometerCell[] {
+  const chars = formatted.split("");
+  return chars.map((ch, i) => ({
+    key: i - chars.length,
+    ch,
+    // The gate: only a matched digit reaches the custom property below, so nothing
+    // else can travel into a style attribute.
+    digit: ch >= "0" && ch <= "9",
+  }));
+}
+
 export default function Odometer({
   formatted,
   delayMs = 0,
@@ -62,11 +96,9 @@ export default function Odometer({
         data-enter={entering && !reduce ? "true" : undefined}
         style={entering && !reduce ? { animationDelay: `${delayMs}ms` } : undefined}
       >
-        {formatted.split("").map((ch, i) =>
-          // The regex is the gate: only a matched digit reaches the custom property,
-          // so nothing else can travel into a style attribute.
-          ch >= "0" && ch <= "9" ? (
-            <span key={i} className="hl-odo-digit">
+        {odometerCells(formatted).map(({ key, ch, digit }) =>
+          digit ? (
+            <span key={key} className="hl-odo-digit">
               <span
                 className="hl-odo-strip"
                 style={{ "--d": ch } as React.CSSProperties}
@@ -79,7 +111,7 @@ export default function Odometer({
               </span>
             </span>
           ) : (
-            <span key={i} className="hl-odo-char">
+            <span key={key} className="hl-odo-char">
               {ch}
             </span>
           )
