@@ -95,7 +95,9 @@ const loadStats = unstable_cache(
     // keeps whatever pages are in hand and reports `truncated`, rather than throwing away a
     // commit total and language list that were fetched successfully. The client must then
     // say the window is incomplete instead of drawing unknown days as zeros.
-    const windowStart = commitWindowStart(new Date(), WINDOW_WEEKS);
+    // One instant for the window AND the snapshot day, so the two can never disagree.
+    const generatedAt = new Date();
+    const windowStart = commitWindowStart(generatedAt, WINDOW_WEEKS);
     const pageCap = process.env.GITHUB_TOKEN ? PAGE_CAP_TOKEN : PAGE_CAP_ANON;
     const { authored, truncated } = await fetchCommitWindow(
       ghFetch,
@@ -117,6 +119,13 @@ const loadStats = unstable_cache(
       days,
       // What the `days` map actually covers, so a consumer never has to assume.
       windowStart: utcDayKey(windowStart),
+      // The UTC day this snapshot was taken. The entry is served for up to 15 minutes past a
+      // 5-minute regeneration and the CDN can hold it across a UTC midnight, so a viewer
+      // whose today is later than this must not draw today's column as a zero — the card
+      // ends its grid on this day and says so. Emitted rather than inferred from
+      // `windowStart`: a client inverting the window with its own copy of WINDOW_WEEKS would
+      // mislabel every visitor the day this constant changed.
+      snapshotDay: utcDayKey(generatedAt),
       truncated,
     };
   },

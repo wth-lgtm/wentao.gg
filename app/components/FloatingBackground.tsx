@@ -5,12 +5,7 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Physics, RigidBody, CuboidCollider, InstancedRigidBodies, CoefficientCombineRule, useRapier, type RapierRigidBody, type InstancedRigidBodyProps } from "@react-three/rapier";
 import { easing } from "maath";
 import * as THREE from "three";
-import type { Piece } from "../lib/commitPile";
-
-// Deterministic pseudo-random (stable across renders → no hydration drift).
-function rand(i: number, seed: number): number {
-  return Math.abs(Math.sin(i * 127.1 + seed * 311.7) * 43758.5453) % 1;
-}
+import { TRAY, fillScale, pourSchedule, rand, shapeOf, sizeOf, trainFor, type Piece, type ShapeKey } from "../lib/commitPile";
 
 // The tray. The sim box used to BE the clip rectangle (walls at ±hw, floor at −hh), so every
 // piece touching an edge was guillotined by the region's overflow: rotation is free on all
@@ -19,11 +14,12 @@ function rand(i: number, seed: number): number {
 // by the same key as the pieces: a slab whose top face reads as a ~28 px perspective band and
 // two lips whose inner faces read as wedges. Perspective check (camera z 11, factor
 // 11/(11−z)): the slab's front-bottom edge at y = −hh+0.58, z = 0.9 projects to −4.33 > −hh
-// (−4.556), and a lip's outer top corner at z = 0.7 to (hw−0.88)·1.068 < hw for hw ≥ 5.4 —
-// so the tray is never itself clipped. (The originally proposed −hh+0.55 with z ±1.3 came
-// out at −4.67: cut by the frame it was meant to replace.)
-const INSET = 1.0; // wall inner face, inside the frame edge
-const FLOOR_LIFT = 0.7; // floor top above the frame bottom
+// (−4.556), and a lip's outer top corner at z = 0.7 projects to (hw−0.88)·1.068, which stays
+// inside hw as long as hw < 13.8 — an upper bound, and the widest tray this card draws is
+// hw 11.5. So the tray is never itself clipped. (The originally proposed −hh+0.55 with z ±1.3
+// came out at −4.67: cut by the frame it was meant to replace.)
+const INSET = TRAY.inset; // wall inner face, inside the frame edge
+const FLOOR_LIFT = TRAY.floorLift; // floor top above the frame bottom
 const TH = 0.6; // floor / ceiling / z-wall collider half-thickness
 // Side walls are thick, outward. They follow the live viewport while the pile does not, so a
 // narrowing window drives them INTO the edge pieces; penetration resolves toward the nearest
@@ -110,80 +106,20 @@ const K = 8; // gentler homing (was 14)
 const C = 2 * Math.sqrt(K) * 0.9; // near-critical damping (zeta 0.9)
 const SLACK = 1.1; // recall only pieces shoved beyond this → pile reforms organically, not in columns
 
-// "Lego land" — a mixed pile of geometric primitives instead of only bars. Each kind is
-// its own instanced group with a matching auto-collider (cuboid/ball, convex hull otherwise).
-type Collider = "cuboid" | "ball" | "hull";
-const SHAPE_DEFS: { key: string; collider: Collider }[] = [
-  { key: "box", collider: "cuboid" },
-  { key: "sphere", collider: "ball" },
-  { key: "cone", collider: "hull" },
-  { key: "octa", collider: "hull" },
-  { key: "tetra", collider: "hull" },
-  { key: "torus", collider: "hull" },
-  { key: "ico", collider: "hull" },
-];
-// Weighted picker — the box brick stays the most common so it still reads as a heatmap pile.
-const PICK = [0, 0, 0, 1, 2, 3, 4, 5, 6];
-// Cross-section of a unit-scale primitive facing the camera (× s²), for the fill rule.
-const AREA: Record<string, number> = { sphere: 0.79, cone: 0.52, octa: 0.77, tetra: 0.55, torus: 0.72, ico: 0.8 };
-// A box's height is the heatmap's own extrusion for that level; every other shape is a
-// uniform scale so it keeps its silhouette.
-const HEIGHTS = [0.34, 0.62, 0.96, 1.35, 1.85];
-
-function shapeOf(i: number) {
-  return SHAPE_DEFS[PICK[Math.floor(rand(i, 7) * PICK.length)]];
-}
-function sizeOf(i: number, key: string, level: number): { scale: [number, number, number]; area: number } {
-  if (key === "box") {
-    const w = 0.42 + rand(i, 1) * 0.14;
-    const d = w * (0.9 + rand(i, 2) * 0.2);
-    const h = HEIGHTS[level] * (0.9 + rand(i, 12) * 0.22);
-    return { scale: [w, h, d], area: w * h };
-  }
-  const s = 0.5 + rand(i, 1) * 0.62; // uniform → keeps each primitive's shape, varied sizes
-  return { scale: [s, s, s], area: AREA[key] * s * s };
-}
-
-// Fill rule: one block per commit means the count follows the quarter (165 today, 100 last
-// week, a few dozen in a quiet one) and so does the mass — a level-4 box is four times the
-// face of a level-0 one — and pieces whose size ignored either would leave the tray a fifth
-// full one quarter and jammed against its ceiling the next. The pieces are scaled so their
-// summed cross-section, packed at the density this shape mix settles to, puts the crest (the
-// topmost centre) at CREST of the tray's height. Measured on the live 165 level-4 commits:
-// coverage 0.68 of the tray settled to a crest of 0.89, so the mix packs at ~0.76; a
-// 15% squeeze (the re-lay threshold) then lifts 0.55 to 0.65, well under the ceiling at
-// 0.92. Clamped: a handful of commits become a few big blocks, not a boulder, and
-// a flood of them stays coarse enough to read. Frozen at mount with the layout — colliders
-// are built once from the instance scale (react-three-rapier re-derives them only when the
-// `colliders` prop changes), so a re-lay must not change piece sizes.
-const CREST = 0.55;
-const DENSITY = 0.76;
-const K_MIN = 0.75;
-const K_MAX = 1.6;
-function fillScale(hw: number, hh: number, pieces: readonly Piece[]): number {
-  let sum = 0;
-  for (let i = 0; i < pieces.length; i++) sum += sizeOf(i, shapeOf(i).key, pieces[i].level).area;
-  if (sum === 0) return 1;
-  const tray = 2 * (hw - INSET) * (2 * hh - FLOOR_LIFT);
-  return Math.min(K_MAX, Math.max(K_MIN, Math.sqrt((CREST * DENSITY * tray) / sum)));
-}
-
 // The pour. Pieces are born `fixed`, parked out of frame, and released on 100 ms beats from a
 // mouth just above the frame's top edge — the entrance is a metered pour that starts when
 // the tray is actually on screen, not a rain that played 300 px before the card arrived and
-// before its numbers existed. Each beat opens every PHASES-th slot across the mouth, the
-// phase advancing one slot per beat so the pattern ripples left → right (the calendar's
-// direction); a slot is reused only every PHASES beats, by which time the previous train
-// has fallen V0·0.3 + 0.54 ≈ 3 u — clear of the next one. A train stacks TRAIN pieces a slot
-// apart above the mouth and falls as one, so its members never overlap; TRAIN grows with
-// the count so no quarter pours for longer than MAX_BEATS. Fixed bodies ignore each other,
-// so the park can overlap freely, and the mesh sync writes every body's matrix (not just
-// active ones), so the park is drawn where it is — out of frame.
+// before its numbers existed. The metre itself (which slot opens on which beat, how tall a
+// train) is pourSchedule/trainFor in commitPile.ts, tested there. Two things about the trains
+// are only approximately true: a slot is reopened every POUR.phases beats, by which time the
+// previous train has fallen V0·0.3 + 0.54 ≈ 3 u — clear of the next one; and the members of
+// a train are a slot apart, which clears most pairs, but two tumbled level-4 boxes (half-
+// diagonals 0.92 u each against a 1.9 u slot) can touch at release and rapier parts them
+// with a small pop. Fixed bodies ignore each other, so the park can overlap freely, and the
+// mesh sync writes every body's matrix (not just active ones), so the park is drawn where it
+// is — out of frame.
 const BEAT_MS = 100;
 const SLOT = 2.2; // × piece scale: clears a tumbled level-4 box (2.07 u tall)
-const PHASES = 3;
-const MAX_BEATS = 24;
-const TRAIN_MAX = 5;
 const V0 = 8; // exit speed downward (u/s)
 const VX = 0.5; // and a hint of drift toward the right, the way the ripple runs (1.5 heaped the right wall)
 const GRACE_BEATS = 12; // after the last release, before the ceiling closes: a 5-train top falls 10 u in 0.75 s
@@ -201,7 +137,7 @@ const RELAY_FRAC = 0.15;
 // Per-shape material feel. Restitution combine-rule priority (Max > Min > Average) means
 // round shapes (Max) stay lively off the Average floor and bounce/roll, while faceted
 // shapes (Min) land dead-calm — energetic character without stack-wide jitter.
-const MATERIALS: Record<string, {
+const MATERIALS: Record<ShapeKey, {
   density: number; friction: number; restitution: number;
   restitutionRule: CoefficientCombineRule; angularDamping: number; linearDamping: number;
 }> = {
@@ -214,7 +150,12 @@ const MATERIALS: Record<string, {
   torus:  { density: 0.9, friction: 0.55, restitution: 0.18, restitutionRule: CoefficientCombineRule.Max, angularDamping: 0.25, linearDamping: 0.05 },
 };
 
-function geomFor(key: string): ReactNode {
+// Each shape is its own instanced group with a matching auto-collider (cuboid/ball, convex
+// hull otherwise).
+type Collider = "cuboid" | "ball" | "hull";
+const COLLIDER: Record<ShapeKey, Collider> = { box: "cuboid", sphere: "ball", cone: "hull", octa: "hull", tetra: "hull", torus: "hull", ico: "hull" };
+
+function geomFor(key: ShapeKey): ReactNode {
   switch (key) {
     case "sphere": return <sphereGeometry args={[0.5, 16, 16]} />;
     case "cone": return <coneGeometry args={[0.52, 1, 20]} />;
@@ -227,8 +168,7 @@ function geomFor(key: string): ReactNode {
 }
 
 interface Group {
-  key: string;
-  collider: Collider;
+  key: ShapeKey;
   instances: InstancedRigidBodyProps[];
   /** palette level per instance — the colour itself is theme-side, see `shades` */
   levels: number[];
@@ -276,14 +216,17 @@ function Pile({ pieces, accent, card, light, visible, pour }: {
   // leave half the box empty or half the pile outside it — there a re-rain is the honest
   // answer, so the layout is re-laid to the live size once the drag has been still for
   // RELAY_QUIET_MS (a continuous drag from 1440 to 700 re-laid at every 25% band before).
-  // The piece scale is part of the frozen layout, see fillScale.
-  const [spawn, setSpawn] = useState(() => ({ hw, hh, k: fillScale(hw, hh, pieces) }));
+  // The piece scale is re-solved for the new tray with it (a 1440→720 drag kept k for a 2.6×
+  // smaller tray and crested at 1.7 of its height), and `seq` remounts the instanced bodies
+  // so their colliders are rebuilt at the new scale — react-three-rapier derives child
+  // colliders once, when the `colliders` prop changes, never from a later `scale`.
+  const [spawn, setSpawn] = useState(() => ({ hw, hh, k: fillScale(hw, hh, pieces), seq: 0 }));
   const relayPending = Math.abs(hw - spawn.hw) > RELAY_FRAC * spawn.hw;
   useEffect(() => {
     if (!relayPending) return;
-    const t = setTimeout(() => setSpawn((s) => ({ hw, hh, k: s.k })), RELAY_QUIET_MS);
+    const t = setTimeout(() => setSpawn((s) => ({ hw, hh, k: fillScale(hw, hh, pieces), seq: s.seq + 1 })), RELAY_QUIET_MS);
     return () => clearTimeout(t);
-  }, [relayPending, hw, hh]);
+  }, [relayPending, hw, hh, pieces]);
   // The walls follow the live width only inside the no-re-lay band. Past it they hold at
   // the spawn width until the re-lay lands: a 1024→784 px drag moved them 4 u into the
   // sleeping pile in the 300 ms before the re-lay, and a piece buried that deep in the
@@ -319,41 +262,36 @@ function Pile({ pieces, accent, card, light, visible, pour }: {
   // colour level (and a box's height, the heatmap's own extrusion) is the commit's.
   const layout = useMemo<Layout>(() => {
     const k = spawn.k;
-    const gs: Group[] = SHAPE_DEFS.map((d) => ({ key: d.key, collider: d.collider, instances: [], levels: [], beats: [], rx: [], ry: [] }));
+    const gs: Group[] = (Object.keys(COLLIDER) as ShapeKey[]).map((key) => ({ key, instances: [], levels: [], beats: [], rx: [], ry: [] }));
     const n = pieces.length;
     const slot = SLOT * k;
     const slots = Math.max(1, Math.floor((2 * (spawn.hw - SPAWN_INSET)) / slot));
-    const perBeat = Math.max(1, Math.floor(slots / PHASES));
-    const train = Math.min(TRAIN_MAX, Math.max(1, Math.ceil(n / (perBeat * MAX_BEATS))));
+    const train = trainFor(n, slots);
+    const stops = pourSchedule(n, slots, train);
     const mouth = spawn.hh + 1.3 * k;
     const x0 = -(slots * slot) / 2 + slot / 2;
-    let i = 0;
-    let beat = 0;
-    while (i < n) {
-      for (let j = beat % PHASES; j < slots && i < n; j += PHASES) {
-        for (let t = 0; t < train && i < n; t++, i++) {
-          const shape = shapeOf(i);
-          const g = gs[SHAPE_DEFS.indexOf(shape)];
-          const level = pieces[i].level;
-          const unit = sizeOf(i, shape.key, level).scale;
-          const scale: [number, number, number] = [unit[0] * k, unit[1] * k, unit[2] * k];
-          const rx = x0 + j * slot + (rand(i, 5) - 0.5) * 0.3 * k;
-          g.levels.push(level);
-          g.beats.push(beat);
-          g.rx.push(rx);
-          g.ry.push(mouth + t * slot);
-          g.instances.push({
-            key: `${g.key}-${g.instances.length}`,
-            type: "fixed",
-            position: [rx, mouth + PARK, 0],
-            rotation: [0, 0, rand(i, 9) * Math.PI],
-            scale,
-          });
-        }
-      }
-      beat++;
+    for (let i = 0; i < n; i++) {
+      const shape = shapeOf(i);
+      const g = gs.find((c) => c.key === shape)!;
+      const level = pieces[i].level;
+      const unit = sizeOf(i, shape, level).scale;
+      const scale: [number, number, number] = [unit[0] * k, unit[1] * k, unit[2] * k];
+      const stop = stops[i];
+      const rx = x0 + stop.slot * slot + (rand(i, 5) - 0.5) * 0.3 * k;
+      g.levels.push(level);
+      g.beats.push(stop.beat);
+      g.rx.push(rx);
+      g.ry.push(mouth + stop.rung * slot);
+      g.instances.push({
+        key: `${shape}-${g.instances.length}`,
+        type: "fixed",
+        position: [rx, mouth + PARK, 0],
+        rotation: [0, 0, rand(i, 9) * Math.PI],
+        scale,
+      });
     }
-    return { groups: gs.filter((g) => g.instances.length > 0), beats: beat, top: mouth + train * slot + k };
+    const beats = n > 0 ? stops[n - 1].beat + 1 : 0;
+    return { groups: gs.filter((g) => g.instances.length > 0), beats, top: mouth + train * slot + k };
   }, [pieces, spawn]);
 
   // One ramp read two ways: the heatmap mixes the accent 18/45/64/82/100% into --card in both
@@ -500,10 +438,13 @@ function Pile({ pieces, accent, card, light, visible, pour }: {
 
     // 2) the pile's peak speed — read once, for the settle capture and the idle test. Nothing
     //    is captured while trains are still parked: a fixed body reads 0 u/s and its X is the
-    //    mouth's, and a home taken there would recall the piece to the sky.
+    //    mouth's, and a home taken there would recall the piece to the sky. The idle test,
+    //    though, does not wait for the capture: a pour interrupted by a scroll (tray parked
+    //    0–30% visible, still inside the mount margin) would otherwise leave a half-poured
+    //    pile that never captured, never slept, and held the loop at full rate for nothing.
     const t = sinceSpawn.current;
     const settling = !captured.current && pourDone.current && t > SETTLE_MIN;
-    const idling = captured.current && !active.current;
+    const idling = !active.current;
     let maxV2 = 0;
     if (settling || idling) {
       // "out" is the union of the live box and the spawn box: a wall that moved inward has
@@ -548,7 +489,8 @@ function Pile({ pieces, accent, card, light, visible, pour }: {
 
     // idle → sleep the whole island (see IDLE_V). Quiet time runs on the delta rapier itself
     // integrates (clamped to 0.5 s), so a 10 fps tab and a 120 Hz one agree on "3 s".
-    // Nothing below has work for a sleeping pile.
+    // Nothing below has work for a sleeping pile. (Sleeping a still-parked fixed body is a
+    // no-op; a later release wakes it with setBodyType.)
     if (idling) {
       quietFor.current = maxV2 < IDLE_V * IDLE_V ? quietFor.current + Math.min(delta, 0.5) : 0;
       if (quietFor.current >= IDLE_T) {
@@ -625,10 +567,10 @@ function Pile({ pieces, accent, card, light, visible, pour }: {
         const mat = MATERIALS[g.key];
         return (
           <InstancedRigidBodies
-            key={g.key}
+            key={`${g.key}-${spawn.seq}`}
             ref={bodyHolders[gi]}
             instances={g.instances}
-            colliders={g.collider}
+            colliders={COLLIDER[g.key]}
             density={mat.density}
             friction={mat.friction}
             restitution={mat.restitution}

@@ -6,14 +6,10 @@ import { motion, useMotionValue, useSpring, useTransform, useReducedMotion } fro
 import { GitCommit, Code, Github, Flame, Zap } from "lucide-react";
 import { useTheme } from "./ThemeProvider";
 import { buildDayWindow, currentStreak, utcDayKey, type CommitDay } from "../lib/githubStats";
-import { levelFor, piecesForDays, snapshotDay } from "../lib/commitPile";
+import { TRAY, capPieces, fillScale, levelFor, piecesForDays } from "../lib/commitPile";
 
 // Interactive physics pile — client-only, lazy (three.js + rapier off the initial bundle).
 const FloatingBackground = dynamic(() => import("./FloatingBackground"), { ssr: false });
-
-// The route's window: the widest grid drawn here. It reports where that window starts, and
-// this constant is what turns that back into the day the snapshot was taken.
-const ROUTE_WINDOW_WEEKS = 12;
 
 interface RepoStats {
   commits: number;
@@ -21,8 +17,8 @@ interface RepoStats {
   languages: { name: string; percentage: number }[];
   /** The route reached its page cap or lost a page: older days are unknown, not zero. */
   truncated: boolean;
-  /** First UTC day the `days` map covers, as the route reported it; null when it did not. */
-  windowStart: string | null;
+  /** The UTC day the route generated this payload; null when it did not say. */
+  snapshotDay: string | null;
 }
 
 function getIntensity(count: number): string {
@@ -71,6 +67,11 @@ const CELL = 15;
 const GAP = 5;
 const STEP = CELL + GAP;
 const BASE_TILT_X = 52; // 3/4 skyline tilt
+// The tray's column: `gap-x-8` between the board column and the tray, and the tray's fixed
+// height in world units — R3F's viewport half-height at fov 45 from z 11 — so the DOM can run
+// the pile's own fill rule on the tray the grid WOULD give, before mounting a canvas.
+const TRAY_GAP = 32;
+const TRAY_HH = Math.tan((45 / 2) * Math.PI / 180) * 11;
 const BASE_ROT_Y = -26; // horizontal turn — staggers columns so fewer bars hide
 
 export default function SiteStats() {
@@ -80,7 +81,7 @@ export default function SiteStats() {
     linesOfCode: 0,
     languages: [],
     truncated: false,
-    windowStart: null,
+    snapshotDay: null,
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -91,6 +92,8 @@ export default function SiteStats() {
   const [bgVisible, setBgVisible] = useState(false);
   const [bgBorn, setBgBorn] = useState(false);
   const [trayInView, setTrayInView] = useState(false);
+  const [blockSize, setBlockSize] = useState<{ w: number; h: number } | null>(null);
+  const [trayShown, setTrayShown] = useState(false);
   const [accentHex, setAccentHex] = useState("#3b82f6");
   const [cardHex, setCardHex] = useState("");
   const reduceMotion = useReducedMotion() ?? false;
@@ -142,6 +145,18 @@ export default function SiteStats() {
       const io = new IntersectionObserver(([e]) => setTrayInView(e.isIntersecting), { threshold: 0.3 });
       io.observe(node);
       trayObserver.current = io;
+    }
+  }, []);
+  // The activity block's size, in both of its shapes (one column or board + tray), decides
+  // whether a tray fits: the block is what the grid divides, and its height is column 1's.
+  const blockObserver = useRef<ResizeObserver | null>(null);
+  const attachBlock = useCallback((node: HTMLDivElement | null) => {
+    blockObserver.current?.disconnect();
+    blockObserver.current = null;
+    if (node) {
+      const ro = new ResizeObserver(([e]) => setBlockSize({ w: e.contentRect.width, h: e.contentRect.height }));
+      ro.observe(node);
+      blockObserver.current = ro;
     }
   }, []);
 
@@ -199,7 +214,7 @@ export default function SiteStats() {
           linesOfCode: data.linesOfCode ?? 0,
           languages: data.languages ?? [],
           truncated: data.truncated === true,
-          windowStart: typeof data.windowStart === "string" ? data.windowStart : null,
+          snapshotDay: typeof data.snapshotDay === "string" ? data.snapshotDay : null,
         });
       } catch (err) {
         console.error("Error fetching data:", err);
@@ -221,11 +236,11 @@ export default function SiteStats() {
   // The grid ends on the day the SNAPSHOT was taken, not the viewer's today. The payload is
   // one cached entry served for up to 15 minutes past a 5-minute regeneration, so across a
   // UTC midnight a viewer can hold yesterday's snapshot: anchored on the client's clock, the
-  // newest column would draw as a zero for a day the data never saw. `snapshotDay` inverts
-  // the route's window start; when it is behind the client's today the window slides back to
-  // it and the labels say so. A payload without the field anchors on today as before.
+  // newest column would draw as a zero for a day the data never saw. The route says which
+  // day it generated on; when that is behind the client's today the window slides back to it
+  // and the labels say so. A payload without the field anchors on today as before.
   const todayKey = utcDayKey(new Date());
-  const snapKey = snapshotDay(stats.windowStart, ROUTE_WINDOW_WEEKS);
+  const snapKey = stats.snapshotDay;
   const stale = !unavailable && snapKey !== null && snapKey < todayKey;
   const anchorKey = stale ? snapKey : todayKey;
 
@@ -236,7 +251,9 @@ export default function SiteStats() {
     () => buildDayWindow(new Date(`${anchorKey}T12:00:00Z`), weeksToShow, commitData),
     [anchorKey, weeksToShow, commitData],
   );
-  const pieces = useMemo(() => piecesForDays(days), [days]);
+  // Capped at PIECE_CAP bodies (the route can date 300–500); the legend discloses the cut.
+  const pile = useMemo(() => capPieces(piecesForDays(days)), [days]);
+  const pieces = pile.shown;
   const weeks: CommitDay[][] = [];
   for (let i = 0; i < days.length; i += 7) weeks.push(days.slice(i, i + 7));
 
@@ -287,9 +304,29 @@ export default function SiteStats() {
     : stats.truncated
       ? `Commit activity (UTC days) — most recent ${windowCommits} commit${plural}; older days not shown${snapshotNote}`
       : `Commit activity for ${span} (UTC days) — ${windowCommits} commit${plural}${snapshotNote}`;
+  // Does the tray the grid would give hold legible pieces? Run the pile's fill rule on it:
+  // the tray is the block minus the board column and the gap, as tall as the block, and the
+  // camera is fixed so its height in world units is always TRAY_HH. Below TRAY.kLegible the
+  // blocks would be under ~10 px, so the tray is hidden and the block is one column rather
+  // than an overfilled tray sliced by its own clip (today's 165 commits need ~470 px of
+  // tray, a ~850 px viewport). A 0.05 band of hysteresis so a drag across the edge does not
+  // mount and unmount a WebGL context on every pixel. (setState during render is React's
+  // pattern for state that follows other state; an effect would cascade.)
+  const trayW = blockSize ? blockSize.w - boardW - TRAY_GAP : 0;
+  const trayH = blockSize ? blockSize.h : 0;
+  const kFit = useMemo(
+    () => (trayW > 0 && trayH > 0 ? fillScale(TRAY_HH * (trayW / trayH), TRAY_HH, pieces) : 0),
+    [trayW, trayH, pieces],
+  );
+  const wantTray = trayShown ? kFit >= TRAY.kLegible : kFit >= TRAY.kLegible + 0.05;
+  if (wantTray !== trayShown) setTrayShown(wantTray);
   // The pile is a second reading of the same window, so it exists only when the window is
-  // known; without it the activity block is one column, as it is for every non-3D visitor.
-  const showTray = use3D && windowKnown;
+  // known and the tray fits; without it the activity block is one column, as it is for every
+  // non-3D visitor.
+  const showTray = use3D && windowKnown && trayShown;
+  // The legend states the encoding, and the cut when there is one.
+  const cut = pile.total > pieces.length ? ` · ${pieces.length} of ${pile.total} shown` : "";
+  const trayLegend = `one block per commit, shaded by its day's level${cut} · push them`;
 
   return (
     <section className="py-20 md:py-24 px-6 relative z-20 pointer-events-none">
@@ -367,7 +404,13 @@ export default function SiteStats() {
                     language-chip row. Laid out as a sibling they share one frame and cannot
                     collide at any width; when there is no pile the grid is one column, so no
                     visitor gets an empty lower-right. */}
-                <div className={showTray ? "grid grid-cols-[auto_1fr] gap-x-8 gap-y-3 items-stretch" : "space-y-3"}>
+                <div
+                  ref={attachBlock}
+                  className={showTray ? "grid gap-x-8 gap-y-3 items-stretch" : "space-y-3"}
+                  // column 1 is exactly the board's width: a long label ("snapshot from …") wraps
+                  // inside it instead of widening the column and shrinking the tray unmeasured
+                  style={showTray ? { gridTemplateColumns: `${boardW}px 1fr` } : undefined}
+                >
                   <div className="col-start-1 row-start-1 text-xs text-muted">
                     Activity (UTC days){stale && <span className="text-[var(--legend)]"> · snapshot from {snapKey}</span>}
                   </div>
@@ -460,8 +503,8 @@ export default function SiteStats() {
                           pour={trayInView}
                         />
                       )}
-                      <span className="absolute left-3 top-2 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--legend)] pointer-events-none select-none">
-                        one block per commit · push them
+                      <span className="absolute left-3 right-3 top-2 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--legend)] pointer-events-none select-none">
+                        {trayLegend}
                       </span>
                     </div>
                   )}
