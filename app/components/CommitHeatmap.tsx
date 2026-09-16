@@ -1,14 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import dynamic from "next/dynamic";
 import { motion, useMotionValue, useSpring, useTransform, useReducedMotion } from "framer-motion";
 import { GitCommit, Code, Github, Flame, Zap } from "lucide-react";
 import { useTheme } from "./ThemeProvider";
-import { buildDayWindow, currentStreak, type CommitDay } from "../lib/githubStats";
+import { buildDayWindow, currentStreak, utcDayKey, type CommitDay } from "../lib/githubStats";
+import { levelFor, piecesForDays, snapshotDay } from "../lib/commitPile";
 
-// Interactive floating-sphere background — client-only, lazy (three.js off the initial bundle).
+// Interactive physics pile — client-only, lazy (three.js + rapier off the initial bundle).
 const FloatingBackground = dynamic(() => import("./FloatingBackground"), { ssr: false });
+
+// The route's window: the widest grid drawn here. It reports where that window starts, and
+// this constant is what turns that back into the day the snapshot was taken.
+const ROUTE_WINDOW_WEEKS = 12;
 
 interface RepoStats {
   commits: number;
@@ -16,6 +21,8 @@ interface RepoStats {
   languages: { name: string; percentage: number }[];
   /** The route reached its page cap or lost a page: older days are unknown, not zero. */
   truncated: boolean;
+  /** First UTC day the `days` map covers, as the route reported it; null when it did not. */
+  windowStart: string | null;
 }
 
 function getIntensity(count: number): string {
@@ -24,14 +31,6 @@ function getIntensity(count: number): string {
   if (count <= 5) return "bg-accent/60";
   if (count <= 10) return "bg-accent/80";
   return "bg-accent";
-}
-
-function levelFor(count: number): number {
-  if (count === 0) return 0;
-  if (count <= 2) return 1;
-  if (count <= 5) return 2;
-  if (count <= 10) return 3;
-  return 4;
 }
 
 function formatNumber(num: number): string {
@@ -81,6 +80,7 @@ export default function SiteStats() {
     linesOfCode: 0,
     languages: [],
     truncated: false,
+    windowStart: null,
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -89,20 +89,24 @@ export default function SiteStats() {
   const [finePointer, setFinePointer] = useState(false);
   const [bgArmed, setBgArmed] = useState(false);
   const [bgVisible, setBgVisible] = useState(false);
+  const [bgBorn, setBgBorn] = useState(false);
+  const [trayInView, setTrayInView] = useState(false);
   const [accentHex, setAccentHex] = useState("#3b82f6");
+  const [cardHex, setCardHex] = useState("");
   const reduceMotion = useReducedMotion() ?? false;
   const { resolvedTheme } = useTheme();
 
-  // Background canvas, three stages on one region. WARM (two viewport heights out): import the
-  // module — the pile's chunk group is ~1.07 MB gzip because rapier inlines its 1.44 MB WASM
-  // as base64, and at a 300 px lead a reading-pace scroll reached the card before the download
-  // did. Same specifier as the dynamic() loader, so Turbopack dedupes it into the same chunks.
-  // ARM (300 px): mount once and never unmount — unmounting rebuilt the WebGL context, the
-  // world and ~110 convex hulls and rained the pile in again on every return. The mount also
-  // waits for the fetch: the loading card is 226 px tall against 491 loaded, and the pile
-  // freezes its layout at mount, so a pile born in the loading card would spawn across ±19 u
-  // for walls that then snap to ±8.7 u. VISIBLE (live, both directions): only gates the
-  // frameloop inside. Callback ref → fires when the node attaches.
+  // Background canvas, three stages observed on the card (the tray itself only exists once
+  // the data has landed, and the warm stage must fire long before that would matter). WARM
+  // (two viewport heights out): import the module — the pile's chunk group is ~1.07 MB gzip
+  // because rapier inlines its 1.44 MB WASM as base64, and at a 300 px lead a reading-pace
+  // scroll reached the card before the download did. Same specifier as the dynamic() loader,
+  // so Turbopack dedupes it into the same chunks. ARM (300 px): mount once and never unmount
+  // — unmounting rebuilt the WebGL context, the world and ~110 convex hulls and rained the
+  // pile in again on every return. The mount also waits for the fetch: the pile freezes its
+  // layout at mount, and a pile born in the 226 px loading card spawned across ±19 u for
+  // walls that then snapped to ±8.7 u in the 491 px loaded one. VISIBLE (live, both
+  // directions): only gates the frameloop inside. Callback ref → fires when the node attaches.
   const bgObserver = useRef<IntersectionObserver | null>(null);
   const warmObserver = useRef<IntersectionObserver | null>(null);
   const attachBg = useCallback((node: HTMLDivElement | null) => {
@@ -127,6 +131,19 @@ export default function SiteStats() {
       bgObserver.current = io;
     }
   }, []);
+  // The pour waits for the tray, not the card: with a 300 px mount lead the old rain had
+  // finished before a reading-pace scroll reached it. 30% of the tray on screen is enough of
+  // its top edge for the trains to be seen entering.
+  const trayObserver = useRef<IntersectionObserver | null>(null);
+  const attachTray = useCallback((node: HTMLDivElement | null) => {
+    trayObserver.current?.disconnect();
+    trayObserver.current = null;
+    if (node) {
+      const io = new IntersectionObserver(([e]) => setTrayInView(e.isIntersecting), { threshold: 0.3 });
+      io.observe(node);
+      trayObserver.current = io;
+    }
+  }, []);
 
   // Cursor-parallax tilt for the 3D bar chart (drives the board only).
   const px = useMotionValue(0);
@@ -141,13 +158,24 @@ export default function SiteStats() {
     setFinePointer(window.matchMedia("(hover: hover) and (pointer: fine)").matches);
   }, []);
 
-  // Re-read the themed accent whenever the theme flips (light/dark accents differ).
+  // Re-read the themed accent and card whenever the theme flips (both differ per theme; the
+  // pile mixes one into the other exactly as the heatmap's LEVELS do). Deferred a microtask:
+  // React runs a child's passive effects before its parent's, so at this point the
+  // ThemeProvider has not yet flipped the <html> class for the theme this effect reacts to,
+  // and a synchronous read returned the OUTGOING theme's tokens — the pile lagged one flip
+  // behind (a light slab on the dark card). The accent alone hid it: #3b82f6 and #2563eb
+  // are a shade apart. A microtask runs after the whole flush, class included.
   useEffect(() => {
-    const readAccent = () => {
-      const a = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim();
+    let live = true;
+    queueMicrotask(() => {
+      if (!live) return;
+      const style = getComputedStyle(document.documentElement);
+      const a = style.getPropertyValue("--accent").trim();
       if (a) setAccentHex(a);
-    };
-    readAccent();
+      const c = style.getPropertyValue("--card").trim();
+      if (c) setCardHex(c);
+    });
+    return () => { live = false; };
   }, [resolvedTheme]);
 
   useEffect(() => {
@@ -171,6 +199,7 @@ export default function SiteStats() {
           linesOfCode: data.linesOfCode ?? 0,
           languages: data.languages ?? [],
           truncated: data.truncated === true,
+          windowStart: typeof data.windowStart === "string" ? data.windowStart : null,
         });
       } catch (err) {
         console.error("Error fetching data:", err);
@@ -184,9 +213,30 @@ export default function SiteStats() {
 
   const unavailable = !loading && error;
   const use3D = mounted && !isMobile && finePointer && !reduceMotion;
+  // Latched: once the card has been within its margin with the data landed, the canvas stays
+  // mounted whatever `loading` does later — a re-mount is a re-rain. (setState during render
+  // is React's pattern for state that follows other state; an effect would cascade.)
+  if (bgArmed && !loading && !bgBorn) setBgBorn(true);
+
+  // The grid ends on the day the SNAPSHOT was taken, not the viewer's today. The payload is
+  // one cached entry served for up to 15 minutes past a 5-minute regeneration, so across a
+  // UTC midnight a viewer can hold yesterday's snapshot: anchored on the client's clock, the
+  // newest column would draw as a zero for a day the data never saw. `snapshotDay` inverts
+  // the route's window start; when it is behind the client's today the window slides back to
+  // it and the labels say so. A payload without the field anchors on today as before.
+  const todayKey = utcDayKey(new Date());
+  const snapKey = snapshotDay(stats.windowStart, ROUTE_WINDOW_WEEKS);
+  const stale = !unavailable && snapKey !== null && snapKey < todayKey;
+  const anchorKey = stale ? snapKey : todayKey;
 
   const weeksToShow = isMobile ? 8 : 12;
-  const days = buildDayWindow(new Date(), weeksToShow, commitData);
+  // Memoised on the day key, not the Date: `days` feeds the pile's layout, and a new array
+  // identity per render would re-lay (re-rain) the pile on every parallax tick.
+  const days = useMemo(
+    () => buildDayWindow(new Date(`${anchorKey}T12:00:00Z`), weeksToShow, commitData),
+    [anchorKey, weeksToShow, commitData],
+  );
+  const pieces = useMemo(() => piecesForDays(days), [days]);
   const weeks: CommitDay[][] = [];
   for (let i = 0; i < days.length; i += 7) weeks.push(days.slice(i, i + 7));
 
@@ -230,18 +280,24 @@ export default function SiteStats() {
   // the label may not claim the full window (and "Best day" below it is then a floor over
   // the newest days, which is what "older days not shown" tells the reader).
   const plural = windowCommits !== 1 ? "s" : "";
+  const span = stale ? `the ${weeksToShow} weeks to ${snapKey}` : `the last ${weeksToShow} weeks`;
+  const snapshotNote = stale ? ` · snapshot from ${snapKey}` : "";
   const boardLabel = !windowKnown
     ? "Commit activity unavailable"
     : stats.truncated
-      ? `Commit activity (UTC days) — most recent ${windowCommits} commit${plural}; older days not shown`
-      : `Commit activity for the last ${weeksToShow} weeks (UTC days) — ${windowCommits} commit${plural}`;
+      ? `Commit activity (UTC days) — most recent ${windowCommits} commit${plural}; older days not shown${snapshotNote}`
+      : `Commit activity for ${span} (UTC days) — ${windowCommits} commit${plural}${snapshotNote}`;
+  // The pile is a second reading of the same window, so it exists only when the window is
+  // known; without it the activity block is one column, as it is for every non-3D visitor.
+  const showTray = use3D && windowKnown;
 
   return (
-    <section aria-label="GitHub activity" className="py-20 md:py-24 px-6 relative z-20 pointer-events-none">
+    <section className="py-20 md:py-24 px-6 relative z-20 pointer-events-none">
       {/* The card's visible header is the repo name, so the document outline jumped from
-          "Projects" straight to "Let's Connect" over a whole landmark. */}
+          "Projects" straight to "Let's Connect" over a whole landmark. The heading is the
+          landmark's one name — a matching aria-label read it twice. */}
       <h2 className="sr-only">GitHub activity</h2>
-      <div className="max-w-5xl mx-auto">
+      <div ref={attachBg} className="max-w-5xl mx-auto">
         <motion.div
           initial={{ opacity: 0 }}
           whileInView={{ opacity: 1 }}
@@ -249,20 +305,7 @@ export default function SiteStats() {
           transition={{ duration: 0.5 }}
           className="glass p-6 sm:p-8 pointer-events-auto"
         >
-          {/* Interactive floating-object background — confined to the empty lower-right
-              region so it never sits behind the stats, languages, or bar chart. */}
-          {use3D && (
-            <div
-              ref={attachBg}
-              aria-hidden
-              className="absolute z-0 overflow-hidden rounded-br-2xl"
-              style={{ top: "30%", left: "36%", right: 0, bottom: 0 }}
-            >
-              {bgArmed && !loading && <FloatingBackground active={bgVisible} accent={accentHex} light={resolvedTheme === "light"} />}
-            </div>
-          )}
-
-          {/* Content — pointer-events pass THROUGH to the background except on interactive bits */}
+          {/* Content — pointer-events pass THROUGH except on interactive bits */}
           <div className="relative z-10 pointer-events-none">
             {/* Header */}
             <div className="flex items-center justify-between mb-6">
@@ -294,7 +337,7 @@ export default function SiteStats() {
                       initial={{ opacity: 0, scale: 0.9 }}
                       whileInView={{ opacity: 1, scale: 1 }}
                       viewport={{ once: true }}
-                      transition={{ delay: 0.05 * i }}
+                      transition={{ delay: 0.1 * i, duration: 0.2 }}
                       className="flex items-center gap-3"
                     >
                       <div className="p-2 bg-accent/10 rounded-lg">
@@ -317,15 +360,26 @@ export default function SiteStats() {
                   ))}
                 </div>
 
-                {/* Activity — 3D bar chart (or flat fallback) */}
-                <div className="space-y-3">
-                  <div className="text-xs text-muted">Activity</div>
+                {/* Activity — 3D bar chart (or flat fallback). On the 3D path the board and the
+                    pile are two columns of one grid: the pile used to be a percent-anchored
+                    overlay (top 30%, left 36%) whose left edge crossed the board's projected
+                    right column below ~760 px viewports and whose top edge landed inside the
+                    language-chip row. Laid out as a sibling they share one frame and cannot
+                    collide at any width; when there is no pile the grid is one column, so no
+                    visitor gets an empty lower-right. */}
+                <div className={showTray ? "grid grid-cols-[auto_1fr] gap-x-8 gap-y-3 items-stretch" : "space-y-3"}>
+                  <div className="col-start-1 row-start-1 text-xs text-muted">
+                    Activity (UTC days){stale && <span className="text-[var(--legend)]"> · snapshot from {snapKey}</span>}
+                  </div>
 
                   {use3D ? (
-                    <div className="flex justify-center sm:justify-start" style={{ perspective: 900 }}>
+                    <div className="col-start-1 row-start-2 flex justify-start">
+                      {/* perspective lives on the board's own box: on the full content width the
+                          projection's origin drifted with the viewport, so the board's oblique
+                          look changed with the window. */}
                       <div
                         className="relative pointer-events-auto"
-                        style={{ paddingTop: 64, paddingBottom: 14 }}
+                        style={{ width: boardW, paddingTop: 64, paddingBottom: 14, perspective: 900, perspectiveOrigin: "50% 50%" }}
                         onPointerMove={onBoardMove}
                         onPointerLeave={resetTilt}
                         role="img"
@@ -347,7 +401,8 @@ export default function SiteStats() {
                                   initial={{ z: -26 }}
                                   whileInView={{ z: 0 }}
                                   viewport={{ once: true }}
-                                  transition={{ delay: 0.15 + (weekIndex * 7 + dayIndex) * 0.004, type: "spring", stiffness: 260, damping: 22 }}
+                                  // one beat per week column: the same left → right sweep the pile pours in
+                                  transition={{ delay: 0.1 * weekIndex, type: "spring", stiffness: 260, damping: 22 }}
                                   whileHover={{ z: 18, scale: 1.08 }}
                                 >
                                   <div className="absolute inset-0 rounded-[2px]" style={{ background: lvl.top, transform: `translateZ(${lvl.h}px)` }} />
@@ -377,13 +432,39 @@ export default function SiteStats() {
                   )}
 
                   {/* Legend */}
-                  <div className="flex items-center justify-center sm:justify-start gap-2 text-[10px] text-muted pt-1">
+                  <div className="col-start-1 row-start-3 flex items-center justify-center sm:justify-start gap-2 text-[10px] text-muted pt-1">
                     <span>Less</span>
                     {[0, 1, 3, 6, 11].map((count) => (
                       <div key={count} className={`w-3 h-3 rounded-[3px] ${getIntensity(count)}`} />
                     ))}
                     <span>More</span>
                   </div>
+
+                  {/* The tray: one block per commit the grid dates, poured once the data is in.
+                      pointer-events-auto because it sits inside the pointer-events-none content
+                      div — without it the cursor field is dead. Decorative to a reader: the
+                      board's label already states the count. */}
+                  {showTray && (
+                    <div
+                      ref={attachTray}
+                      aria-hidden
+                      className="relative col-start-2 row-start-1 row-span-3 overflow-hidden rounded-xl pointer-events-auto"
+                    >
+                      {bgBorn && (
+                        <FloatingBackground
+                          pieces={pieces}
+                          accent={accentHex}
+                          card={cardHex}
+                          light={resolvedTheme === "light"}
+                          active={bgVisible}
+                          pour={trayInView}
+                        />
+                      )}
+                      <span className="absolute left-3 top-2 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--legend)] pointer-events-none select-none">
+                        one block per commit · push them
+                      </span>
+                    </div>
+                  )}
                 </div>
               </>
             )}
