@@ -33,7 +33,10 @@ interface TraderCardProps {
 // so two copies of it is two chances for the stack to jump at the seating moment.
 const CARD = "hl-berth-card px-3 py-2.5";
 const LINE_1 = "flex items-center gap-1";
-const LINE_2 = "mt-1.5 flex items-baseline gap-4 pl-[2.875rem]";
+// 2.75rem = the 40px plate plus line one's 4px gap, so line two's first legend starts
+// exactly where the address does. It was 2.875rem, which was that sum when the gap was
+// 6px — measured after the gap changed, the two lines sat 2px apart.
+const LINE_2 = "mt-1.5 flex items-baseline gap-4 pl-[2.75rem]";
 
 // The phone's berth. Not a second design — the SAME instrument as the desktop row,
 // folded onto two lines because 390px cannot hold five columns.
@@ -163,7 +166,7 @@ export default function TraderCard({
       </div>
 
       {/* Line 2: the readings, as mono legend/value pairs in the rail's language.
-          Indented past the plate (40px + the 6px gap) so both lines hang off one edge. */}
+          Indented past the plate by LINE_2 so both lines hang off one edge. */}
       <div className={LINE_2}>
         <div className="flex items-baseline gap-1.5">
           <Legend>ROI</Legend>

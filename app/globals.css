@@ -1136,6 +1136,18 @@ input:focus {
   color: var(--muted);
 }
 
+/* On the phone card the delta sits in a 12px text-xs line beside two other readings, and
+   its own 11px mono line box is 0.59px taller than theirs. Measured: that made the 28
+   cards on the live 7D board that have a delta reading 66.19px and the 22 that render
+   "new" 65.59px — and left every one of the 28 taller than the arming frame that exists
+   to be their exact height, a 16.62px jump across the stack at the seating moment. One
+   line-height and all three delta states agree with the readings beside them. Scoped to
+   the card on purpose: the delta COLUMN's cell height feeds the commit engine's travel
+   arithmetic, and that is not a number to touch for 0.59px on a phone. */
+.hl-berth-card .hl-delta {
+  line-height: 1rem;
+}
+
 /* The same berth, folded for a phone. Below sm the board is a stack of these instead
    of a table, and the card used to be its own visual language: `bg-card rounded-xl
    border` per card, `bg-background rounded-lg` per stat tile — three nested surfaces
