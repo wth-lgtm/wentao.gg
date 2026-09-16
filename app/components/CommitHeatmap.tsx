@@ -87,19 +87,38 @@ export default function SiteStats() {
   const [mounted, setMounted] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [finePointer, setFinePointer] = useState(false);
+  const [bgArmed, setBgArmed] = useState(false);
   const [bgVisible, setBgVisible] = useState(false);
   const [accentHex, setAccentHex] = useState("#3b82f6");
   const reduceMotion = useReducedMotion() ?? false;
   const { resolvedTheme } = useTheme();
 
-  // Background canvas: mount/unmount as the card enters/leaves the viewport (frees the
-  // 2nd WebGL context offscreen). Callback ref → fires exactly when the node attaches.
+  // Background canvas, three stages on one region. WARM (two viewport heights out): import the
+  // module — the pile's chunk group is ~1.07 MB gzip because rapier inlines its 1.44 MB WASM
+  // as base64, and at a 300 px lead a reading-pace scroll reached the card before the download
+  // did. Same specifier as the dynamic() loader, so Turbopack dedupes it into the same chunks.
+  // ARM (300 px): mount once and never unmount — unmounting rebuilt the WebGL context, the
+  // world and ~110 convex hulls and rained the pile in again on every return. VISIBLE (live,
+  // both directions): only gates the frameloop inside. Callback ref → fires when the node attaches.
   const bgObserver = useRef<IntersectionObserver | null>(null);
+  const warmObserver = useRef<IntersectionObserver | null>(null);
   const attachBg = useCallback((node: HTMLDivElement | null) => {
     bgObserver.current?.disconnect();
     bgObserver.current = null;
+    warmObserver.current?.disconnect();
+    warmObserver.current = null;
     if (node) {
-      const io = new IntersectionObserver(([e]) => setBgVisible(e.isIntersecting), { rootMargin: "300px" });
+      const warm = new IntersectionObserver(([e]) => {
+        if (!e.isIntersecting) return;
+        import("./FloatingBackground");
+        warm.disconnect();
+      }, { rootMargin: "200% 0px" });
+      warm.observe(node);
+      warmObserver.current = warm;
+      const io = new IntersectionObserver(([e]) => {
+        setBgVisible(e.isIntersecting);
+        if (e.isIntersecting) setBgArmed(true);
+      }, { rootMargin: "300px" });
       io.observe(node);
       bgObserver.current = io;
     }
@@ -235,7 +254,7 @@ export default function SiteStats() {
               className="absolute z-0 overflow-hidden rounded-br-2xl"
               style={{ top: "30%", left: "36%", right: 0, bottom: 0 }}
             >
-              {bgVisible && <FloatingBackground accent={accentHex} light={resolvedTheme === "light"} />}
+              {bgArmed && <FloatingBackground active={bgVisible} accent={accentHex} light={resolvedTheme === "light"} />}
             </div>
           )}
 

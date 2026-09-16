@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useRef, type ReactNode } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Physics, RigidBody, CuboidCollider, InstancedRigidBodies, CoefficientCombineRule, type RapierRigidBody, type InstancedRigidBodyProps } from "@react-three/rapier";
 import { easing } from "maath";
@@ -28,6 +28,22 @@ function Boundary({ hw, hh, hz }: { hw: number; hh: number; hz: number }) {
 
 const SETTLE_MIN = 2.5;
 const SETTLE_MAX = 10;
+// Rapier sleeps whole contact islands and the pile is one island, so it never reaches the
+// engine's own threshold (replicated 90 s in Node: 200/200 awake). Nor does it ever go quiet
+// by itself: the Max-restitution round pieces keep a torus wobbling on the floor at ~6 rad/s
+// and a sphere rolling at 0.5 u/s indefinitely, so the settled pile's peak speed keeps
+// spiking to 0.6–1.0 u/s, now and then past it, forever (per-frame trace over 30 s in
+// Chrome: 90% of frames above 0.15 u/s, longest quiet run 4 frames — "all under 0.15 for six
+// frames" fired once, at 38 s; at 1.0 one run stayed awake 17 s). So: once no body has
+// exceeded IDLE_V for IDLE_T seconds of simulated time we put the island to sleep ourselves —
+// rapier then has no active body to invalidate() for and the demand frameloop stops: no
+// stepping, no 200 setMatrixAt, no draw. 1.5 u/s is ~57 px/s here, 50% over the creep peaks;
+// anything airborne passes it within 125 ms under g = 12, a recall slide is faster or
+// friction-locked, and a rolling sphere decays home inside 3 s. A kinetic test, not a pointer
+// one: after a swipe the cursor is gone while pieces are still airborne or being recalled by
+// the spring below.
+const IDLE_V = 1.5;
+const IDLE_T = 3;
 // soft cursor field — a FORCE model (impulse = force·dt, no ×mass) so heavy pieces resist
 // and light ones fly: weight becomes visible, and the shove is frame-rate independent.
 const R = 2.6; // influence radius
@@ -88,14 +104,34 @@ interface Group {
   key: string;
   collider: Collider;
   instances: InstancedRigidBodyProps[];
-  colors: THREE.Color[];
+  /** palette level per instance — the colour itself is theme-side, see `shades` */
+  levels: number[];
 }
 
-function Pile({ count, accent, light }: { count: number; accent: string; light: boolean }) {
-  const { viewport, camera, pointer, gl } = useThree();
+type Holder = { current: (RapierRigidBody | null)[] | null };
+
+function forEachBody(holders: Holder[], f: (b: RapierRigidBody) => void) {
+  for (let gi = 0; gi < holders.length; gi++) {
+    const list = holders[gi]?.current;
+    if (!list) continue;
+    for (let i = 0; i < list.length; i++) {
+      const b = list[i];
+      if (b) f(b);
+    }
+  }
+}
+
+function Pile({ count, accent, light, visible }: { count: number; accent: string; light: boolean; visible: boolean }) {
+  const { viewport, camera, pointer, gl, invalidate } = useThree();
   const hw = viewport.width / 2;
   const hh = viewport.height / 2;
   const hz = 1.3;
+  // The layout is frozen at mount. `position` is a mutable rapier option: a new instances
+  // array re-runs setTranslation on every body, so building positions from the live viewport
+  // teleported all 200 settled pieces back to the sky on every aspect change (reproduced on
+  // production at 1100→1000 px). Only the walls follow the viewport now; a narrower region
+  // nudges edge pieces inward, a wider one leaves a gap at the right — both beat a re-fall.
+  const [spawn] = useState(() => ({ hw, hh }));
 
   // One entry per group; aligned by group index. InstancedRigidBodies assigns its ref
   // as an OBJECT ref (writes .current) — a function ref silently no-ops — so we hand it
@@ -103,6 +139,11 @@ function Pile({ count, accent, light }: { count: number; accent: string; light: 
   const homeX = useRef<Float32Array[]>([]);
   const massA = useRef<Float32Array[]>([]);
   const captured = useRef(false);
+  // Seconds since the layout was (re)spawned, accumulated from frame deltas: R3F zeroes
+  // clock.elapsedTime on every frameloop switch, and a Canvas-age clock would capture home-X
+  // from mid-air spawn columns after any respawn.
+  const sinceSpawn = useRef(0);
+  const quietFor = useRef(0);
 
   const active = useRef(false);
   const wasActive = useRef(false);
@@ -113,29 +154,9 @@ function Pile({ count, accent, light }: { count: number; accent: string; light: 
   const hit = useMemo(() => new THREE.Vector3(), []);
   const dir = useMemo(() => new THREE.Vector3(), []);
 
-  const groups = useMemo<Group[]>(() => {
-    // Level palette per theme. Dark: accent → near-black. Light: WHITE → accent, so the
-    // pile is a bright white-to-blue mix (with genuine white pieces) on the white card.
-    const acc = new THREE.Color(accent || "#3b82f6");
-    const white = new THREE.Color("#ffffff");
-    const dark = new THREE.Color("#18181b");
-    const shades = light
-      ? [
-          white.clone(),
-          acc.clone().lerp(white, 0.7),
-          acc.clone().lerp(white, 0.46),
-          acc.clone().lerp(white, 0.22),
-          acc.clone(),
-        ]
-      : [
-          acc.clone().lerp(dark, 0.8),
-          acc.clone().lerp(dark, 0.55),
-          acc.clone().lerp(dark, 0.36),
-          acc.clone().lerp(dark, 0.18),
-          acc.clone(),
-        ];
+  const layout = useMemo<Group[]>(() => {
     const heights = [0.34, 0.62, 0.96, 1.35, 1.85];
-    const gs: Group[] = SHAPE_DEFS.map((d) => ({ key: d.key, collider: d.collider, instances: [], colors: [] }));
+    const gs: Group[] = SHAPE_DEFS.map((d) => ({ key: d.key, collider: d.collider, instances: [], levels: [] }));
     for (let i = 0; i < count; i++) {
       const gi = PICK[Math.floor(rand(i, 7) * PICK.length)];
       const g = gs[gi];
@@ -151,9 +172,9 @@ function Pile({ count, accent, light }: { count: number; accent: string; light: 
         const s = 0.5 + rand(i, 1) * 0.62; // uniform → keeps each primitive's shape, varied sizes
         scale = [s, s, s];
       }
-      g.colors.push(shades[level]);
-      const x = (rand(i, 5) * 2 - 1) * (hw - 0.9);
-      const y = hh * 0.3 + rand(i, 6) * hh * 3.4;
+      g.levels.push(level);
+      const x = (rand(i, 5) * 2 - 1) * (spawn.hw - 0.9);
+      const y = spawn.hh * 0.3 + rand(i, 6) * spawn.hh * 3.4;
       g.instances.push({
         key: `${g.key}-${g.instances.length}`,
         position: [x, y, 0],
@@ -162,35 +183,67 @@ function Pile({ count, accent, light }: { count: number; accent: string; light: 
       });
     }
     return gs.filter((g) => g.instances.length > 0);
-  }, [count, accent, hw, hh, light]);
+  }, [count, spawn]);
+
+  // Level palette per theme. Dark: accent → near-black. Light: WHITE → accent, so the
+  // pile is a bright white-to-blue mix (with genuine white pieces) on the white card.
+  // Kept apart from the layout so a theme flip only recolours in place.
+  const shades = useMemo(() => {
+    const acc = new THREE.Color(accent || "#3b82f6");
+    const white = new THREE.Color("#ffffff");
+    const dark = new THREE.Color("#18181b");
+    return light
+      ? [
+          white.clone(),
+          acc.clone().lerp(white, 0.7),
+          acc.clone().lerp(white, 0.46),
+          acc.clone().lerp(white, 0.22),
+          acc.clone(),
+        ]
+      : [
+          acc.clone().lerp(dark, 0.8),
+          acc.clone().lerp(dark, 0.55),
+          acc.clone().lerp(dark, 0.36),
+          acc.clone().lerp(dark, 0.18),
+          acc.clone(),
+        ];
+  }, [accent, light]);
 
   // One stable { current } holder per group, aligned by index. Plain objects (not
   // useRef) so passing them as `ref` and reading them isn't a ref-access-during-render.
-  const bodyHolders = useMemo(
-    () => groups.map(() => ({ current: null as (RapierRigidBody | null)[] | null })),
-    [groups]
+  const bodyHolders = useMemo<Holder[]>(
+    () => layout.map(() => ({ current: null })),
+    [layout]
   );
   const meshHolders = useMemo(
-    () => groups.map(() => ({ current: null as THREE.InstancedMesh | null })),
-    [groups]
+    () => layout.map(() => ({ current: null as THREE.InstancedMesh | null })),
+    [layout]
   );
 
   useEffect(() => {
-    homeX.current = groups.map((g) => new Float32Array(g.instances.length));
-    massA.current = groups.map((g) => new Float32Array(g.instances.length));
+    homeX.current = layout.map((g) => new Float32Array(g.instances.length));
+    massA.current = layout.map((g) => new Float32Array(g.instances.length));
     captured.current = false;
-    groups.forEach((g, gi) => {
-      const mesh = meshHolders[gi]?.current;
-      if (!mesh) return;
-      for (let i = 0; i < g.colors.length; i++) mesh.setColorAt(i, g.colors[i]);
-      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-    });
-  }, [groups, meshHolders]);
+    sinceSpawn.current = 0;
+    quietFor.current = 0;
+  }, [layout]);
 
   useEffect(() => {
+    layout.forEach((g, gi) => {
+      const mesh = meshHolders[gi]?.current;
+      if (!mesh) return;
+      for (let i = 0; i < g.levels.length; i++) mesh.setColorAt(i, shades[g.levels[i]]);
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    });
+    invalidate(); // a sleeping pile has no frame coming to show the new colours
+  }, [layout, shades, meshHolders, invalidate]);
+
+  // Under a demand frameloop nothing draws unless asked: every pointer transition asks for
+  // one frame, and the bodies that frame wakes keep the loop alive by themselves after that.
+  useEffect(() => {
     const el = gl.domElement;
-    const on = () => { active.current = true; };
-    const off = () => { active.current = false; };
+    const on = () => { active.current = true; invalidate(); };
+    const off = () => { active.current = false; invalidate(); };
     el.addEventListener("pointerenter", on);
     el.addEventListener("pointermove", on);
     el.addEventListener("pointerleave", off);
@@ -201,12 +254,29 @@ function Pile({ count, accent, light }: { count: number; accent: string; light: 
       el.removeEventListener("pointerleave", off);
       el.removeEventListener("pointerout", off);
     };
-  }, [gl]);
+  }, [gl, invalidate]);
+
+  // Back on screen: the frameloop just went never → demand with the clock reset, and rapier
+  // only invalidates from inside a step, so a pile frozen mid-fall would stay frozen until the
+  // pointer arrived. One frame restarts whatever was still moving.
+  useEffect(() => {
+    if (visible) invalidate();
+  }, [visible, invalidate]);
+
+  // A moved wall does not wake the sleeping island it now overlaps. Wake everything on a size
+  // change so penetration resolution can nudge edge pieces inward; the idle test re-sleeps it.
+  const sizeSeen = useRef(false);
+  useEffect(() => {
+    if (!sizeSeen.current) { sizeSeen.current = true; return; }
+    forEachBody(bodyHolders, (b) => b.wakeUp());
+    invalidate();
+  }, [hw, hh, bodyHolders, invalidate]);
 
   useFrame((state, delta) => {
     const gb = bodyHolders;
-    if (!gb.length || homeX.current.length !== groups.length) return;
+    if (!gb.length || homeX.current.length !== layout.length) return;
     const dt = Math.max(1e-4, Math.min(delta, 1 / 30));
+    sinceSpawn.current += delta;
 
     // 1) cursor follower (field center) + its RAW velocity. Sampling speed from the raw
     //    hit point — not the low-passed follower — means fast flicks aren't smoothed away.
@@ -225,38 +295,56 @@ function Pile({ count, accent, light }: { count: number; accent: string; light: 
     const speed = active.current ? cvel.length() : 0;
     const sf = Math.min(1, Math.pow(speed / V_FULL, 1.5)); // super-linear: a flick ≫ a drag
 
-    // 2) capture the settled pile as "home" X once it has come to rest
-    if (!captured.current) {
-      const t = state.clock.elapsedTime;
-      if (t > SETTLE_MIN) {
-        let maxV2 = 0;
-        for (let gi = 0; gi < gb.length; gi++) {
-          const list = gb[gi]?.current;
-          if (!list) continue;
-          for (let i = 0; i < list.length; i++) {
-            const b = list[i];
-            if (!b) continue;
-            const lv = b.linvel();
-            const s2 = lv.x * lv.x + lv.y * lv.y + lv.z * lv.z;
-            if (s2 > maxV2) maxV2 = s2;
-          }
+    // 2) the pile's peak speed — read once, for the settle capture and the idle test
+    const t = sinceSpawn.current;
+    const settling = !captured.current && t > SETTLE_MIN;
+    const idling = captured.current && !active.current;
+    let maxV2 = 0;
+    if (settling || idling) {
+      forEachBody(gb, (b) => {
+        // A piece that has tunnelled out of the box (measured: a 2000 px/s swipe through the
+        // pile launches 3–6 through a wall) would fall forever and hold the loop awake for
+        // nothing visible. Park it where it is and leave it out of the quiet test.
+        const p = b.translation();
+        if (p.y < -hh - 1.5 || Math.abs(p.x) > hw + 1.5 || Math.abs(p.z) > hz + 1.5) {
+          if (!b.isSleeping()) b.sleep();
+          return;
         }
-        if (maxV2 < 0.5 || t > SETTLE_MAX) {
-          for (let gi = 0; gi < gb.length; gi++) {
-            const list = gb[gi]?.current;
-            if (!list) continue;
-            const HX = homeX.current[gi];
-            const MA = massA.current[gi];
-            for (let i = 0; i < list.length; i++) {
-              const b = list[i];
-              if (!b) continue;
-              HX[i] = b.translation().x;
-              MA[i] = b.mass();
-            }
-          }
-          captured.current = true;
+        const lv = b.linvel();
+        const s2 = lv.x * lv.x + lv.y * lv.y + lv.z * lv.z;
+        if (s2 > maxV2) maxV2 = s2;
+      });
+    }
+
+    // capture the settled pile as "home" X once it has come to rest
+    if (settling && (maxV2 < 0.5 || t > SETTLE_MAX)) {
+      for (let gi = 0; gi < gb.length; gi++) {
+        const list = gb[gi]?.current;
+        if (!list) continue;
+        const HX = homeX.current[gi];
+        const MA = massA.current[gi];
+        for (let i = 0; i < list.length; i++) {
+          const b = list[i];
+          if (!b) continue;
+          HX[i] = b.translation().x;
+          MA[i] = b.mass();
         }
       }
+      captured.current = true;
+    }
+
+    // idle → sleep the whole island (see IDLE_V). Quiet time runs on the delta rapier itself
+    // integrates (clamped to 0.5 s), so a 10 fps tab and a 120 Hz one agree on "3 s".
+    // Nothing below has work for a sleeping pile.
+    if (idling) {
+      quietFor.current = maxV2 < IDLE_V * IDLE_V ? quietFor.current + Math.min(delta, 0.5) : 0;
+      if (quietFor.current >= IDLE_T) {
+        quietFor.current = 0;
+        forEachBody(gb, (b) => b.sleep());
+        return;
+      }
+    } else {
+      quietFor.current = 0;
     }
 
     const pushing = active.current; // presence floor → shove even when slow
@@ -317,7 +405,7 @@ function Pile({ count, accent, light }: { count: number; accent: string; light: 
   return (
     <>
       <Boundary hw={hw} hh={hh} hz={hz} />
-      {groups.map((g, gi) => {
+      {layout.map((g, gi) => {
         const mat = MATERIALS[g.key];
         return (
           <InstancedRigidBodies
@@ -357,14 +445,22 @@ export default function FloatingBackground({
   count = 200,
   accent,
   light = false,
+  active = true,
 }: {
   count?: number;
   accent: string;
   light?: boolean;
+  /** Card within its mount margin. Off → the loop is "never": no render, no step, no wake. */
+  active?: boolean;
 }) {
   return (
     <Canvas
       dpr={[1, 1.5]}
+      // "demand": rapier invalidate()s once per active body after each step, so the drop and
+      // every shove sustain the loop themselves and the settled, sleeping pile costs nothing.
+      // "never" while the card is offscreen — rapier steps inside useFrame, so this parks the
+      // world too, and the pile resumes exactly where it froze instead of raining in again.
+      frameloop={active ? "demand" : "never"}
       gl={{ alpha: true, antialias: true }}
       camera={{ position: [0, 0, 11], fov: 45 }}
       onCreated={({ gl }) => {
@@ -380,8 +476,11 @@ export default function FloatingBackground({
       <pointLight position={[0, 0, 6]} intensity={light ? 0.18 : 0.7} />
       <pointLight position={[-4, 3, -3]} intensity={light ? 0.15 : 0.5} color={accent || "#3b82f6"} />
       <Suspense fallback={null}>
-        <Physics gravity={[0, -12, 0]} timeStep={1 / 60} interpolate numSolverIterations={12} numInternalPgsIterations={1}>
-          <Pile count={count} accent={accent} light={light} />
+        {/* interpolate is off: react-three-rapier only lerps the `mesh` branch — an instanced
+            body is written straight from the step (esm.js "instancedMesh" → setMatrix) — so the
+            flag bought nothing but a translation()+rotation() snapshot of all 200 bodies per step. */}
+        <Physics gravity={[0, -12, 0]} timeStep={1 / 60} interpolate={false} numSolverIterations={12} numInternalPgsIterations={1}>
+          <Pile count={count} accent={accent} light={light} visible={active} />
         </Physics>
       </Suspense>
     </Canvas>
