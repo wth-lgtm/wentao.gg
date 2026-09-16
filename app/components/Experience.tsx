@@ -2,8 +2,9 @@
 
 import { motion, useScroll, useTransform, AnimatePresence } from "framer-motion";
 import { useRef, useState } from "react";
-import { MapPin, Calendar, ChevronDown } from "lucide-react";
+import { MapPin, Calendar, ChevronDown, ExternalLink } from "lucide-react";
 import Image from "next/image";
+import { numberOf } from "./sections";
 
 interface Experience {
   title: string;
@@ -83,6 +84,7 @@ function ExperienceCard({
   onToggle: () => void;
 }) {
   const cardRef = useRef(null);
+  const panelId = `experience-panel-${index}`;
   const { scrollYProgress } = useScroll({
     target: cardRef,
     offset: ["start end", "center center"],
@@ -123,56 +125,78 @@ function ExperienceCard({
           style={{ opacity, x, scale }}
           className="flex-1 glass card-lift group pointer-events-auto hover:border-muted/60"
         >
-          {/* Clickable header */}
-          <button
-            onClick={onToggle}
-            className="w-full text-left p-6 md:p-8"
-          >
-            <div className="flex items-center gap-4 mb-3">
-              {experience.logo && (
-                <div className="flex-shrink-0 w-12 h-12 bg-white rounded-[18px] overflow-hidden">
-                  <Image
-                    src={experience.logo}
-                    alt={`${experience.company} logo`}
-                    width={48}
-                    height={48}
-                    className="w-full h-full object-contain"
-                  />
+          {/* The company link is a SIBLING of the toggle, not the <h3> inside it: that <h3>
+              carried a bare onClick + window.open, so the only way to reach the company site
+              was a mouse — Tab landed on the button and nothing announced a link at all
+              (WCAG 2.1.1). Anchored to the header so it stays put when the card expands. */}
+          <div className="relative">
+            {/* Clickable header. The focus ring is drawn INSIDE: .glass is overflow:hidden and
+                this button's border box IS the clip rectangle, so the global
+                `outline-offset: 2px` ring fell entirely outside it and was never visible
+                (WCAG 2.4.7). The `!` is load-bearing — globals.css's `*:focus-visible` is
+                unlayered, so it outranks any Tailwind utility no matter how specific. */}
+            <button
+              onClick={onToggle}
+              aria-expanded={isExpanded}
+              aria-controls={panelId}
+              className="w-full text-left p-6 md:p-8 focus-visible:[outline-offset:-4px]! focus-visible:rounded-[14px]!"
+            >
+              <div className="flex items-center gap-4 mb-3">
+                {experience.logo && (
+                  <div className="flex-shrink-0 w-12 h-12 bg-white rounded-[18px] overflow-hidden">
+                    <Image
+                      src={experience.logo}
+                      alt={`${experience.company} logo`}
+                      width={48}
+                      height={48}
+                      className="w-full h-full object-contain"
+                    />
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-xl md:text-2xl font-semibold text-foreground group-hover:text-accent transition-colors">
+                    {experience.company}
+                  </h3>
+                  <p className="text-accent font-medium">{experience.title}</p>
                 </div>
-              )}
-              <div className="flex-1 min-w-0">
-                <h3
-                  className={`text-xl md:text-2xl font-semibold text-foreground group-hover:text-accent transition-colors ${experience.companyUrl ? "cursor-pointer" : ""}`}
-                  onClick={experience.companyUrl ? (e) => { e.stopPropagation(); window.open(experience.companyUrl, "_blank", "noopener,noreferrer"); } : undefined}
-                >
-                  {experience.company}
-                </h3>
-                <p className="text-accent font-medium">{experience.title}</p>
+                <ChevronDown
+                  size={20}
+                  className={`text-muted flex-shrink-0 transition-transform duration-300 ${
+                    isExpanded ? "rotate-180" : ""
+                  }`}
+                />
               </div>
-              <ChevronDown
-                size={20}
-                className={`text-muted flex-shrink-0 transition-transform duration-300 ${
-                  isExpanded ? "rotate-180" : ""
-                }`}
-              />
-            </div>
 
-            <div className="flex flex-wrap items-center gap-2 sm:gap-4 text-xs sm:text-sm text-muted">
-              <span className="flex items-center gap-1 sm:gap-1.5">
-                <Calendar size={12} className="sm:w-3.5 sm:h-3.5 text-muted" />
-                {experience.period}
-              </span>
-              <span className="flex items-center gap-1 sm:gap-1.5">
-                <MapPin size={12} className="sm:w-3.5 sm:h-3.5 text-muted" />
-                {experience.location}
-              </span>
-            </div>
-          </button>
+              <div className="flex flex-wrap items-center gap-2 sm:gap-4 pr-10 text-xs sm:text-sm text-muted">
+                <span className="flex items-center gap-1 sm:gap-1.5">
+                  <Calendar size={12} className="sm:w-3.5 sm:h-3.5 text-muted" />
+                  {experience.period}
+                </span>
+                <span className="flex items-center gap-1 sm:gap-1.5">
+                  <MapPin size={12} className="sm:w-3.5 sm:h-3.5 text-muted" />
+                  {experience.location}
+                </span>
+              </div>
+            </button>
+
+            {experience.companyUrl && (
+              <a
+                href={experience.companyUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={`Visit ${experience.company}`}
+                className="absolute bottom-4 right-4 md:bottom-6 md:right-6 p-2 text-muted transition-colors hover:text-accent"
+              >
+                <ExternalLink size={14} />
+              </a>
+            )}
+          </div>
 
           {/* Expandable content */}
           <AnimatePresence>
             {isExpanded && (
               <motion.div
+                id={panelId}
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
@@ -246,7 +270,7 @@ export default function Experience() {
           className="mb-12"
         >
           <div className="flex items-center gap-3 mb-3">
-            <span className="font-mono text-xs tracking-[0.25em] text-muted">01</span>
+            <span className="font-mono text-xs tracking-[0.25em] text-muted">{numberOf("experience")}</span>
             <span className="h-px w-12 bg-border" />
           </div>
           <h2 className="text-3xl md:text-4xl font-bold tracking-tight heading-legible">Experience</h2>

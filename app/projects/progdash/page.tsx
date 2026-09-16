@@ -108,7 +108,7 @@ export default function ProgDash() {
             <span className="text-sm hidden sm:inline">Back</span>
           </Link>
           <h1 className="text-lg font-bold flex items-center gap-2">
-            <FileSpreadsheet size={20} className="text-green-500" />
+            <FileSpreadsheet size={20} className="text-gain" />
             ProgDash
           </h1>
           {session ? (
@@ -133,8 +133,8 @@ export default function ProgDash() {
           transition={{ duration: 0.3 }}
           className="text-center mb-6 sm:mb-8"
         >
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-green-500/10 border border-green-500/20 mb-4">
-            <FileSpreadsheet size={32} className="text-green-500" />
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gain/10 border border-gain/20 mb-4">
+            <FileSpreadsheet size={32} className="text-gain" />
           </div>
           <p className="text-muted text-sm sm:text-base max-w-md mx-auto">
             Load your powerlifting program from Google Sheets into a clean,
@@ -174,21 +174,19 @@ export default function ProgDash() {
                 key={step.label}
                 className={`text-center p-3 sm:p-4 rounded-xl border transition-colors ${
                   step.active
-                    ? "bg-green-500/5 border-green-500/30"
+                    ? "bg-gain/5 border-gain/30"
                     : "bg-card border-border"
                 }`}
               >
                 <div
                   className={`inline-flex items-center justify-center w-10 h-10 rounded-lg mb-2 ${
-                    step.active ? "bg-green-500/20" : "bg-green-500/10"
+                    step.active ? "bg-gain/20" : "bg-gain/10"
                   }`}
                 >
-                  <step.icon
-                    size={18}
-                    className={
-                      step.active ? "text-green-400" : "text-green-500"
-                    }
-                  />
+                  {/* One colour for both states — green-400 marked "active" measured
+                      1.74:1 on the light background, i.e. invisible. The tile's own
+                      background and border already carry the active state. */}
+                  <step.icon size={18} className="text-gain" />
                 </div>
                 <div className="text-xs sm:text-sm font-medium">
                   {step.label}
@@ -206,13 +204,13 @@ export default function ProgDash() {
           transition={{ duration: 0.3, delay: 0.12 }}
           className="mb-6 sm:mb-8"
         >
-          <div className="p-3 sm:p-4 bg-blue-500/5 border border-blue-500/20 rounded-xl">
+          <div className="p-3 sm:p-4 bg-accent/5 border border-accent/20 rounded-xl">
             <div className="flex items-center gap-3">
-              <div className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-blue-500/10 shrink-0">
-                <Lock size={14} className="text-blue-400" />
+              <div className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-accent/10 shrink-0">
+                <Lock size={14} className="text-accent" />
               </div>
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium text-blue-400">Your data is safe</div>
+                <div className="text-sm font-medium text-accent">Your data is safe</div>
                 <div className="text-xs text-muted mt-0.5">
                   Read-only access. No data stored. Your sheets stay yours.
                 </div>
@@ -221,7 +219,7 @@ export default function ProgDash() {
             <div className="flex items-center gap-3 mt-2.5 ml-11 text-xs">
               <Link
                 href="/projects/progdash/privacy"
-                className="text-blue-400 underline underline-offset-2 hover:text-blue-300 transition-colors"
+                className="text-accent underline underline-offset-2 hover:text-accent-hover transition-colors"
               >
                 Privacy Policy
               </Link>
@@ -230,7 +228,7 @@ export default function ProgDash() {
                 href="https://myaccount.google.com/permissions"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-blue-400 underline underline-offset-2 hover:text-blue-300 transition-colors"
+                className="text-accent underline underline-offset-2 hover:text-accent-hover transition-colors"
               >
                 Revoke Access
               </a>
@@ -288,7 +286,7 @@ export default function ProgDash() {
           >
             {/* Error */}
             {error && (
-              <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-sm">
+              <div className="mb-4 p-3 bg-loss/10 border border-loss/20 rounded-xl text-loss text-sm">
                 {error}
               </div>
             )}
@@ -298,7 +296,7 @@ export default function ProgDash() {
               <div className="bg-card rounded-xl border border-border overflow-hidden">
                 <div className="px-4 sm:px-5 py-3 border-b border-border">
                   <h3 className="font-semibold text-sm sm:text-base flex items-center gap-2">
-                    <FileSpreadsheet size={16} className="text-green-500" />
+                    <FileSpreadsheet size={16} className="text-gain" />
                     Your Spreadsheets
                   </h3>
                   <p className="text-xs text-muted mt-0.5">
@@ -327,7 +325,7 @@ export default function ProgDash() {
                       >
                         <FileSpreadsheet
                           size={16}
-                          className="text-green-500 shrink-0"
+                          className="text-gain shrink-0"
                         />
                         <div className="min-w-0">
                           <div className="font-medium text-sm truncate">
@@ -353,7 +351,7 @@ export default function ProgDash() {
                   <div className="flex items-center justify-between">
                     <div>
                       <h3 className="font-semibold text-sm sm:text-base flex items-center gap-2">
-                        <Sheet size={16} className="text-green-500" />
+                        <Sheet size={16} className="text-gain" />
                         {selectedSheet.name}
                       </h3>
                       <p className="text-xs text-muted mt-0.5">
@@ -389,7 +387,7 @@ export default function ProgDash() {
                       >
                         <Sheet
                           size={14}
-                          className="text-green-500 shrink-0"
+                          className="text-gain shrink-0"
                         />
                         <span className="text-sm">{tab}</span>
                       </button>
@@ -433,7 +431,7 @@ export default function ProgDash() {
                         Tab: {sheetData.activeSheet}
                       </p>
                     </div>
-                    <span className="px-2 py-0.5 text-xs font-medium bg-green-500/10 text-green-500 rounded border border-green-500/20">
+                    <span className="px-2 py-0.5 text-xs font-medium bg-gain/10 text-gain rounded border border-gain/20">
                       Live
                     </span>
                   </div>

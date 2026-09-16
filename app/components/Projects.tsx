@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { ExternalLink, Dumbbell, Video, TrendingUp, Folder, ChevronDown, FileSpreadsheet } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image";
+import { numberOf } from "./sections";
 
 interface Project {
   title: string;
@@ -18,13 +19,17 @@ interface Project {
 
 interface ProjectCategory {
   name: string;
+  // Decorative prefix only. As the whole heading it made the sub-heading read
+  // "bitcoin sign, 1 project" / "person lifting weights, 3 projects".
+  emoji: string;
   icon: React.ElementType;
   projects: Project[];
 }
 
 const projectCategories: ProjectCategory[] = [
   {
-    name: "₿",
+    name: "Markets",
+    emoji: "₿",
     icon: TrendingUp,
     projects: [
       {
@@ -39,7 +44,8 @@ const projectCategories: ProjectCategory[] = [
     ],
   },
   {
-    name: "🏋️",
+    name: "Lifting",
+    emoji: "🏋️",
     icon: Dumbbell,
     projects: [
       {
@@ -91,12 +97,16 @@ const itemVariants = {
 function ProjectCard({ project }: { project: Project }) {
   if (project.comingSoon) {
     return (
-      <div className="group block glass border-dashed transition-all duration-300 h-full cursor-default pointer-events-auto opacity-70">
+      /* No ancestor opacity: at opacity-70 the badge composited to 3.79:1 dark / 2.17:1
+         light and the card's own copy to 3.38 / 2.74. The dashed border and muted title
+         already read as a placeholder. */
+      <div className="group block glass border-dashed transition-all duration-300 h-full cursor-default pointer-events-auto">
         <div className="relative h-36 sm:h-48 bg-background overflow-hidden">
           <div className="absolute inset-0 bg-gradient-to-br from-muted/15 to-muted/5 flex items-center justify-center">
             <project.icon className="w-10 h-10 sm:w-12 sm:h-12 text-muted/50" />
           </div>
-          <div className="absolute top-2 right-2 sm:top-3 sm:right-3 px-2 py-1 bg-muted/80 text-white text-xs font-medium rounded">
+          {/* bg-foreground/text-background, not bg-accent: accent + white is 3.68:1 dark. */}
+          <div className="absolute top-2 right-2 sm:top-3 sm:right-3 px-2 py-1 bg-foreground text-background text-xs font-medium rounded">
             Coming Soon
           </div>
         </div>
@@ -197,6 +207,7 @@ function CategorySection({ category, isExpanded, onToggle }: {
         </div>
         <div className="flex items-center gap-2 flex-1 min-w-0">
           <h3 className="text-lg sm:text-xl font-semibold text-foreground group-hover:text-accent transition-colors truncate">
+            <span aria-hidden="true" className="mr-1.5">{category.emoji}</span>
             {category.name}
           </h3>
           <span className="text-xs sm:text-sm text-muted whitespace-nowrap">
@@ -268,7 +279,7 @@ export default function Projects() {
           className="mb-12"
         >
           <div className="flex items-center gap-3 mb-3">
-            <span className="font-mono text-xs tracking-[0.25em] text-muted">03</span>
+            <span className="font-mono text-xs tracking-[0.25em] text-muted">{numberOf("projects")}</span>
             <span className="h-px w-12 bg-border" />
           </div>
           <h2 className="text-3xl md:text-4xl font-bold tracking-tight heading-legible">Projects</h2>
