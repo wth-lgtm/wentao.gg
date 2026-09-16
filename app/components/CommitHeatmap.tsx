@@ -14,6 +14,8 @@ interface RepoStats {
   commits: number;
   linesOfCode: number;
   languages: { name: string; percentage: number }[];
+  /** The route reached its page cap or lost a page: older days are unknown, not zero. */
+  truncated: boolean;
 }
 
 function getIntensity(count: number): string {
@@ -74,7 +76,12 @@ const BASE_ROT_Y = -26; // horizontal turn — staggers columns so fewer bars hi
 
 export default function SiteStats() {
   const [commitData, setCommitData] = useState<Map<string, number>>(new Map());
-  const [stats, setStats] = useState<RepoStats>({ commits: 0, linesOfCode: 0, languages: [] });
+  const [stats, setStats] = useState<RepoStats>({
+    commits: 0,
+    linesOfCode: 0,
+    languages: [],
+    truncated: false,
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -140,6 +147,7 @@ export default function SiteStats() {
           commits: data.commits ?? 0,
           linesOfCode: data.linesOfCode ?? 0,
           languages: data.languages ?? [],
+          truncated: data.truncated === true,
         });
       } catch (err) {
         console.error("Error fetching data:", err);
@@ -165,6 +173,9 @@ export default function SiteStats() {
   const streak = currentStreak(days);
   const bestDay = days.reduce((m, d) => Math.max(m, d.count), 0);
   const windowCommits = days.reduce((n, d) => n + d.count, 0);
+  // Dark cells mean UNKNOWN when the fetch failed or the route returned a cut-off window
+  // with nothing in it; a streak and a best day derived from that are not zeros.
+  const windowKnown = !unavailable && !(stats.truncated && windowCommits === 0);
 
   // The route already drops sub-1% shares, but the CDN serves this payload for up to ~15
   // minutes (s-maxage=300, stale-while-revalidate=600), so a stale "JavaScript 0%" chip
@@ -173,8 +184,8 @@ export default function SiteStats() {
   const statTiles = [
     { icon: GitCommit, value: unavailable ? "—" : `${stats.commits}`, label: "Commits" },
     { icon: Code, value: unavailable ? "—" : `~${formatNumber(stats.linesOfCode)}`, label: "Lines of code" },
-    { icon: Flame, value: unavailable ? "—" : `${streak}`, label: "Day streak" },
-    { icon: Zap, value: unavailable ? "—" : `${bestDay}`, label: "Best day" },
+    { icon: Flame, value: windowKnown ? `${streak}` : "—", label: "Day streak" },
+    { icon: Zap, value: windowKnown ? `${bestDay}` : "—", label: "Best day" },
   ];
 
   const boardW = weeksToShow * STEP - GAP;
@@ -191,11 +202,16 @@ export default function SiteStats() {
   const dayTitle = (day: CommitDay) =>
     `${day.date} (UTC): ${day.count} commit${day.count !== 1 ? "s" : ""}`;
   // Counted over the window, not all time: "12 weeks — 194 commits" read as a claim about
-  // the window while the board could only ever show the days of the newest 100 commits. On
-  // a failed fetch the cells are all dark because nothing is known, which is not "0".
-  const boardLabel = unavailable
+  // the window while the board could only ever show the days of the newest 100 commits.
+  // When the route says `truncated` the older cells are dark because they are UNKNOWN, so
+  // the label may not claim the full window (and "Best day" below it is then a floor over
+  // the newest days, which is what "older days not shown" tells the reader).
+  const plural = windowCommits !== 1 ? "s" : "";
+  const boardLabel = !windowKnown
     ? "Commit activity unavailable"
-    : `Commit activity for the last ${weeksToShow} weeks (UTC days) — ${windowCommits} commit${windowCommits !== 1 ? "s" : ""}`;
+    : stats.truncated
+      ? `Commit activity (UTC days) — most recent ${windowCommits} commit${plural}; older days not shown`
+      : `Commit activity for the last ${weeksToShow} weeks (UTC days) — ${windowCommits} commit${plural}`;
 
   return (
     <section aria-label="GitHub activity" className="py-20 md:py-24 px-6 relative z-20 pointer-events-none">

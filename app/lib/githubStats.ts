@@ -86,6 +86,51 @@ export function currentStreak(days: readonly CommitDay[]): number {
   return streak;
 }
 
+/** The subset of `Response` the commit pager needs, so a test can inject a fake. */
+export interface PagedResponse {
+  ok: boolean;
+  status: number;
+  json: () => Promise<unknown>;
+  headers: { get: (name: string) => string | null };
+}
+
+export interface CommitWindow {
+  /** Author dates of every commit on every page that came back. */
+  authored: string[];
+  /** True when the window is CUT OFF: a page failed or the page cap was reached. */
+  truncated: boolean;
+}
+
+/**
+ * Walks `/commits?since=…` from `firstUrl` along the Link `rel="next"` chain, at most
+ * `pageCap` pages. Nothing here throws: a failed page or an exhausted cap returns the
+ * pages already in hand with `truncated: true`, because the commit total and the language
+ * list are fetched separately and discarding them over a 403 on page one would blank a
+ * card whose other halves arrived intact.
+ */
+export async function fetchCommitWindow(
+  fetchImpl: (url: string) => Promise<PagedResponse>,
+  firstUrl: string,
+  pageCap: number,
+): Promise<CommitWindow> {
+  const authored: string[] = [];
+  let next: string | null = firstUrl;
+  for (let page = 0; next !== null; page++) {
+    if (page >= pageCap) return { authored, truncated: true };
+    const res = await fetchImpl(next);
+    if (!res.ok) return { authored, truncated: true };
+    const batch = await res.json();
+    // A non-list body is GitHub telling us something (a rate-limit message, say), not a
+    // page of commits — the window is cut off, not empty.
+    if (!Array.isArray(batch)) return { authored, truncated: true };
+    for (const c of batch as Array<{ commit?: { author?: { date?: string } } }>) {
+      authored.push(c?.commit?.author?.date ?? "");
+    }
+    next = parseNextLink(res.headers.get("link"));
+  }
+  return { authored, truncated: false };
+}
+
 /** The `rel="next"` URL of a GitHub Link header, or null once the last page is in hand. */
 export function parseNextLink(link: string | null | undefined): string | null {
   if (!link) return null;

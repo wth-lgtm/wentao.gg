@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import {
   bucketByUtcDay,
   commitWindowStart,
-  parseNextLink,
+  fetchCommitWindow,
   topLanguages,
   utcDayKey,
 } from "@/app/lib/githubStats";
@@ -71,31 +71,18 @@ export async function GET() {
     // make every visitor a GitHub request. Note GitHub filters `since` on COMMITTER date
     // while we bucket AUTHOR date; committer >= author, so a rebased commit can land a day
     // or two before windowStart, which the client's own window already ignores.
+    //
+    // A page failing (403 at the ceiling above is the likeliest) or the cap being reached
+    // keeps whatever pages are in hand and reports `truncated`, rather than throwing away a
+    // commit total and language list that were fetched successfully. The client must then
+    // say the window is incomplete instead of drawing unknown days as zeros.
     const windowStart = commitWindowStart(new Date(), WINDOW_WEEKS);
     const pageCap = process.env.GITHUB_TOKEN ? PAGE_CAP_TOKEN : PAGE_CAP_ANON;
-    const authored: string[] = [];
-    let truncated = false;
-    let next: string | null =
-      `${API}/repos/${REPO}/commits?since=${windowStart.toISOString()}&per_page=100`;
-    for (let page = 0; next !== null; page++) {
-      if (page >= pageCap) {
-        truncated = true;
-        break;
-      }
-      const pageRes: Response = await ghFetch(next);
-      if (!pageRes.ok) {
-        // The first page failing leaves no day data at all, and an all-dark 84-cell grid
-        // beside a confident commit total is the lie this route exists to avoid — fail the
-        // whole payload so the card shows its unavailable state. A later page failing is
-        // partial data, which is honest as long as we say so.
-        if (page === 0) throw new Error(`commits window ${pageRes.status}`);
-        truncated = true;
-        break;
-      }
-      const batch: Array<{ commit?: { author?: { date?: string } } }> = await pageRes.json();
-      for (const c of batch) authored.push(c?.commit?.author?.date ?? "");
-      next = parseNextLink(pageRes.headers.get("link"));
-    }
+    const { authored, truncated } = await fetchCommitWindow(
+      ghFetch,
+      `${API}/repos/${REPO}/commits?since=${windowStart.toISOString()}&per_page=100`,
+      pageCap,
+    );
     const days = bucketByUtcDay(authored);
 
     // Language breakdown.

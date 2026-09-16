@@ -6,10 +6,12 @@ import {
   buildDayWindow,
   commitWindowStart,
   currentStreak,
+  fetchCommitWindow,
   parseNextLink,
   topLanguages,
   utcDayKey,
   type CommitDay,
+  type PagedResponse,
 } from "../app/lib/githubStats";
 
 const DAY_MS = 86_400_000;
@@ -180,4 +182,101 @@ test("topLanguages returns the largest shares first, capped at the limit", () =>
 test("topLanguages of an empty repo is empty, never a 0% chip", () => {
   assert.deepEqual(topLanguages({}, 3), []);
   assert.deepEqual(topLanguages({ TypeScript: 0 }, 3), []);
+});
+
+// A stand-in for GitHub's paged /commits: each entry is one URL's answer.
+interface FakePage {
+  ok?: boolean;
+  status?: number;
+  dates?: string[];
+  body?: unknown;
+  next?: string;
+}
+
+function fakeGitHub(pages: Record<string, FakePage>) {
+  const calls: string[] = [];
+  const impl = async (url: string): Promise<PagedResponse> => {
+    calls.push(url);
+    const page = pages[url];
+    if (!page) throw new Error(`unexpected fetch: ${url}`);
+    const ok = page.ok !== false;
+    return {
+      ok,
+      status: page.status ?? (ok ? 200 : 403),
+      json: async () =>
+        page.body !== undefined
+          ? page.body
+          : (page.dates ?? []).map((date) => ({ commit: { author: { date } } })),
+      headers: {
+        get: (name: string) =>
+          name.toLowerCase() === "link" && page.next ? `<${page.next}>; rel="next"` : null,
+      },
+    };
+  };
+  return { impl, calls };
+}
+
+const P1 = "https://api.github.com/commits?since=2026-06-23T00:00:00.000Z&per_page=100";
+const P2 = `${P1}&page=2`;
+const P3 = `${P1}&page=3`;
+
+test("fetchCommitWindow follows rel=next to the end of the window", async () => {
+  const gh = fakeGitHub({
+    [P1]: { dates: ["2026-09-16T04:40:00Z"], next: P2 },
+    [P2]: { dates: ["2026-07-22T10:00:00Z", "2026-07-22T11:00:00Z"] },
+  });
+  const win = await fetchCommitWindow(gh.impl, P1, 3);
+  assert.equal(win.truncated, false);
+  assert.deepEqual(win.authored, [
+    "2026-09-16T04:40:00Z",
+    "2026-07-22T10:00:00Z",
+    "2026-07-22T11:00:00Z",
+  ]);
+  assert.deepEqual(gh.calls, [P1, P2]);
+});
+
+test("fetchCommitWindow stops at the page cap and says the window is cut off", async () => {
+  const gh = fakeGitHub({
+    [P1]: { dates: ["2026-09-16T04:40:00Z"], next: P2 },
+    [P2]: { dates: ["2026-09-15T04:40:00Z"], next: P3 },
+    [P3]: { dates: ["2026-07-22T10:00:00Z"] },
+  });
+  const win = await fetchCommitWindow(gh.impl, P1, 2);
+  assert.equal(win.truncated, true);
+  assert.equal(win.authored.length, 2);
+  assert.deepEqual(gh.calls, [P1, P2], "must not fetch past the cap");
+});
+
+test("fetchCommitWindow keeps the rest of the payload when the FIRST page fails", async () => {
+  // 403 at the anonymous ceiling is the likeliest failure and usually has not stopped the
+  // head-count and language fetches, so it must not throw the whole card away.
+  const gh = fakeGitHub({ [P1]: { ok: false, status: 403 } });
+  const win = await fetchCommitWindow(gh.impl, P1, 3);
+  assert.deepEqual(win, { authored: [], truncated: true });
+});
+
+test("fetchCommitWindow keeps the pages it has when a LATER page fails", async () => {
+  const gh = fakeGitHub({
+    [P1]: { dates: ["2026-09-16T04:40:00Z"], next: P2 },
+    [P2]: { ok: false, status: 502 },
+  });
+  const win = await fetchCommitWindow(gh.impl, P1, 3);
+  assert.deepEqual(win, { authored: ["2026-09-16T04:40:00Z"], truncated: true });
+});
+
+test("fetchCommitWindow treats a body that is not a commit list as a cut-off window", async () => {
+  const gh = fakeGitHub({ [P1]: { body: { message: "API rate limit exceeded" } } });
+  const win = await fetchCommitWindow(gh.impl, P1, 3);
+  assert.deepEqual(win, { authored: [], truncated: true });
+});
+
+test("fetchCommitWindow reports a complete window when one page holds it all", async () => {
+  const gh = fakeGitHub({ [P1]: { dates: ["2026-09-16T04:40:00Z"] } });
+  const win = await fetchCommitWindow(gh.impl, P1, 3);
+  assert.deepEqual(win, { authored: ["2026-09-16T04:40:00Z"], truncated: false });
+});
+
+test("fetchCommitWindow of an empty window is empty and NOT truncated", async () => {
+  const gh = fakeGitHub({ [P1]: { dates: [] } });
+  assert.deepEqual(await fetchCommitWindow(gh.impl, P1, 3), { authored: [], truncated: false });
 });
