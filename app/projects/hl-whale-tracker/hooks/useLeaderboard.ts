@@ -3,7 +3,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { TraderMetrics, TimePeriod } from "../lib/types";
 import { TTL_S } from "../lib/config";
-import { isUnreadableBoard, unreadableBoardMessage } from "../lib/boardHealth";
+import {
+  isUnreadableBoard,
+  isUnreadableWindow,
+  unreadableBoardMessage,
+} from "../lib/boardHealth";
 
 // Fetches /api/hl-leaderboard and keeps all four periods in memory, so changing the
 // time filter is instant and costs no network. Previously this re-downloaded the entire
@@ -128,8 +132,13 @@ export function useLeaderboard(timePeriod: TimePeriod) {
     // we last ASKED", which is what bounds the fan-out even when answers are slow.
     attemptedAtRef.current = Date.now();
     setRefreshing(true);
-    setError(null);
-    setUnreadable(false);
+    // `error` and `unreadable` are deliberately NOT cleared here. Clearing them in the
+    // prologue meant a refresh over a failed board dropped BOARD UNAVAILABLE the instant
+    // the button was pressed: the table flashed back to its empty state — or to the
+    // "No traders found" sentence — for the length of the request, and then the failure
+    // returned. A failure stands until something better arrives, so both are cleared on
+    // the success path below. (`unchanged` is not a failure; it is a transient status
+    // field about the click that is happening, so it resets here.)
     window.clearTimeout(unchangedTimer.current);
     setUnchanged(false);
 
@@ -168,6 +177,8 @@ export function useLeaderboard(timePeriod: TimePeriod) {
       setRowsSeen(typeof body.rowsSeen === "number" ? body.rowsSeen : null);
       setRowsPartial(partialRows);
       setTtlSeconds(typeof body.ttlSeconds === "number" ? body.ttlSeconds : null);
+      // The answer landed and it is a board, so whatever failure was on screen is over.
+      setError(null);
       setLoading(false);
       setRefreshing(false);
       setAttempts((n) => n + 1);
@@ -235,6 +246,13 @@ export function useLeaderboard(timePeriod: TimePeriod) {
   //
   // A hidden tab is never fetched for: the timer that fires behind it declines, and the
   // visibility listener picks it up when the reader actually comes back.
+  //
+  // It also relies on effect ORDER within the commit: `load` writes attemptedAtRef
+  // synchronously, before its fetch, while this effect reads that ref only when a timer
+  // or a listener fires — never during the commit that re-ran it. So the ref is always
+  // the stamp of the most recent ASK by the time nextWakeAt sees it, and the rate floor
+  // cannot be computed against a stale attempt. Moving the stamp into an effect would
+  // break that silently.
   useEffect(() => {
     // Until a body has told us, our own route's s-maxage is the honest cadence — it is
     // the window the CDN would have served anyway, and a failed first load never got
@@ -273,6 +291,17 @@ export function useLeaderboard(timePeriod: TimePeriod) {
     };
   }, [snapshot, ttlSeconds, attempts, refetch]);
 
+  // The two failures the composed `error` below merges, told apart. A thrown request and
+  // a 200 whose rows could not be read read identically to a caller, and the live region
+  // in page.tsx called both of them a failed refresh — so a click that COMPLETED and
+  // came back with an unreadable board announced "Refresh failed".
+  // `unreadable` is the whole board — every window empty, recorded at load time because
+  // it is a property of the body — and isUnreadableWindow is the window ON SCREEN,
+  // derived here rather than stored so switching the filter re-asks the question for the
+  // window the visitor moved to.
+  const windowUnreadable =
+    unreadable || isUnreadableWindow(periods[timePeriod], rowsPartial[timePeriod]);
+
   return {
     traders: periods[timePeriod] ?? [],
     // All four windows, for the analytics tab's cross-window reads. Already in state
@@ -283,11 +312,13 @@ export function useLeaderboard(timePeriod: TimePeriod) {
     refreshing,
     // A thrown request wins: it is the more specific failure, and one sentence per
     // failure is the rule the announcement effect in page.tsx depends on.
+    // Two unreadable shapes, one sentence — see windowUnreadable above. The count is
+    // always the window's own, which is what keeps this and the rail's DROPPED field
+    // from printing two numbers for one failure.
     error:
-      error ??
-      (unreadable
-        ? unreadableBoardMessage(rowsPartial[timePeriod] ?? null)
-        : null),
+      error ?? (windowUnreadable ? unreadableBoardMessage(rowsPartial[timePeriod] ?? null) : null),
+    /** Which of the two the string above is, so a caller can word it. */
+    errorKind: error !== null ? "request" : windowUnreadable ? "unreadable" : null,
     snapshot,
     rowsSeen,
     // Scoped to the window on screen, because the figures pnl/roi/vlm are: a row whose

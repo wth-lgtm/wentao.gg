@@ -4,9 +4,11 @@
 // (read-only, 2026-09-16) rather than the documentation, because three of the
 // behaviours this file protects only show up in real payloads:
 //
-//   * The 7d #1 address's hundred most recent fills carry 73 distinct `oid`s. The old
-//     time heuristic collapsed them into ten rows and told the visitor each row was
-//     "one order" — a false statement for seven of the ten.
+//   * A board address's hundred most recent fills are dozens of separate orders, not
+//     ten: the old time heuristic collapsed them and told the visitor each row was
+//     "one order" — a false statement for seven of the ten. The exact oid count moves
+//     between probes, so it is dated in one place (THE OID SAMPLE in lib/fills.ts)
+//     and not re-asserted here.
 //   * `dir` is not the eight values the table was built from: `Settlement` and
 //     `Spot Dust Conversion` are live, and settlement fills carry real closedPnl that
 //     the OTHER fallback dropped from the total.
@@ -31,6 +33,7 @@ import {
   formatDayLabel,
   formatElapsed,
   formatFee,
+  formatSize,
   formatZone,
   groupFills,
   realisedTotal,
@@ -299,7 +302,10 @@ test("formatFee: one precision for the whole column", () => {
   assert.equal(formatFee(-0.42, "USDC"), "-0.420 USDC");
   // Below the column's resolution, but not zero — and a rebate keeps its sign.
   assert.equal(formatFee(0.0001, "HYPE"), "<0.001 HYPE");
-  assert.equal(formatFee(-0.0001, "HYPE"), "-<0.001 HYPE");
+  // A minus glued to a less-than ("-<0.001") is not a readable bound and is not even
+  // the right claim: a rebate of one ten-thousandth is GREATER than -0.001, so the
+  // inequality has to turn round with the sign.
+  assert.equal(formatFee(-0.0001, "HYPE"), ">-0.001 HYPE");
   assert.equal(formatFee(0, "USDC"), "0.000 USDC");
 });
 
@@ -342,4 +348,31 @@ test("parseFills keeps the order ids the tape groups on, capped at FILL_LIMIT", 
   const twap = parseFills([{ coin: "ETH", dir: "Open Long", oid: 5, twapId: 9 }]);
   assert.equal(twap?.[0].twapId, 9);
   assert.equal(parseFills([{ coin: "ETH", dir: "Open Long", oid: "nope" }])?.[0].oid, null);
+});
+
+test("dirFacets: a mapped dir hands back a facet the caller cannot rewrite", () => {
+  const facets = dirFacets("Open Long");
+  // DIR_TABLE is a module singleton and dirFacets returned the row itself, so one
+  // caller assigning to `.realises` would have changed what "Open Long" means for
+  // every later read in the process — including the realised-PnL total.
+  assert.equal(Object.isFrozen(facets), true);
+  assert.throws(() => {
+    (facets as { realises: boolean }).realises = true;
+  }, TypeError);
+  assert.equal(dirFacets("Open Long").realises, false);
+});
+
+test("formatSize: a non-zero count below the column's resolution says so", () => {
+  // parseSpot drops only EXACT zeros, which is correct — 1e-6 of a token is a holding
+  // — but four decimals then printed it as a bare "0", a confident zero over something
+  // the account owns. Same rule as formatFee: below the resolution, state the bound.
+  assert.equal(formatSize(0), "0");
+  assert.equal(formatSize(0.00001), "<0.0001");
+  assert.equal(formatSize(-0.00001), ">-0.0001");
+  // At and above the resolution nothing changes.
+  assert.equal(formatSize(0.0001), "0.0001");
+  assert.equal(formatSize(0.5), "0.5");
+  assert.equal(formatSize(1.5), "1.5");
+  assert.equal(formatSize(2_331_863), "2,331,863");
+  assert.equal(formatSize(null), "\u2014");
 });

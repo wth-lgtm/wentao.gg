@@ -110,6 +110,46 @@ export function useCommit(
     ghost.current = null;
   }, []);
 
+  /**
+   * Mount the ghost sheet and park its dissolve, paused. Extracted because it was
+   * twenty-four lines of ref bookkeeping inside a branch of the layout effect, which is
+   * where the two ghost refs and the guard in its `finally` are easiest to get wrong.
+   */
+  const armGhost = useCallback(
+    (
+      clone: HTMLTableElement,
+      plan: CommitPlan,
+      outgoingRows: number,
+      // Passed in rather than read off refs.host here: a useCallback whose body reaches
+      // into a ref's `.current` has a dependency the compiler infers as `refs.host.current`
+      // and the source cannot declare, which skips optimisation for the whole hook
+      // (react-hooks/preserve-manual-memoization). The caller already holds it.
+      host: HTMLElement
+    ) => {
+      const sheet = mountGhost(clone, plan, outgoingRows, host);
+      if (!sheet) return;
+      ghost.current = sheet;
+      const anim = sheet.animate([{ opacity: 1 }, { opacity: 0 }], {
+        duration: GHOST_FADE_MS,
+        easing: EASE_DISSOLVE,
+        fill: "forwards",
+      });
+      anim.pause();
+      ghostAnim.current = anim;
+      anim.finished
+        .catch(() => {})
+        .finally(() => {
+          // Removed here and in settle(); whichever comes first. The guard keeps a
+          // cancelled sheet's finally from removing the next commit's sheet.
+          if (ghost.current !== sheet) return;
+          ghost.current = null;
+          ghostAnim.current = null;
+          sheet.remove();
+        });
+    },
+    []
+  );
+
   useLayoutEffect(() => {
     const prev = prevOrder.current;
     prevOrder.current = order;
@@ -118,9 +158,21 @@ export function useCommit(
     const clone = outgoing.current;
     outgoing.current = null;
 
-    // Not a commit: a refresh, a direction toggle (the chevron's business), a tier that
-    // never travels, or a board with nothing on one side (the arming frame).
-    if (!isNew || tier !== "commit") return;
+    // The tier can LEAVE commit mid-flight — a window dragged below sm, a pointer
+    // becoming coarse, reduced motion switched on — and this effect would then return
+    // early on every later change with a commit still running: fifty rows keeping their
+    // inline will-change and their opaque travel fill, and a ghost sheet parked over the
+    // board, for as long as the page lived. Settling on the way out makes leaving the
+    // tier as clean as unmounting. A no-op when nothing is running, which is the usual
+    // case for every phone that ever loads the page.
+    if (tier !== "commit") {
+      settle();
+      return;
+    }
+
+    // Not a commit: a refresh, a direction toggle (the chevron's business), or a board
+    // with nothing on one side (the arming frame).
+    if (!isNew) return;
     if (change.kind !== "sort-field" && change.kind !== "period") return;
     if (prev.length === 0 || order.length === 0) return;
 
@@ -134,29 +186,7 @@ export function useCommit(
       armTravel(plan, INVERSION_MS, rows.current, running.current);
     } else {
       const host = refs.host.current;
-      if (host && clone) {
-        const sheet = mountGhost(clone, plan, prev.length, host);
-        if (sheet) {
-          ghost.current = sheet;
-          const anim = sheet.animate([{ opacity: 1 }, { opacity: 0 }], {
-            duration: GHOST_FADE_MS,
-            easing: EASE_DISSOLVE,
-            fill: "forwards",
-          });
-          anim.pause();
-          ghostAnim.current = anim;
-          anim.finished
-            .catch(() => {})
-            .finally(() => {
-              // Removed here and in settle(); whichever comes first. The guard keeps a
-              // cancelled sheet's finally from removing the next commit's sheet.
-              if (ghost.current !== sheet) return;
-              ghost.current = null;
-              ghostAnim.current = null;
-              sheet.remove();
-            });
-        }
-      }
+      if (clone && host) armGhost(clone, plan, prev.length, host);
       armTravel(plan, HELD_TRAVEL_MS, rows.current, running.current);
       armArrivals(plan, rows.current, running.current);
     }
@@ -166,7 +196,7 @@ export function useCommit(
       running.current.forEach((anim) => anim.play());
       ghostAnim.current?.play();
     });
-  }, [order, change, tier, refs.host, settle]);
+  }, [order, change, tier, refs.host, armGhost, settle]);
 
   useEffect(() => () => settle(), [settle]);
 
@@ -272,9 +302,17 @@ function mountGhost(
   clone.removeAttribute("aria-busy");
   clone.caption?.remove();
   for (const { from } of plan.held) body.rows[from].dataset.held = "true";
-  // A row caught mid-travel by the snapshot carries the fill attribute; the ghost is
-  // still, so it must not.
-  body.querySelectorAll("[data-travel]").forEach((el) => el.removeAttribute("data-travel"));
+  // cloneNode(true) copies the INLINE STYLE as well as the attributes, so a row caught
+  // mid-commit by the snapshot arrives carrying both of armTravel's marks: `data-travel`
+  // (the opaque fill, which would make a still picture look like it is moving) and
+  // `will-change: transform`. The second one is the expensive half — a picture of fifty
+  // rows with fifty compositor layers promoted for motion it will never have, held for
+  // the length of the fade. Cleared on every row rather than on `[data-travel]` alone,
+  // because an ARRIVING row carries the hint without the attribute.
+  for (const row of body.rows) {
+    row.removeAttribute("data-travel");
+    (row as HTMLElement).style.willChange = "";
+  }
   clone.style.willChange = "opacity";
   host.appendChild(clone);
   return clone;

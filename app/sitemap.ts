@@ -2,6 +2,8 @@ import type { MetadataRoute } from "next";
 
 // A static list on purpose: five hand-known routes beat a filesystem walk that would also
 // pick up API routes and image handlers.
+//
+// The origin below is one of three copies — see the note in app/robots.ts.
 const ROUTES: { path: string; priority: number; changeFrequency: MetadataRoute.Sitemap[number]["changeFrequency"] }[] = [
   { path: "/", priority: 1, changeFrequency: "weekly" },
   { path: "/projects/poweropps", priority: 0.8, changeFrequency: "monthly" },

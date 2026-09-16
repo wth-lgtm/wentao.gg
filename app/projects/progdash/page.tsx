@@ -98,7 +98,15 @@ export default function ProgDash() {
   return (
     <main className="min-h-screen bg-background">
       {/* Header */}
-      <header className="sticky top-0 z-50 bg-background/90 backdrop-blur-md border-b border-border">
+      {/* Opaque, and no backdrop-blur — the same decision, and the same reason, as the
+          whale tracker's header. Until body's `overflow-x: hidden` became `clip` (PR #61)
+          this header never actually stuck: body was a scroll container, so it stuck to
+          body and scrolled away with the page, and the fill never had anything behind it.
+          Now it engages, and measured in Chromium at 1440x620 and 390x500 in both themes
+          there are 2-10 text-bearing elements under its band at a scroll of 250px, at a
+          0.9 fill with blur(12px) over them. A full-width backdrop-filter also
+          re-rasterises on every scroll frame. */}
+      <header className="sticky top-0 z-50 bg-background border-b border-border">
         <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
           <Link
             href="/#projects"
@@ -431,7 +439,16 @@ export default function ProgDash() {
                         Tab: {sheetData.activeSheet}
                       </p>
                     </div>
-                    <span className="px-2 py-0.5 text-xs font-medium bg-gain/10 text-gain rounded border border-gain/20">
+                    {/* No bg-gain/10 behind the word. Measured in Chromium by
+                        compositing the real computed colours: --gain on a 10% --gain wash
+                        over --card is 4.33:1 in the LIGHT theme, under the 4.5:1 WCAG AA
+                        asks of 12px/500 text (dark was fine at 7.69:1, so only one theme
+                        was ever legible). On the bare card the same word measures 4.99:1
+                        light and 9.22:1 dark — which is also the repo's existing idiom for
+                        a green reading, since toneClass puts --gain straight onto --card
+                        everywhere on the whale board. The border carries the chip's shape
+                        and takes the tint the fill gave up. */}
+                    <span className="px-2 py-0.5 text-xs font-medium text-gain rounded border border-gain/40">
                       Live
                     </span>
                   </div>

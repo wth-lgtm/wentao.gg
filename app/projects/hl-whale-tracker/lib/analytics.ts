@@ -39,6 +39,15 @@ function ratio(numerator: number, denominator: number): number | null {
 }
 
 export interface Concentration {
+  /**
+   * The arithmetic sum of the window's PnL, and a NET one — it is returned unchanged
+   * on the branch that refuses every share, so it is the one field here whose meaning
+   * does not depend on the others being readable. That makes it a reading and NOT a
+   * denominator: when a row is negative the shares below are null precisely because
+   * dividing by this total produces figures over 100%, so anything derived from it
+   * would be the number the null is there to withhold. No consumer reads it today and
+   * that is the reason to say so here rather than after one does.
+   */
   total: number;
   /** Share of the window's total PnL held by the single largest address. */
   topShare: number | null;

@@ -54,21 +54,41 @@ const listeners = new Set<() => void>();
 // shadow localStorage, so a `storage` event from another tab could never change the theme.
 let memoryTheme: Theme | null = null;
 
+// A settled answer, remembered. useSyncExternalStore calls getSnapshot on every render
+// AND again on every notification, so this was a synchronous localStorage read per
+// render of the provider that wraps the whole tree. Only a VALID stored value is cached
+// — see getThemeSnapshot.
+let storedTheme: Theme | null = null;
+
 function subscribeTheme(onStoreChange: () => void) {
   listeners.add(onStoreChange);
-  // Another tab writing the same key.
-  window.addEventListener("storage", onStoreChange);
+  // Another tab writing the same key. The cache has to be dropped BEFORE React is told,
+  // or the re-render it schedules reads the value that has just been replaced.
+  const onStorage = () => {
+    storedTheme = null;
+    onStoreChange();
+  };
+  window.addEventListener("storage", onStorage);
   return () => {
     listeners.delete(onStoreChange);
-    window.removeEventListener("storage", onStoreChange);
+    window.removeEventListener("storage", onStorage);
   };
 }
 
 function getThemeSnapshot(): Theme {
+  if (storedTheme !== null) return storedTheme;
   // Storage first: once it is readable again its value is the truth, including whatever
   // another tab just wrote.
   const stored = safeStorage.get(STORAGE_KEY);
-  if (isTheme(stored)) return stored;
+  if (isTheme(stored)) {
+    storedTheme = stored;
+    return storedTheme;
+  }
+  // Deliberately NOT cached. safeStorage.get returns null both for "no such key" and
+  // for the WebKit SecurityError, and caching the second would break the contract in
+  // the line above: a blocked-storage visitor who later becomes readable would be
+  // pinned to "system" for the life of the tab. The uncached path costs one getItem per
+  // render and is what the visitor with no saved preference was already paying.
   return memoryTheme ?? "system";
 }
 
@@ -76,14 +96,25 @@ function getServerThemeSnapshot(): Theme {
   return "system";
 }
 
+// One MediaQueryList for the tab, built on first use — module evaluation must not touch
+// `window`, since this file is imported on the server. Same pattern, and for the same
+// reason, as hooks/useSurfaceTier.ts: getSystemSnapshot ran `window.matchMedia` on every
+// call, which both allocated a fresh list per render of the root provider and meant the
+// list being SUBSCRIBED to was never the list being READ.
+let darkQuery: MediaQueryList | null = null;
+function systemDarkQuery(): MediaQueryList {
+  darkQuery ??= window.matchMedia(DARK_QUERY);
+  return darkQuery;
+}
+
 function subscribeSystem(onStoreChange: () => void) {
-  const mediaQuery = window.matchMedia(DARK_QUERY);
+  const mediaQuery = systemDarkQuery();
   mediaQuery.addEventListener("change", onStoreChange);
   return () => mediaQuery.removeEventListener("change", onStoreChange);
 }
 
 function getSystemSnapshot(): boolean {
-  return window.matchMedia(DARK_QUERY).matches;
+  return systemDarkQuery().matches;
 }
 
 function getServerSystemSnapshot(): boolean {
@@ -114,6 +145,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     // Clearing on success matters as much as setting on failure: a stale memoryTheme would
     // outrank localStorage forever after.
     memoryTheme = safeStorage.set(STORAGE_KEY, newTheme) ? null : newTheme;
+    storedTheme = null;
     listeners.forEach((listener) => listener());
   }, []);
 

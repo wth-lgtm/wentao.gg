@@ -18,7 +18,9 @@ const CURRENCY_UNITS: readonly Unit[] = [
   [1e6, "M"],
   [1e3, "K"],
 ];
-// Percent scales only from 100,000% up (see formatPercent), so it never needs a K.
+// Percent only enters the scale at 100,000% (see formatPercent), so k is the lowest
+// rung it can reach — "100k%" — and there is no bare tier below it. No T either: the
+// all-time ROI ceiling is 2,641,203.9%, five orders of magnitude short of 1e9%.
 const PERCENT_UNITS: readonly Unit[] = [
   [1e9, "B"],
   [1e6, "M"],
@@ -39,6 +41,12 @@ function scaleCompact(
   units: readonly Unit[],
   decimalsFor: (scaled: number) => number
 ): string {
+  // A non-finite magnitude clears no threshold, so findIndex misses and the step-up
+  // loop below walked the index all the way down to 0 and handed back the LARGEST
+  // suffix in the table: a missing number printed "$NaNT", i.e. a trillion dollars.
+  // These tokens are what Intl prints on the uncompacted path ("$NaN", "$\u221e"), so the
+  // two paths now agree and neither invents a unit.
+  if (!Number.isFinite(absValue)) return Number.isNaN(absValue) ? "NaN" : "\u221e";
   let index = units.findIndex(([threshold]) => absValue >= threshold);
   if (index === -1) index = units.length;
   for (;;) {
@@ -95,17 +103,19 @@ export function formatCurrency(
 // three tiers below all fit in seven characters including a sign; `decimals` does not
 // apply to them, because each tier sets the precision its width can afford. Call sites
 // that compact a value put the uncompacted one in a `title` so nothing is lost.
-export function formatPercent(
-  value: number,
-  options: {
-    showSign?: boolean;
-    decimals?: number;
-    compact?: boolean;
-  } = {}
-): string {
-  const { showSign = false, decimals = 1, compact = false } = options;
+//
+// `decimals` is deliberately absent from the compact variant below rather than merely
+// unused: every tier fixes its own precision, so a call passing both was silently
+// getting the tier's decimals and not the ones it asked for. The union makes that a
+// compile error instead of a surprise.
+type PercentOptions =
+  | { showSign?: boolean; decimals?: number; compact?: false }
+  | { showSign?: boolean; compact: true };
+
+export function formatPercent(value: number, options: PercentOptions = {}): string {
+  const showSign = options.showSign ?? false;
   const sign = showSign && value > 0 ? "+" : "";
-  if (!compact) return `${sign}${value.toFixed(decimals)}%`;
+  if (!options.compact) return `${sign}${value.toFixed(options.decimals ?? 1)}%`;
 
   const absValue = Math.abs(value);
   const rounded = Math.round(absValue);
@@ -147,6 +157,27 @@ export function toneClass(value: number): string {
   if (value > 0) return "text-[var(--gain)]";
   if (value < 0) return "text-[var(--loss)]";
   return "text-muted";
+}
+
+/**
+ * Elapsed time as a field that ticks: MM:SS under an hour, H:MM:SS over it.
+ *
+ * Past an hour the rail used to print "60:00", then "125:07" — `Math.floor(s / 60)` with
+ * no hours term, so a tab left open showed a minutes field that had stopped being one.
+ * H:MM:SS is the tape's own reading (fills.ts formatClock) and it keeps the seconds
+ * visible, which is the point of a field that ticks. Hours are unpadded: they have no
+ * fixed width to hold.
+ *
+ * Lived inside SoundingRail.tsx, which is a client component wrapping a once-a-second
+ * interval, so nothing could assert on it. The clamp moved in with it — it was at the
+ * one call site, which is why "-1:-1" was reachable from anywhere else.
+ */
+export function formatAge(seconds: number): string {
+  const s = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
+  const mm = String(Math.floor(s / 60) % 60).padStart(2, "0");
+  const ss = String(s % 60).padStart(2, "0");
+  const hours = Math.floor(s / 3600);
+  return hours > 0 ? `${hours}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
 /** A non-chromatic carrier for direction, so hue is never the only cue. */

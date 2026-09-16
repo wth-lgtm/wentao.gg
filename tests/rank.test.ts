@@ -103,3 +103,15 @@ test("PREVIOUS_WINDOW: each window compares against the next-shorter one; 24H ha
   assert.equal(PREVIOUS_WINDOW["30d"], "7d");
   assert.equal(PREVIOUS_WINDOW.allTime, "30d");
 });
+
+test("rankByPnl: a duplicated address keeps its BEST berth, not the last one written", () => {
+  // withCanonicalRank goes out of its way to give two rows with one address two
+  // distinct ranks; rankByPnl built its map with `new Map(entries)`, which silently
+  // kept whichever berth was written LAST — the worse one. Two postures on one payload
+  // defect in one file. A delta lookup answers "where is this address on the board",
+  // and the answer is its highest berth.
+  const rows = [row("0xaaa", 300), row("0xbbb", 200), row("0xaaa", 100)];
+  assert.equal(rankByPnl(rows).get("0xaaa"), 1);
+  assert.equal(rankByPnl(rows).get("0xbbb"), 2);
+  assert.equal(rankByPnl(rows).size, 2);
+});

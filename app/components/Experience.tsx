@@ -130,16 +130,22 @@ function ExperienceCard({
               was a mouse — Tab landed on the button and nothing announced a link at all
               (WCAG 2.1.1). Anchored to the header so it stays put when the card expands. */}
           <div className="relative">
-            {/* Clickable header. The focus ring is drawn INSIDE: .glass is overflow:hidden and
-                this button's border box IS the clip rectangle, so the global
+            {/* Clickable header. The focus ring is drawn INSIDE: .glass is overflow:hidden
+                and this button's border box IS the clip rectangle, so the global
                 `outline-offset: 2px` ring fell entirely outside it and was never visible
-                (WCAG 2.4.7). The `!` is load-bearing — globals.css's `*:focus-visible` is
-                unlayered, so it outranks any Tailwind utility no matter how specific. */}
+                (WCAG 2.4.7). That now lives in globals.css as .glass-inset-focus, where
+                specificity beats the unlayered `*:focus-visible` on its own — here it
+                took two arbitrary-value utilities each with a load-bearing `!`, which is
+                a cascade fight spelled out on an element. */}
             <button
               onClick={onToggle}
               aria-expanded={isExpanded}
-              aria-controls={panelId}
-              className="w-full text-left p-6 md:p-8 focus-visible:[outline-offset:-4px]! focus-visible:rounded-[14px]!"
+              // Only while the panel is in the DOM. AnimatePresence unmounts it on
+              // collapse, so a permanent aria-controls named an element that was not
+              // there for all but one of the five cards — an idref a screen reader
+              // offers to jump to and then cannot find.
+              aria-controls={isExpanded ? panelId : undefined}
+              className="glass-inset-focus w-full text-left p-6 md:p-8"
             >
               <div className="flex items-center gap-4 mb-3">
                 {experience.logo && (
@@ -154,7 +160,13 @@ function ExperienceCard({
                   </div>
                 )}
                 <div className="flex-1 min-w-0">
-                  <h3 className="text-xl md:text-2xl font-semibold text-foreground group-hover:text-accent transition-colors">
+                  {/* No group-hover:text-accent. --accent IS the link colour on this
+                      page — the company's own link is the sibling anchor anchored to
+                      this header — so tinting the heading on card hover offered a link
+                      that is not there, while the actual link a few pixels away gets no
+                      hover of its own from the card. What this control does is expand
+                      the card, which the chevron and the card lift already say. */}
+                  <h3 className="text-xl md:text-2xl font-semibold text-foreground">
                     {experience.company}
                   </h3>
                   <p className="text-accent font-medium">{experience.title}</p>

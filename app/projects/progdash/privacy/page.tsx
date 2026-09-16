@@ -15,7 +15,15 @@ export const metadata: Metadata = {
 export default function ProgDashPrivacy() {
   return (
     <main className="min-h-screen bg-background">
-      <header className="sticky top-0 z-50 bg-background/90 backdrop-blur-md border-b border-border">
+      {/* Opaque, and no backdrop-blur — the same decision, and the same reason, as the
+          whale tracker's header. Until body's `overflow-x: hidden` became `clip` (PR #61)
+          this header never actually stuck: body was a scroll container, so it stuck to
+          body and scrolled away with the page, and the fill never had anything behind it.
+          Now it engages, and measured in Chromium at 1440x620 and 390x500 in both themes
+          there are 2-10 text-bearing elements under its band at a scroll of 250px, at a
+          0.9 fill with blur(12px) over them. A full-width backdrop-filter also
+          re-rasterises on every scroll frame. */}
+      <header className="sticky top-0 z-50 bg-background border-b border-border">
         <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
           <Link
             href="/projects/progdash"
@@ -25,7 +33,9 @@ export default function ProgDashPrivacy() {
             <span className="text-sm hidden sm:inline">Back</span>
           </Link>
           <h1 className="text-lg font-bold flex items-center gap-2">
-            <FileSpreadsheet size={20} className="text-green-500" />
+            {/* --gain, not green-500: the token is measured in both themes (10.2:1 on
+                dark, 5.55:1 on light) and a hardcoded palette step is neither. */}
+            <FileSpreadsheet size={20} className="text-gain" />
             ProgDash
           </h1>
           <div className="w-16" />
@@ -97,7 +107,7 @@ export default function ProgDashPrivacy() {
                 href="https://myaccount.google.com/permissions"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-green-500 underline hover:text-green-400 transition-colors"
+                className="text-gain underline hover:text-foreground transition-colors"
               >
                 Google Account permissions
               </a>
@@ -112,7 +122,7 @@ export default function ProgDashPrivacy() {
               via the contact information on{" "}
               <Link
                 href="/"
-                className="text-green-500 underline hover:text-green-400 transition-colors"
+                className="text-gain underline hover:text-foreground transition-colors"
               >
                 wentao.gg
               </Link>

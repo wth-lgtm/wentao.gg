@@ -1,6 +1,10 @@
 // One POST to Hyperliquid's public info API, shared by the two trader routes.
 //
-// SERVER-ONLY. It is a separate module from lib/trader.ts deliberately: that file is in
+// SERVER-ONLY, and now enforced rather than asserted — see the guard below. It had
+// only ever been a comment, which is the kind of boundary that holds right up until
+// someone needs one constant out of the file.
+//
+// It is a separate module from lib/trader.ts deliberately: that file is in
 // the client bundle (TradesPanel imports FILL_LIMIT, lib/urlState imports ADDRESS_RE),
 // and an outbound fetch helper carrying the upstream URL does not belong there. It is
 // not in either route file either, because Next's route type plugin rejects any export
@@ -10,6 +14,22 @@
 // The URL is a hardcoded constant and every caller passes the address inside the JSON
 // BODY, so no request input can influence the host. That, plus the 40-hex gate each
 // route applies before calling, is what stops these routes being a generic proxy.
+
+// The enforcement the SERVER-ONLY note above had been missing.
+//
+// `import "server-only"` is the canonical spelling and is what this should become the
+// moment the package is a real dependency. It is not one: nothing in the tree ships it
+// and Next resolves the bare specifier through a bundler ALIAS, so the import makes
+// this module unloadable under `node --import tsx` and takes tests/info.test.ts down
+// with it (verified: MODULE_NOT_FOUND on `server-only` from this file). Adding the
+// package is a dependency change this pass is not allowed to make, so the boundary is
+// enforced in a form both the bundler and the test runner can swallow. It costs one
+// comparison at module evaluation and never fires on a server.
+if (typeof window !== "undefined") {
+  throw new Error(
+    "lib/info is server-only: it carries the upstream URL and the outbound fetch, and must not be imported into a client bundle"
+  );
+}
 
 const INFO_URL = "https://api.hyperliquid.xyz/info";
 

@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  formatAge,
   formatCurrency,
   formatPercent,
 } from "../app/projects/hl-whale-tracker/lib/formatters";
@@ -129,4 +130,74 @@ test("formatPercent: compact never exceeds seven characters", () => {
       }
     }
   }
+});
+
+test("formatCurrency: a non-finite magnitude never acquires a unit", () => {
+  const compact1 = { compact: true, decimals: 1 } as const;
+
+  // scaleCompact's step-up loop used to walk a non-finite magnitude all the way down
+  // to index 0 and hand back the largest suffix in the table, so a missing number read
+  // as "$NaNT" — a trillion dollars. The compact path now prints what the uncompacted
+  // Intl path prints, which is the only reading the data supports.
+  assert.equal(formatCurrency(NaN, compact1), formatCurrency(NaN));
+  assert.equal(formatCurrency(NaN, compact1), "$NaN");
+  assert.equal(formatCurrency(Infinity, compact1), formatCurrency(Infinity));
+  assert.equal(formatCurrency(Infinity, compact1), "$∞");
+  assert.equal(formatCurrency(-Infinity, compact1), "-$∞");
+  // Same rung-walk, same phantom suffix: "NaNB%".
+  assert.equal(formatPercent(NaN, { compact: true }), "NaN%");
+  assert.equal(formatPercent(Infinity, { compact: true }), "∞%");
+});
+
+test("formatCurrency: each tier prints at its exact threshold", () => {
+  const compact1 = { compact: true, decimals: 1 } as const;
+
+  // The thresholds are `>=`, so the boundary value itself belongs to the higher unit.
+  assert.equal(formatCurrency(1e3, compact1), "$1.0K");
+  assert.equal(formatCurrency(1e6, compact1), "$1.0M");
+  assert.equal(formatCurrency(1e9, compact1), "$1.0B");
+  assert.equal(formatCurrency(1e12, compact1), "$1.0T");
+  // One cent below a threshold stays in the lower unit when rounding allows it.
+  assert.equal(formatCurrency(999.4e3, compact1), "$999.4K");
+  assert.equal(formatCurrency(999.4e9, compact1), "$999.4B");
+});
+
+test("formatCurrency: the top tier steps up too, and keeps its sign", () => {
+  const compact1 = { compact: true, decimals: 1 } as const;
+
+  // B→T was the one rung the tests never walked: 999.95B rounds to 1000.0B at one
+  // decimal, which is not a number of billions.
+  assert.equal(formatCurrency(999.95e9, compact1), "$1.0T");
+  // A step-up on a negative keeps the minus outside the $, with and without showSign.
+  assert.equal(formatCurrency(-999.95e6, compact1), "-$1.0B");
+  assert.equal(formatCurrency(-999.95e9, { ...compact1, showSign: true }), "-$1.0T");
+  assert.equal(formatPercent(-999_999, { compact: true }), "-1.00M%");
+  assert.equal(formatPercent(-99_999.6, { compact: true, showSign: true }), "-100k%");
+});
+
+test("formatAge: MM:SS under an hour, H:MM:SS over it", () => {
+  // The rail's age field ticks once a second and a tab stays open for hours. With no
+  // hours term it printed "60:00" and then "125:07" — a minutes field that had stopped
+  // being one.
+  assert.equal(formatAge(0), "00:00");
+  assert.equal(formatAge(7), "00:07");
+  assert.equal(formatAge(59), "00:59");
+  assert.equal(formatAge(60), "01:00");
+  assert.equal(formatAge(599), "09:59");
+  assert.equal(formatAge(3599), "59:59");
+  assert.equal(formatAge(3600), "1:00:00");
+  assert.equal(formatAge(3661), "1:01:01");
+  assert.equal(formatAge(7507), "2:05:07");
+  // The hours field is not padded: it has no fixed width to hold, and a tab open for
+  // more than nine hours should read "12:00:00", not be truncated to fit.
+  assert.equal(formatAge(43_200), "12:00:00");
+});
+
+test("formatAge: a fractional or negative input cannot produce a broken field", () => {
+  // The caller clamps at zero and floors before calling, so neither reaches here today.
+  // Pinned anyway, because "-1:-1" is the failure mode and the clamp living only at the
+  // call site is what made this untestable in the first place.
+  assert.equal(formatAge(59.9), "00:59");
+  assert.equal(formatAge(-1), "00:00");
+  assert.equal(formatAge(NaN), "00:00");
 });

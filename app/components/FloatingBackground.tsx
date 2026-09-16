@@ -86,6 +86,18 @@ const SETTLE_MAX = 10;
 // the spring below.
 const IDLE_V = 1.5;
 const IDLE_T = 3;
+// How long a pointer can sit still inside the region before it stops counting as a
+// shove. Longer than a hand's natural tremor and shorter than the idle window above, so
+// a parked cursor lets the pile settle and then sleep rather than holding it awake.
+const POINTER_IDLE_MS = 1200;
+
+// The quiet timer is a HARD RESET, not a decaying window: one frame over IDLE_V discards
+// every second of quiet accumulated before it. That is the conservative reading — a pile
+// still exchanging solver kicks has not settled — and the cost is that a single spike at
+// 2.9 s of quiet buys another full IDLE_T at frame rate. A decaying window (subtract
+// rather than zero) would tolerate the spike and risk sleeping a pile that is genuinely
+// still moving. Left as the hard reset deliberately; the trade is recorded here because
+// the choice is not visible from the one line that makes it.
 // soft cursor field — a FORCE model (impulse = force·dt, no ×mass) so heavy pieces resist
 // and light ones fly: weight becomes visible, and the shove is frame-rate independent.
 const R = 2.6; // influence radius
@@ -250,6 +262,14 @@ function Pile({ pieces, accent, card, light, visible, pour }: {
   const pourDone = useRef(false);
 
   const active = useRef(false);
+  // When the pointer last MOVED. Presence alone used to mean active forever: pointerenter
+  // and pointermove set the flag, only leave/out cleared it, so a cursor parked anywhere
+  // over the region kept `idling` false, reset the quiet timer on every frame and held the
+  // pile at full frame rate indefinitely (the spec's criterion was written as "cursor
+  // away", which a parked cursor is not). After POINTER_IDLE_MS of stillness the pile is
+  // allowed to settle and sleep; the next pointermove sets the flag and invalidates, so a
+  // single pixel of movement brings it straight back.
+  const lastMove = useRef(0);
   const wasActive = useRef(false);
   // persistent vectors (damp3 stashes velocity on `cursor`; finite-diff needs `prev`)
   const cursor = useMemo(() => new THREE.Vector3(0, -1000, 0), []);
@@ -293,6 +313,22 @@ function Pile({ pieces, accent, card, light, visible, pour }: {
     const beats = n > 0 ? stops[n - 1].beat + 1 : 0;
     return { groups: gs.filter((g) => g.instances.length > 0), beats, top: mouth + train * slot + k };
   }, [pieces, spawn]);
+
+  // The React key that remounts the instanced bodies, and it has to track the LAYOUT and
+  // not just the re-lay. `spawn.seq` was bumped only by the re-lay effect above, so a new
+  // commit payload — the ISR route refreshing under a card that is already mounted — built
+  // new `instances` with new scales under the SAME key, and react-three-rapier derives a
+  // child collider ONCE, when the `colliders` prop changes, never from a later `scale`:
+  // the pile then simulated the previous shapes at the new sizes. The levels are in the
+  // string because a day crossing a level boundary changes a piece's height without
+  // changing how many pieces each shape has.
+  const layoutKey = useMemo(
+    () =>
+      `${spawn.seq}-${spawn.k.toFixed(3)}-${layout.groups
+        .map((g) => g.levels.join(""))
+        .join(".")}`,
+    [spawn.seq, spawn.k, layout]
+  );
 
   // One ramp read two ways: the heatmap mixes the accent 18/45/64/82/100% into --card in both
   // themes, and so does the pile now — in light the rest pieces are the heatmap's rest-cell
@@ -381,7 +417,7 @@ function Pile({ pieces, accent, card, light, visible, pour }: {
   // one frame, and the bodies that frame wakes keep the loop alive by themselves after that.
   useEffect(() => {
     const el = gl.domElement;
-    const on = () => { active.current = true; invalidate(); };
+    const on = () => { active.current = true; lastMove.current = performance.now(); invalidate(); };
     const off = () => { active.current = false; invalidate(); };
     el.addEventListener("pointerenter", on);
     el.addEventListener("pointermove", on);
@@ -444,7 +480,9 @@ function Pile({ pieces, accent, card, light, visible, pour }: {
     //    pile that never captured, never slept, and held the loop at full rate for nothing.
     const t = sinceSpawn.current;
     const settling = !captured.current && pourDone.current && t > SETTLE_MIN;
-    const idling = !active.current;
+    // A still pointer is idle too — see lastMove.
+    const idling =
+      !active.current || performance.now() - lastMove.current > POINTER_IDLE_MS;
     let maxV2 = 0;
     if (settling || idling) {
       // "out" is the union of the live box and the spawn box: a wall that moved inward has
@@ -471,7 +509,7 @@ function Pile({ pieces, accent, card, light, visible, pour }: {
     }
 
     // capture the settled pile as "home" X once it has come to rest
-    if (settling && (maxV2 < 0.5 || t > SETTLE_MAX)) {
+    const captureHomes = () => {
       for (let gi = 0; gi < gb.length; gi++) {
         const list = gb[gi]?.current;
         if (!list) continue;
@@ -485,7 +523,8 @@ function Pile({ pieces, accent, card, light, visible, pour }: {
         }
       }
       captured.current = true;
-    }
+    };
+    if (settling && (maxV2 < 0.5 || t > SETTLE_MAX)) captureHomes();
 
     // idle → sleep the whole island (see IDLE_V). Quiet time runs on the delta rapier itself
     // integrates (clamped to 0.5 s), so a 10 fps tab and a 120 Hz one agree on "3 s".
@@ -495,6 +534,15 @@ function Pile({ pieces, accent, card, light, visible, pour }: {
       quietFor.current = maxV2 < IDLE_V * IDLE_V ? quietFor.current + Math.min(delta, 0.5) : 0;
       if (quietFor.current >= IDLE_T) {
         quietFor.current = 0;
+        // Last chance to read where the pile came to rest. `settling` is gated on
+        // `t > SETTLE_MIN` (2.5 s) while the quiet test is not, so a pile that fell
+        // quickly and was never touched could reach IDLE_T (3 s of quiet) with the
+        // capture still waiting on SETTLE_MIN — and after the sleep below nothing
+        // invalidates, so the loop stops and that frame never comes. The homes were then
+        // whatever the pour left in the array, and the cursor's recall pulled pieces to
+        // the mouth. Capturing here costs one pass over a pile that has, by definition,
+        // stopped moving.
+        if (!captured.current && pourDone.current) captureHomes();
         forEachBody(gb, (b) => b.sleep());
         return;
       }
@@ -567,7 +615,7 @@ function Pile({ pieces, accent, card, light, visible, pour }: {
         const mat = MATERIALS[g.key];
         return (
           <InstancedRigidBodies
-            key={`${g.key}-${spawn.seq}`}
+            key={`${g.key}-${layoutKey}`}
             ref={bodyHolders[gi]}
             instances={g.instances}
             colliders={COLLIDER[g.key]}

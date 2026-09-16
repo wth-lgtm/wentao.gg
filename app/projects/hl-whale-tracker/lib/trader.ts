@@ -67,9 +67,10 @@ export interface Fill {
   feeToken: string;
   /**
    * Exchange ORDER id. Kept because it is the only field that says which fills were
-   * one decision: the 7d #1 address's hundred most recent fills carry 73 distinct
-   * oids, and the time heuristic that stood in for this collapsed them into ten rows
-   * labelled "one order".
+   * one decision: a hundred fills from a board address are dozens of separate orders,
+   * and the time heuristic that stood in for this collapsed them into ten rows
+   * labelled "one order". The dated readings are THE OID SAMPLE in lib/fills.ts —
+   * they move between probes, so this does not name a figure.
    */
   oid: number | null;
   /** Parent id of a TWAP: many child oids, one intent, so it groups ahead of oid. */
@@ -153,7 +154,16 @@ export function parsePositions(raw: unknown): PerpPosition[] | null {
   return out;
 }
 
-/** null when upstream did not answer; [] when it answered with no non-zero balance. */
+/**
+ * null when upstream did not answer; [] when it answered with no non-zero balance.
+ *
+ * The filter drops only EXACT zeros, which is the honest gate: 1e-6 of a token is a
+ * holding the account owns, and a threshold here would be this module deciding what is
+ * too small to have. What made that look wrong was the PRINT side — formatSize rounded
+ * such a balance to a bare "0" — and that is fixed where it belongs (lib/fills.ts states
+ * the bound: "<0.0001"). The dust drawer is the other half: it folds sub-dollar rows away
+ * by VALUE without dropping them, and the section's count stays the full total.
+ */
 export function parseSpot(raw: unknown): SpotBalance[] | null {
   if (raw == null) return null;
   const list = (raw as { balances?: unknown })?.balances;

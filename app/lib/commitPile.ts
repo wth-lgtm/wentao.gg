@@ -59,7 +59,9 @@ export function rand(i: number, seed: number): number {
 
 // "Lego land" — a mixed pile of geometric primitives instead of only bars. The box brick
 // is the most common (three picks in nine) so it still reads as a heatmap pile.
-export const SHAPES = ["box", "sphere", "cone", "octa", "tetra", "torus", "ico"] as const;
+// Not exported: nothing outside this file names it, and the type below is what callers
+// actually want (FloatingBackground keys its material and collider maps on ShapeKey).
+const SHAPES = ["box", "sphere", "cone", "octa", "tetra", "torus", "ico"] as const;
 export type ShapeKey = (typeof SHAPES)[number];
 const PICK = [0, 0, 0, 1, 2, 3, 4, 5, 6];
 
@@ -70,8 +72,16 @@ export function shapeOf(i: number): ShapeKey {
 // A box's height is the heatmap's own extrusion for its level; every other shape is a
 // uniform scale so it keeps its silhouette. AREA is each unit primitive's camera-facing
 // cross-section (× s²), for the fill rule.
-export const HEIGHTS = [0.34, 0.62, 0.96, 1.35, 1.85];
-const AREA: Record<ShapeKey, number> = { box: 0, sphere: 0.79, cone: 0.52, octa: 0.77, tetra: 0.55, torus: 0.72, ico: 0.8 };
+// Not exported either: only sizeOf reads it, and a bar height is not a number a caller
+// can do anything with on its own.
+const HEIGHTS = [0.34, 0.62, 0.96, 1.35, 1.85];
+// `box` is deliberately absent rather than 0. A box returns from sizeOf before AREA is
+// read — its area is w × h, from its own random dimensions — so the 0 that used to sit
+// here was a value nothing could consume and a reader had to rule out. Omitting it makes
+// the type say so: a lookup for "box" is a compile error, which is the correct answer.
+const AREA: Record<Exclude<ShapeKey, "box">, number> = {
+  sphere: 0.79, cone: 0.52, octa: 0.77, tetra: 0.55, torus: 0.72, ico: 0.8,
+};
 
 /** Unit-scale size and face area of piece `i` — shape, size and spin are texture, not data. */
 export function sizeOf(i: number, key: ShapeKey, level: number): { scale: [number, number, number]; area: number } {
@@ -83,6 +93,7 @@ export function sizeOf(i: number, key: ShapeKey, level: number): { scale: [numbe
   }
   const s = 0.5 + rand(i, 1) * 0.62; // uniform → keeps each primitive's shape, varied sizes
   return { scale: [s, s, s], area: AREA[key] * s * s };
+  // `key` is narrowed to Exclude<ShapeKey, "box"> by the early return above.
 }
 
 /**

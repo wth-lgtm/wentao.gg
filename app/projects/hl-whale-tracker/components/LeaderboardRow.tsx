@@ -2,7 +2,7 @@
 
 import { ChevronRight, ExternalLink } from "lucide-react";
 import Odometer from "./Odometer";
-import { Legend, dash } from "./Instrument";
+import { DeltaPlate, Legend, Plate } from "./Instrument";
 import { TraderMetrics } from "../lib/types";
 import {
   formatAddress,
@@ -11,7 +11,6 @@ import {
   signGlyph,
   toneClass,
 } from "../lib/formatters";
-import { tierOf } from "../lib/tier";
 
 interface LeaderboardRowProps {
   trader: TraderMetrics;
@@ -32,52 +31,6 @@ interface LeaderboardRowProps {
   registerRow?: (key: string, el: HTMLElement | null) => void;
 }
 
-// An unmoved berth is a KNOWN zero, so it may not share a glyph with the unknown: this
-// repo reads the em dash as "unknown" (Instrument.tsx `dash`, used that way across the
-// panels), and the delta column has a genuine unknown of its own — the 24H window has
-// no shorter window to compare against. The middle dot is signGlyph's own zero.
-const UNMOVED = "·";
-
-/**
- * The delta plate. Direction is carried three ways at once — the glyph, the tone token
- * and the numeral — so no single channel is load-bearing: the glyph survives a
- * monochrome print, the tone survives a glance, the numeral survives both. The sr-only
- * words are what a screen reader gets instead of "black up-pointing triangle".
- */
-function DeltaPlate({ delta }: { delta: number | null | undefined }) {
-  if (delta === undefined) {
-    // No reference window (24H): the reading is unknown, and the unknown is the em dash.
-    return (
-      <span className="hl-delta" data-tone="unknown">
-        {dash}
-      </span>
-    );
-  }
-  if (delta === null) {
-    // Not on the previous board. Unknown too, but a specific one — the trader arrived —
-    // so it gets the etched legend the volume column uses for its designed absence.
-    return <Legend>new</Legend>;
-  }
-  if (delta === 0) {
-    return (
-      <span className="hl-delta" data-tone="flat">
-        <span aria-hidden>{UNMOVED}</span>
-        <span className="sr-only">unchanged</span>
-      </span>
-    );
-  }
-  return (
-    <span
-      className={`hl-delta ${toneClass(delta)}`}
-      data-tone={delta > 0 ? "up" : "down"}
-    >
-      <span aria-hidden>{signGlyph(delta)}</span>
-      <span className="sr-only">{delta > 0 ? "up" : "down"} </span>
-      {Math.abs(delta)}
-    </span>
-  );
-}
-
 export default function LeaderboardRow({
   trader,
   rank,
@@ -89,6 +42,13 @@ export default function LeaderboardRow({
   registerRow,
 }: LeaderboardRowProps) {
   const explorerUrl = `https://app.hyperliquid.xyz/explorer/address/${trader.address}`;
+  // The compact ROI and the exact one. The title is set only when they DIFFER: below
+  // 1000% the compact form is the uncompacted form character for character, so every
+  // short ROI on the board carried a tooltip that repeated the cell — a hover target
+  // and an extra announcement for no information. 12 of 50 all-time rows are above
+  // 1000%, which is where the title earns its place.
+  const roi = formatPercent(trader.winRate, { compact: true });
+  const roiExact = formatPercent(trader.winRate);
 
   return (
     <tr
@@ -100,9 +60,7 @@ export default function LeaderboardRow({
       className="hl-berth"
     >
       <td className="px-3 sm:px-4">
-        <span className="hl-plate" data-tier={tierOf(rank)}>
-          {String(rank).padStart(2, "0")}
-        </span>
+        <Plate rank={rank} />
       </td>
 
       {deltaColumn && (
@@ -155,9 +113,9 @@ export default function LeaderboardRow({
             box and spilled into Volume. The exact figure rides in the title. */}
         <span
           className={`tabular-nums ${toneClass(trader.winRate)}`}
-          title={formatPercent(trader.winRate)}
+          title={roiExact === roi ? undefined : roiExact}
         >
-          {formatPercent(trader.winRate, { compact: true })}
+          {roi}
         </span>
       </td>
 
@@ -165,10 +123,10 @@ export default function LeaderboardRow({
         <span className="tabular-nums text-muted">
           {trader.volume === 0 ? (
             // Seven of the fifty on the live 7D board traded exactly nothing (41 on
-            // 30D). Saying so beats printing a $0.00 that looks like a bug.
-            <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--legend)]">
-              none
-            </span>
+            // 30D). Saying so beats printing a $0.00 that looks like a bug. <Legend>,
+            // not a hand-written copy of its five classes — the phone card next door
+            // already said this with the component.
+            <Legend>none</Legend>
           ) : (
             formatCurrency(trader.volume, { compact: true, decimals: 1 })
           )}

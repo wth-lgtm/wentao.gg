@@ -3,16 +3,25 @@
 import Link from "next/link";
 import { useEffect } from "react";
 
-// The site-wide boundary, for everything that is not the whale tracker (which has its
-// own, so a panel throw there keeps the tracker's hull). Before this, any throw outside
-// that route rendered Next's default error screen — the only page on the site with no
-// tokens, no INDEX link and no retry.
+// The root SEGMENT's boundary, for everything that is not the whale tracker (which has
+// its own, so a panel throw there keeps the tracker's hull). Before this, any throw
+// outside that route rendered Next's default error screen — the only page on the site
+// with no tokens, no INDEX link and no retry.
+//
+// Renamed from GlobalRouteError, which claimed a job this file does not have: in the App
+// Router the GLOBAL boundary is `app/global-error.tsx`, which replaces the root layout
+// and is the only thing that catches a throw in the layout itself. `app/error.tsx`
+// renders INSIDE that layout and catches its children. So a throw in layout.tsx or in
+// ThemeProvider still reaches Next's default screen, and the name said otherwise.
+// global-error.tsx is deliberately not added here: it cannot use the fonts, the theme
+// class or the providers it replaces, so it is a second, token-less page to design and
+// maintain for a failure mode this site has not had.
 //
 // Tokens only, no component imports: this file renders when something in the tree
 // below it has already failed, so it must not depend on any of it. `reset()` re-renders
 // that subtree, which is the cheapest thing to try first.
 
-export default function GlobalRouteError({
+export default function SiteRouteError({
   error,
   reset,
 }: {

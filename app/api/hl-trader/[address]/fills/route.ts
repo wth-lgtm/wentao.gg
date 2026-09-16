@@ -56,6 +56,24 @@ async function spotMeta(): Promise<unknown> {
   return value;
 }
 
+// The DERIVED map, memoised beside the raw payload rather than instead of it.
+//
+// pairNames walks a 311-entry universe and a 501-entry token table to build 311 strings,
+// and it was doing that on every request for a payload that changes at most once an hour.
+// Keyed on the payload's OBJECT IDENTITY, which is exactly the right invalidation here:
+// spotMeta() above returns the same object for the life of the cache entry and a fresh
+// read is a fresh object, so this cannot go stale without the raw cache going stale
+// first — and the raw payload stays the cache of record, so this route's labels and the
+// sibling route's pricing are still built from one read of spotMeta.
+let nameCache: { from: unknown; names: Map<string, string> } | null = null;
+
+function spotNames(meta: unknown): Map<string, string> {
+  if (nameCache !== null && nameCache.from === meta) return nameCache.names;
+  const names = pairNames(meta);
+  nameCache = { from: meta, names };
+  return names;
+}
+
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ address: string }> }
@@ -81,7 +99,18 @@ export async function GET(
   // Resolved here rather than shipping the whole 311-pair table to the browser. An
   // unresolved fill keeps upstream's own "@107", which is honest — hiding the row would
   // lose a real trade.
-  const names = pairNames(meta);
+  //
+  // KNOWN GAP, recorded rather than fixed. When spotMeta fails outright (`meta === null`
+  // after lib/info's timeout or a 429) pairNames returns an EMPTY map, so every spot fill
+  // falls back to its index — and nothing in this response says the label map is missing.
+  // On screen "@107" then reads as the market's name rather than as a lookup that did not
+  // happen, which is the one shape of dishonesty this app spends most of its care on.
+  // It is left as is deliberately: the tape's own contract is that `fills: null` means
+  // upstream did not answer, the fills here are all present and correct, and the fix is a
+  // second signal in the body plus a state in the panel to render it — a change to both
+  // sides of the wire for a field that is cosmetic when it degrades. The short SPOT_TTL_MS
+  // on a failed read (see above) is what stops it lasting an hour.
+  const names = spotNames(meta);
   const parsed = parseFills(fills, FILL_LIMIT)?.map((f) => {
     const label = names.get(f.coin);
     return label ? { ...f, label } : f;
@@ -93,9 +122,9 @@ export async function GET(
       // Trimmed deliberately, but not indiscriminately: hash/tid/cloid stay behind
       // as internals the UI never renders. `oid` and `twapId` do ride along — they
       // identify an ORDER, not a wallet (the wallet is already the URL), and they are
-      // what lets the tape say "one order" truthfully: the 7d #1 address's hundred
-      // most recent fills carry 73 distinct oids, which the time heuristic that stood
-      // in for them collapsed into ten rows.
+      // what lets the tape say "one order" truthfully — the time heuristic that stood
+      // in for them collapsed dozens of orders into ten rows (dated readings: THE OID
+      // SAMPLE in lib/fills.ts).
       fills: parsed ?? null,
       fetchedAt: Date.now(),
     },

@@ -158,8 +158,11 @@ export function useTableControls() {
         volume: (t) => t.volume,
       };
       const read = key[state.sort];
-      // Deterministic tiebreak on pnl: sixteen of the top fifty have a volume of
-      // exactly 0.00, and without this they'd shuffle between renders.
+      // Deterministic tiebreak on pnl: a large share of the board trades exactly 0.00
+      // volume in any window, and without this they'd shuffle between renders. The count
+      // is per WINDOW and it moves — measured 2026-09-16: 9 in 24H, 5 in 7D, 40 in 30D,
+      // 12 all-time. "Sixteen of the top fifty" was a single undated figure that matched
+      // no window, and it sat beside LeaderboardRow's own reading of the same fact.
       return [...canonical(rows)].sort((a, b) => {
         const diff = read(a) - read(b);
         const primary = state.dir === "desc" ? -diff : diff;

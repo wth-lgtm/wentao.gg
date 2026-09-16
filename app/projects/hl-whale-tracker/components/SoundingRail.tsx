@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { TimePeriod } from "../lib/types";
 import { SWR_S, UPSTREAM_HOST } from "../lib/config";
+import { formatAge } from "../lib/formatters";
 import type { LeaderboardSnapshot } from "../hooks/useLeaderboard";
 
 // Replaces the banner that used to sit here reading "Still tuning the API
@@ -22,17 +23,6 @@ const WINDOW_LABEL: Record<TimePeriod, string> = {
   "30d": "30D",
   allTime: "ALL",
 };
-
-// Past an hour the age used to print "60:00", then "125:07" — `Math.floor(s/60)` with
-// no hours term, so a tab left open showed a minutes field that had stopped being one.
-// H:MM:SS is the tape's own reading (fills.ts formatClock) and it keeps the seconds
-// visible, which is the point of a field that ticks.
-function formatAge(seconds: number): string {
-  const mm = String(Math.floor(seconds / 60) % 60).padStart(2, "0");
-  const ss = String(seconds % 60).padStart(2, "0");
-  const hours = Math.floor(seconds / 3600);
-  return hours > 0 ? `${hours}:${mm}:${ss}` : `${mm}:${ss}`;
-}
 
 /**
  * Isolated so its once-a-second tick re-renders four characters instead of the

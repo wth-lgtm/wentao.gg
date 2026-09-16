@@ -1,11 +1,16 @@
 import { unstable_cache } from "next/cache";
 import { NextResponse } from "next/server";
 
+// The `@/` alias, consistently. This route reached for it while CommitHeatmap.tsx reads
+// the same module as "../lib/githubStats" — two spellings of one import is how a moved
+// file breaks one call site and not the other. The alias is the right one to keep here:
+// a route four directories deep would otherwise say "../../../lib/githubStats".
 import {
   bucketByUtcDay,
   commitWindowStart,
   fetchCommitWindow,
   topLanguages,
+  totalCommits,
   utcDayKey,
 } from "@/app/lib/githubStats";
 
@@ -57,6 +62,10 @@ function ghHeaders(): Record<string, string> {
 
 function ghFetch(url: string) {
   // No per-URL caching — the one snapshot entry above is what holds the payload together.
+  // Every request from here carries the bearer token when one is configured, which is
+  // why fetchCommitWindow is handed API as its allowed origin: the URLs it follows come
+  // out of GitHub's Link header, and a credential must not go wherever a response header
+  // points.
   return fetch(url, { headers: ghHeaders(), cache: "no-store" });
 }
 
@@ -67,17 +76,16 @@ function gh(path: string) {
 const loadStats = unstable_cache(
   async () => {
     // True total commit count: request 1 per page and read the last-page number from the
-    // Link header (works past 100, unlike counting a single page).
+    // Link header (works past 100, unlike counting a single page). totalCommits owns the
+    // two readings and the case that used to fall between them — `.length` on a body that
+    // is not a list was `undefined`, and an undefined field is DROPPED by JSON.stringify,
+    // so the card received a snapshot with no `commits` key and rendered whatever that
+    // coerced to. A count we cannot read is the same failure as a head page we cannot
+    // fetch, so it takes the same exit.
     const headRes = await gh(`/repos/${REPO}/commits?per_page=1`);
     if (!headRes.ok) throw new Error(`commits ${headRes.status}`);
-    let total = 1;
-    const link = headRes.headers.get("link");
-    if (link) {
-      const m = link.match(/[?&]page=(\d+)>;\s*rel="last"/);
-      total = m ? parseInt(m[1], 10) : 1;
-    } else {
-      total = (await headRes.json()).length;
-    }
+    const total = totalCommits(headRes.headers.get("link"), await headRes.json());
+    if (total === null) throw new Error("commits: no readable count on the head page");
 
     // Per-day counts for the activity grid: ask for the WINDOW, not the head of the log.
     // A single per_page=100 page only ever covered the 100 newest commits, so on
@@ -85,9 +93,13 @@ const loadStats = unstable_cache(
     // git puts inside the 12-week window — rendered as an empty cell. Any burst of >100
     // commits blanked the rest of the quarter the same way.
     //
-    // `since` is truncated to 00:00:00Z (see commitWindowStart) so the URL stays identical
-    // for a whole day and the fetch cache can actually hit; a to-the-second bound would
-    // make every visitor a GitHub request. Note GitHub filters `since` on COMMITTER date
+    // `since` is truncated to 00:00:00Z (see commitWindowStart) so every regeneration
+    // inside one UTC day asks for the same range and two snapshots cannot disagree about
+    // where the grid starts. It is NOT about a fetch cache: the reads here are all
+    // `no-store` inside one unstable_cache entry, so the URL is not a cache key and the
+    // budget is spent per regeneration whatever the bound says — the version of this
+    // comment that claimed otherwise outlived the cache it described.
+    // Note GitHub filters `since` on COMMITTER date
     // while we bucket AUTHOR date; committer >= author, so a rebased commit can land a day
     // or two before windowStart, which the client's own window already ignores.
     //
@@ -103,6 +115,7 @@ const loadStats = unstable_cache(
       ghFetch,
       `${API}/repos/${REPO}/commits?since=${windowStart.toISOString()}&per_page=100`,
       pageCap,
+      API,
     );
     const days = bucketByUtcDay(authored);
 
@@ -139,8 +152,15 @@ export async function GET() {
       headers: { "Cache-Control": "public, s-maxage=300, stale-while-revalidate=600" },
     });
   } catch {
-    // A throw leaves nothing cached, so the next request retries instead of serving a
-    // remembered failure.
-    return NextResponse.json({ error: true }, { status: 200 });
+    // A throw leaves no unstable_cache ENTRY, so the next regeneration re-asks GitHub.
+    // That is all it ever meant: this response is still a 200 on a route declaring
+    // `revalidate = 300`, so without a header of its own the failure was cacheable and
+    // the ISR/CDN layer could hand `{ error: true }` to every visitor for five minutes —
+    // exactly the remembered failure the old comment claimed could not happen. `no-store`
+    // is what makes the sentence true.
+    return NextResponse.json(
+      { error: true },
+      { status: 200, headers: { "Cache-Control": "no-store" } }
+    );
   }
 }

@@ -1,9 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AddressLegend, Legend, dash } from "./Instrument";
+import { AddressLegend, Legend, Unavailable, dash } from "./Instrument";
 import { formatCurrency, formatPercent, toneClass } from "../lib/formatters";
 import { formatPrice, formatSize } from "../lib/fills";
+import {
+  Aggregate,
+  DUST_USD,
+  byValueDesc,
+  isDust,
+  maintenanceShare,
+  sumOf,
+} from "../lib/positions";
 import { PerpPosition, SpotBalance, TraderPositions } from "../lib/trader";
 
 // The Positions tab: what one whale is actually holding right now.
@@ -31,8 +39,17 @@ function Metric({ label, children }: { label: string; children: React.ReactNode 
   );
 }
 
+/**
+ * Where a figure on this panel stops being written out in full.
+ *
+ * One place, because it had two: money() below and spotValue() four hundred lines
+ * down both carried `Math.abs(v) >= 10_000`, so the perp ledger and the spot list
+ * agreed on the threshold only by coincidence.
+ */
+const compactAbove = (v: number) => Math.abs(v) >= 10_000;
+
 const money = (v: number | null, decimals = 2) =>
-  v === null ? dash : formatCurrency(v, { compact: Math.abs(v) >= 10_000, decimals });
+  v === null ? dash : formatCurrency(v, { compact: compactAbove(v), decimals });
 
 // formatPrice and formatSize hand back a bare "—" for null, which sits a shade
 // darker than the muted `dash` every other unknown on this panel uses — Entry and
@@ -105,28 +122,12 @@ function AsOf({ since }: { since: number }) {
 }
 
 // ── Position ordering and the dust gate ───────────────────────────────────────
-
-/** Largest notional first, unknown value last. Upstream order is asset-index order
- * and carries no meaning to a reader — it is why a $0.35 SUI residue sat between INJ
- * at $1.63M and XRP at $19.6M. Sort is stable, so equal values keep upstream order. */
-function byValueDesc(a: PerpPosition, b: PerpPosition): number {
-  if (a.positionValue === b.positionValue) return 0;
-  if (a.positionValue === null) return 1;
-  if (b.positionValue === null) return -1;
-  return b.positionValue - a.positionValue;
-}
-
-/**
- * The gate is ABSOLUTE and stays that way.
- *
- * A relative gate (`positionValue < totalNtlPos * 0.0001`) was probed against live
- * accounts and collapses real trades: eight positions of $1.3K–$12K for 0x45d26f28,
- * eight more for 0x7fdafde5, a $21,070 ASTER position for 0xb83de012. The residues
- * this is for measured $0.01, $0.35, $3, $18 and $22, so ten dollars catches the
- * garbage without hiding anybody's trade.
- */
-const DUST_USD = 10;
-const isDust = (p: PerpPosition) => p.positionValue !== null && p.positionValue < DUST_USD;
+//
+// byValueDesc, isDust, DUST_USD, sumOf, Aggregate and maintenanceShare moved to
+// lib/positions.ts, which tests/positions.test.ts can load. They were pure functions
+// living in a client component, so the facts they exist to protect — a missing figure
+// never becomes a 0, an unpriced position never sorts as though it were worth nothing
+// — were asserted by their comments and by nothing else.
 
 interface Ranked {
   main: PerpPosition[];
@@ -140,38 +141,6 @@ function rankPositions(positions: PerpPosition[] | null): Ranked | null {
 }
 
 // ── The roll-up ───────────────────────────────────────────────────────────────
-
-/** A sum together with how much of the book it actually covers. */
-interface Aggregate {
-  /** null when upstream gave none of the inputs: the dash, never a 0 built of unknowns. */
-  total: number | null;
-  /** Rows that contributed a figure. */
-  seen: number;
-  /** Rows that were asked for one. */
-  of: number;
-}
-
-/**
- * Sum over the values upstream actually gave, and remember how many that was.
- *
- * Returning only the number was a quieter version of the same lie the dash exists to
- * prevent: a figure missing from ONE of twelve present rows is a case the data really
- * produces (tests/trader.test.ts pins that a missing figure inside a present row stays
- * null, never 0), and the header then printed a sum of eleven under a bare "Unrealised"
- * as though it were the book's total. The count travels with the total so the cell can
- * say "11 of 12".
- */
-function sumOf(values: (number | null)[]): Aggregate {
-  let total = 0;
-  let seen = 0;
-  for (const v of values) {
-    if (v !== null) {
-      total += v;
-      seen += 1;
-    }
-  }
-  return { total: seen === 0 ? null : total, seen, of: values.length };
-}
 
 interface PerpTotals {
   unrealized: Aggregate;
@@ -220,24 +189,24 @@ function Coverage({
 }) {
   if (agg.total === null || agg.seen >= agg.of) return null;
   return (
-    <Legend>
-      {agg.seen} of {agg.of}
-      <span className="sr-only">
+    <>
+      <Legend>
+        {agg.seen} of {agg.of}
+      </Legend>
+      {/* A SIBLING of the legend, the way every other sr-only sentence on this panel
+          is written. Nested inside it, the sentence inherited `uppercase` — and a
+          screen reader handed an all-caps sentence may spell it out letter by letter
+          rather than read it, which is the one thing this sentence must not do.
+          `normal-case tracking-normal` because being a sibling is not enough: the spot
+          roll-up renders this whole component INSIDE its "Total ≈ …" Legend, so the
+          span inherited `uppercase` (measured) from two levels up while the three perp
+          sites were clean. Undoing it on the span itself is the only version no host
+          can break — the same defence, for the same reason, as AddressLegend's hex. */}
+      <span className="sr-only normal-case tracking-normal">
         {` ${unit}: upstream reported no ${what} for the other ${agg.of - agg.seen}, so this total is not the whole book`}
       </span>
-    </Legend>
+    </>
   );
-}
-
-/** Maintenance margin as a share of equity: 100% is the liquidation line. Null unless
- * both figures are present AND equity is above zero — a ratio of a zero account is not
- * a percentage, and printing 0% there would read as "nothing at risk". */
-function maintenanceShare(
-  required: number | null,
-  equity: number | null
-): number | null {
-  if (required === null || equity === null || equity <= 0) return null;
-  return (required / equity) * 100;
 }
 
 function TotalsRow({ totals, maintenance }: { totals: PerpTotals; maintenance: number | null }) {
@@ -350,7 +319,13 @@ function Market({ p }: { p: PerpPosition }) {
 function Roe({ p, dust }: { p: PerpPosition; dust: boolean }) {
   if (dust) return notMeaningful;
   if (p.roe === null) return dash;
-  return <span className={toneClass(p.roe)}>{(p.roe * 100).toFixed(2)}%</span>;
+  // Through formatPercent, like Maintenance two cells away. Both print a percentage of
+  // the same account and one was hand-rolling `toFixed(2) + "%"`, which is how the two
+  // end up disagreeing the next time the percent form changes. `roe` is a RATIO
+  // upstream, so the ×100 stays here.
+  return (
+    <span className={toneClass(p.roe)}>{formatPercent(p.roe * 100, { decimals: 2 })}</span>
+  );
 }
 
 /**
@@ -392,9 +367,17 @@ function PositionList({ rows, dust = false }: { rows: PerpPosition[]; dust?: boo
               <Th align="right" className="hidden lg:table-cell">
                 Liq.
               </Th>
-              <Th align="right" className="hidden lg:table-cell">
-                Funding
-              </Th>
+              {/* Funding is shown at every width the TABLE is, where Margin and Liq.
+                  stay behind lg. It was `hidden lg:table-cell` with them, which left it
+                  invisible from 640 to 1023 — and the stacked slab BELOW 640 renders
+                  "Funding since open", so a phone showed a figure a tablet did not. It is
+                  also the column that justifies the dust drawer: a residue's ROE and
+                  liquidation price are blanked as "not meaningful at this size", and what
+                  is left to say about a $0.35 position is what it has paid to be held.
+                  Measured in Chromium at 640/700/768/1024/1200 on the live 7d #1 account
+                  (twelve positions): table overflow 0 at every width, Funding taking 89px
+                  — the same as Entry — and no cell wrapping that was not already. */}
+              <Th align="right">Funding</Th>
               <Th align="right" pad="pl-2 pr-4">
                 uPnL
               </Th>
@@ -418,7 +401,7 @@ function PositionList({ rows, dust = false }: { rows: PerpPosition[]; dust?: boo
                 <Td muted className="hidden lg:table-cell">
                   {dust ? notMeaningful : price(p.liquidationPx)}
                 </Td>
-                <Td className="hidden lg:table-cell">
+                <Td>
                   {p.fundingSinceOpen === null ? dash : <Funding value={p.fundingSinceOpen} />}
                 </Td>
                 <Td pad="pl-2 pr-4">
@@ -495,50 +478,6 @@ function DustBlock({ rows, total }: { rows: PerpPosition[]; total: number }) {
   );
 }
 
-/**
- * The absent state, which is NOT the empty state.
- *
- * The route answers 200 with a partial body when one of its three upstream calls
- * fails — Hyperliquid returns 429 on a second sequential call from a shared egress IP
- * — and the snapshot carries that as null. Rendering the designed "currently flat"
- * copy over it asserted a fact about the whale that the app did not have.
- */
-function Unavailable({
-  reason,
-  onRetry,
-  busy,
-}: {
-  reason: string;
-  onRetry?: () => void;
-  busy: boolean;
-}) {
-  return (
-    <>
-      <p className="mt-2 font-mono text-xs uppercase tracking-[0.16em] text-[var(--loss)]">
-        {reason}
-      </p>
-      {onRetry && <ReRead onRetry={onRetry} busy={busy} />}
-    </>
-  );
-}
-
-// Re-asks for THIS address through useTrader's reload, so the tab, the selection and
-// the rest of the snapshot all survive the retry. Disabled while a request is in
-// flight because a partial 200 leaves `data` populated, so nothing else on screen
-// changes to say the click landed.
-function ReRead({ onRetry, busy }: { onRetry: () => void; busy: boolean }) {
-  return (
-    <button
-      type="button"
-      onClick={onRetry}
-      disabled={busy}
-      className="mt-3 rounded border border-border px-2 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--legend)] transition-colors hover:text-foreground disabled:opacity-50"
-    >
-      {busy ? "Re-reading" : "Re-read"}
-    </button>
-  );
-}
-
 // ── Spot ordering, pricing and its own dust gate ──────────────────────────────
 
 /** Biggest count first, unknown last. Only the tie-break behind byUsdDesc now: on its
@@ -586,9 +525,10 @@ const SPOT_DUST_USD = 1;
  */
 function spotValue(usd: number): string {
   if (usd > 0 && usd < 0.005) return "<$0.01";
-  // Same tiers as money(), inlined because the null branch — which hands back a JSX
-  // dash — cannot be reached here and the row renders the unpriced case itself.
-  return formatCurrency(usd, { compact: Math.abs(usd) >= 10_000, decimals: 2 });
+  // Not money() itself, because its null branch hands back a JSX dash and the row
+  // renders the unpriced case for itself — but the same threshold, from the same
+  // constant, so the two columns cannot drift apart.
+  return formatCurrency(usd, { compact: compactAbove(usd), decimals: 2 });
 }
 
 const isSpotDust = (b: SpotBalance) => b.usdValue !== null && b.usdValue < SPOT_DUST_USD;
@@ -759,6 +699,8 @@ export default function PositionsPanel({
   // an empty spot list would make "spot holder" a claim about nothing.
   const spotFirst =
     positions !== null && positions.length === 0 && spot !== null && spot.length > 0;
+  // Both slices absent is one upstream refusal, not two — see the spot notice below.
+  const bothAbsent = positions === null && spot === null;
   const asOf = <AsOf since={data.fetchedAt} />;
 
   // Both figures or neither, and both above zero. A ratio needs a positive denominator
@@ -815,7 +757,15 @@ export default function PositionsPanel({
           is arithmetic rather than a claim. It is phrased as a MULTIPLE of the live
           account ("the leaderboard reads 2.02x the live perp account") rather than as a
           "difference", so an address where the leaderboard reads LOWER prints a ratio
-          below 1 and still says something true. */}
+          below 1 and still says something true.
+
+          The explanation that follows the figures is ONE sentence now, and in the
+          spot-first layout it is replaced rather than shortened. It ran to four —
+          fifty-five words, the longest paragraph on the tab — and in the spot-first
+          case it spent them reconciling a leaderboard equity against a perp account
+          whose every figure above is a dash, for 40 of the 50 rows on the 30-day
+          board. The reading is the ratio; the prose only has to say why a reader
+          should not expect the two to tie. */}
       <p className="mt-3 text-xs text-muted">
         {leaderboardEquity !== null && (
           <>
@@ -824,11 +774,9 @@ export default function PositionsPanel({
             {leaderboardEquity.ratio.toFixed(2)}× the live perp account.{" "}
           </>
         )}
-        Account value here is this address&rsquo;s live perp margin account, read straight
-        from Hyperliquid. The equity on the leaderboard is a different measurement —
-        Hyperliquid&rsquo;s own stats snapshot, refreshed on its own schedule and over a
-        wider scope than perps — so the two are not expected to tie. The figures on this
-        tab are the live ones.
+        {spotFirst
+          ? "Perps only — this address holds no open perp position, so the spot list above is the holding."
+          : "Account value here is the live perp margin account; the leaderboard\u2019s equity is Hyperliquid\u2019s own stats snapshot, on its own schedule and over a wider scope than perps, so the two are not expected to tie."}
       </p>
     </Panel>
   );
@@ -846,7 +794,11 @@ export default function PositionsPanel({
       {positions === null ? (
         <div className="px-4 pb-4">
           <Unavailable
-            reason="Upstream did not answer for this address"
+            reason={
+              bothAbsent
+                ? "Upstream did not answer for this address — neither perps nor spot"
+                : "Upstream did not answer for this address"
+            }
             onRetry={onRetry}
             busy={loading}
           />
@@ -900,19 +852,35 @@ export default function PositionsPanel({
       </div>
       {spot === null ? (
         <Unavailable
-          reason="Upstream did not answer for this address"
-          onRetry={onRetry}
+          reason={
+            bothAbsent
+              ? "Part of the same upstream failure as the perp state above"
+              : "Upstream did not answer for this address"
+          }
+          // One failure, one retry. Both slices nulled is ONE refusal — the route
+          // answers 200 with both absent when the shared-egress 429 lands — and it
+          // rendered as two identical sentences under two Re-read buttons that do
+          // exactly the same thing. The perp block above owns the retry, and it is
+          // above because `positions === null` is one of the two states that never
+          // reorder (see spotFirst).
+          onRetry={bothAbsent ? undefined : onRetry}
           busy={loading}
         />
       ) : spot.length === 0 ? (
         <p className="mt-2 text-sm text-muted">No non-zero spot balances.</p>
       ) : (
         <>
-          <ul>
-            {spotRanked?.main.map((b) => (
-              <SpotRow key={b.coin} b={b} />
-            ))}
-          </ul>
+          {/* Gated: when every balance is sub-dollar `main` is empty, and the list
+              still rendered — an empty <ul> carrying the section's row rule and
+              spacing above a drawer holding all the content. The zero address has 63
+              sub-dollar balances, so this is a state the data reaches. */}
+          {spotRanked && spotRanked.main.length > 0 && (
+            <ul>
+              {spotRanked.main.map((b) => (
+                <SpotRow key={b.coin} b={b} />
+              ))}
+            </ul>
+          )}
           {spotRanked && spotRanked.dust.length > 0 && (
             <SpotDustBlock rows={spotRanked.dust} total={spot.length} />
           )}

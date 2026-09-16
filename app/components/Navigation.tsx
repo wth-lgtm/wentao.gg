@@ -21,6 +21,15 @@ const projects: { name: string; href: string; comingSoon?: boolean }[] = [
 
 const EASE = [0.16, 1, 0.3, 1] as const;
 
+// What the Tab trap counts as focusable inside the overlay. A constant because it was a
+// string literal inside a keydown handler: every control the overlay renders has to be
+// matched by it, and a selector that lives beside the markup it describes is the only
+// version anyone will remember to update. Deliberately narrow — the overlay renders
+// nothing but links and buttons, and a full tabbable selector (tabindex, inputs,
+// [contenteditable], audio/video controls) would be a list of elements that are not
+// here, with `:not([tabindex="-1"])` on each to keep it honest.
+const FOCUSABLE = 'a[href], button:not([disabled])';
+
 export default function Navigation() {
   const [open, setOpen] = useState(false);
   const [clock, setClock] = useState("");
@@ -28,6 +37,17 @@ export default function Navigation() {
   const overlayRef = useRef<HTMLDivElement>(null);
   const closeBtnRef = useRef<HTMLButtonElement>(null);
   const openerRef = useRef<HTMLElement | null>(null);
+  // Whether closing should hand focus back to the INDEX button. It should for Escape
+  // and for CLOSE, and it should NOT when the menu closed because a link in it was
+  // activated: the browser has already moved focus (and the scroll position) to the
+  // fragment or the new route, and pulling focus back to a button in the top-right
+  // corner discards the navigation the click just performed — the visitor lands at
+  // the section with their focus somewhere else entirely.
+  const restoreOpener = useRef(true);
+  const closeForNavigation = () => {
+    restoreOpener.current = false;
+    setOpen(false);
+  };
 
   // Owner's local time (SF) as ambient metadata — refreshed each half-minute.
   useEffect(() => {
@@ -53,6 +73,31 @@ export default function Navigation() {
     // One frame of slack so framer-motion has committed the overlay's entrance styles.
     const raf = requestAnimationFrame(() => closeBtnRef.current?.focus());
 
+    // The rest of the page, made INERT while the index is open.
+    //
+    // aria-modal="true" is a promise to assistive tech and the Tab trap below keeps the
+    // tab sequence honest, but neither of them stops a screen reader's virtual cursor
+    // walking the page behind the frosted layer, browser find-in-page landing on it, or a
+    // click reaching it. `inert` removes a subtree from all of that at once, and it is the
+    // attribute the APG dialog pattern asks for alongside aria-modal.
+    //
+    // Applied to <body>'s own children, because the overlay is one of them: every
+    // provider between body and here renders a fragment, so on this page body's children
+    // ARE the skip link, the canvases, this overlay, <main> and the footer. Anything
+    // already inert is left alone and left out of the restore list, so nothing here can
+    // hand back an element it did not take.
+    const overlay = overlayRef.current;
+    const inerted: HTMLElement[] = [];
+    if (overlay) {
+      for (const el of Array.from(document.body.children)) {
+        if (!(el instanceof HTMLElement)) continue;
+        if (el === overlay || el.contains(overlay)) continue;
+        if (el.hasAttribute("inert")) continue;
+        el.setAttribute("inert", "");
+        inerted.push(el);
+      }
+    }
+
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setOpen(false);
@@ -61,7 +106,7 @@ export default function Navigation() {
       if (e.key !== "Tab") return;
       const overlay = overlayRef.current;
       if (!overlay) return;
-      const focusables = overlay.querySelectorAll<HTMLElement>("a[href], button:not([disabled])");
+      const focusables = overlay.querySelectorAll<HTMLElement>(FOCUSABLE);
       if (focusables.length === 0) return;
       const first = focusables[0];
       const last = focusables[focusables.length - 1];
@@ -80,7 +125,10 @@ export default function Navigation() {
       cancelAnimationFrame(raf);
       document.removeEventListener("keydown", onKey);
       document.body.style.overflow = prevOverflow;
-      openerRef.current?.focus();
+      // Before the focus restore, not after: the INDEX button lives in one of the
+      // subtrees above, and focus() on an inert element does nothing at all.
+      for (const el of inerted) el.removeAttribute("inert");
+      if (restoreOpener.current) openerRef.current?.focus();
     };
   }, [open]);
 
@@ -104,6 +152,7 @@ export default function Navigation() {
             <button
               onClick={(e) => {
                 openerRef.current = e.currentTarget;
+                restoreOpener.current = true;
                 setOpen(true);
               }}
               aria-label="Open menu"
@@ -142,7 +191,7 @@ export default function Navigation() {
               <div className="flex items-center justify-between">
                 <a
                   href="#"
-                  onClick={() => setOpen(false)}
+                  onClick={closeForNavigation}
                   className="text-xl font-semibold tracking-tight text-foreground"
                 >
                   W.
@@ -171,7 +220,7 @@ export default function Navigation() {
                   >
                     <a
                       href={s.href}
-                      onClick={() => setOpen(false)}
+                      onClick={closeForNavigation}
                       className="group flex items-baseline gap-4 md:gap-6 w-fit"
                     >
                       <span className="font-mono text-xs md:text-sm text-muted tabular-nums pt-1">{s.n}</span>
@@ -196,7 +245,7 @@ export default function Navigation() {
                             <Link
                               key={p.name}
                               href={p.href}
-                              onClick={() => setOpen(false)}
+                              onClick={closeForNavigation}
                               className="text-sm text-muted hover:text-foreground transition-colors"
                             >
                               {p.name}
@@ -211,7 +260,10 @@ export default function Navigation() {
 
               {/* footer metadata */}
               <div className="flex items-center justify-between font-mono text-xs text-muted">
-                <a href="mailto:me@wentao.gg" className="hover:text-foreground transition-colors">
+                <a
+                  href="mailto:me@wentao.gg"
+                  className="hover:text-foreground transition-colors"
+                >
                   me@wentao.gg
                 </a>
                 <span className="tabular-nums">SF {clock}</span>

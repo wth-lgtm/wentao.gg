@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   isUnreadableBoard,
+  isUnreadableWindow,
   unreadableBoardMessage,
 } from "../app/projects/hl-whale-tracker/lib/boardHealth";
 
@@ -98,4 +99,28 @@ test("unreadableBoardMessage: the count is the window's own, and only when there
     "Leaderboard unreadable: upstream rows arrived but none carried complete figures"
   );
   assert.equal(unreadableBoardMessage(0), unreadableBoardMessage(null));
+});
+
+test("isUnreadableWindow: the window on screen, not the whole board", () => {
+  // isUnreadableBoard only fires when EVERY window is empty, so a board with rows in
+  // three windows and a fourth that arrived empty with dropped rows produced no error at
+  // all — and LeaderboardTable read "no rows, no error" as EMPTY and printed "No traders
+  // found with activity in this period" over a window whose rows upstream had sent and
+  // this app could not read. Same fabrication, one window at a time.
+  assert.equal(isUnreadableWindow([], 45_092), true);
+  assert.equal(isUnreadableWindow([], 1), true);
+  // Rows arrived: whatever else dropped, the window has something to show.
+  assert.equal(isUnreadableWindow([{}], 45_092), false);
+  // A genuine empty: upstream held nothing for this window and nothing was dropped.
+  assert.equal(isUnreadableWindow([], 0), false);
+  // A count the body did not carry is not a count. Upstream renaming a window key lands
+  // here, and it must not be read as "0 dropped" — the window is simply unexplained.
+  assert.equal(isUnreadableWindow([], null), false);
+  assert.equal(isUnreadableWindow([], undefined), false);
+  // No window ARRAY at all reads the same as an empty one: "the body carried no rows
+  // for this window" is the same fact either way, and what makes it a failure rather
+  // than an absence is the dropped count beside it. So the pair below splits on the
+  // count, not on the rows.
+  assert.equal(isUnreadableWindow(undefined, 5), true);
+  assert.equal(isUnreadableWindow(undefined, undefined), false);
 });

@@ -51,6 +51,30 @@ export function isUnreadableBoard(payload: unknown): boolean {
 }
 
 /**
+ * The same fabrication, one WINDOW at a time.
+ *
+ * isUnreadableBoard fires only when every window is empty, which is the total failure.
+ * The partial one is just as reachable and was unhandled: rows in three windows and a
+ * fourth that arrived empty with dropped rows produced no error, so LeaderboardTable
+ * read "no rows, no error" as EMPTY and printed "No traders found with activity in this
+ * period" — over a window whose rows upstream had sent and this app could not read. The
+ * figures are per-window (a row missing its 7d volume is dropped from the 7d board
+ * alone), so the predicate has to be too.
+ *
+ * A count the body did not carry is NOT a zero, and that is the case that matters here:
+ * upstream renaming a window key leaves this window with no rows and no dropped figure,
+ * and the answer is false — the window is unexplained, not proven unreadable, and
+ * claiming otherwise would put a sentence with no number behind it on screen. The
+ * whole-board predicate above still covers the case where every window went empty.
+ */
+export function isUnreadableWindow(
+  rows: readonly unknown[] | undefined,
+  dropped: number | null | undefined
+): boolean {
+  return (rows?.length ?? 0) === 0 && typeof dropped === "number" && dropped > 0;
+}
+
+/**
  * What the banner says, given the count for the window ON SCREEN.
  *
  * The window's own count rather than a total, so this sentence and the rail's DROPPED

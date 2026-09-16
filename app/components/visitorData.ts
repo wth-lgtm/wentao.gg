@@ -2,8 +2,13 @@
 // middleware). Client-side only. Everything here is the visitor's OWN data echoed back
 // to them for the hero's greeting + "visitor intel" card — nothing is persisted.
 
+// `timePeriod` is gone, not defaulted. proxy.ts stopped writing it — it was building an
+// Intl.DateTimeFormat per request to bucket the visitor's local hour and nothing ever
+// read the result — so the field survived here as a declared string that parsed to
+// "morning" for every visitor on earth, at 3pm included. A default standing in for a
+// value nothing produces is the shape of data honesty this repo spends most of its
+// comments on.
 export interface VisitorData {
-  timePeriod: string;
   location: string; // "City, Region, Country 🇺🇸" (may be "")
   city: string; // raw city only (may be "" when geo resolved only to a country)
   cc: string; // ISO country code (may be "")
@@ -13,7 +18,6 @@ export interface VisitorData {
 }
 
 const EMPTY: VisitorData = {
-  timePeriod: "morning",
   location: "",
   city: "",
   cc: "",
@@ -43,7 +47,6 @@ export function getVisitorData(): VisitorData {
     // Treat the null-island (0,0) placeholder some edges emit as "no fix".
     const hasFix = lat !== null && lon !== null && !(lat === 0 && lon === 0);
     return {
-      timePeriod: parsed.timePeriod || "morning",
       location: parsed.location || "",
       city: typeof parsed.city === "string" ? parsed.city : "",
       cc: typeof parsed.cc === "string" ? parsed.cc : "",
