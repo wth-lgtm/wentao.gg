@@ -36,7 +36,8 @@ export default function Hero() {
                 inherited ones, and both inner copies declare all three explicitly via
                 HERO_NAME_METRICS — an explicit declaration always beats an inherited
                 value, layers or not. The container holds no direct text of its own. */}
-            <h1 className="relative min-h-[3rem] md:min-h-[7rem]">
+            {/* data-hero-h1: the jack field's keep-out reads this rect while it is on screen (JackFieldScene.tsx). */}
+            <h1 data-hero-h1 className="relative min-h-[3rem] md:min-h-[7rem]">
               <span className={`${HERO_NAME_METRICS} text-foreground text-shimmer`}>
                 {HERO_NAME}
               </span>

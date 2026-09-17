@@ -2,9 +2,12 @@
 // cross.buf (positions quantised to ±1, 4,940 verts) — arm outer r 0.333, bore r 0.10 to a
 // floor at 0.667, a ~0.01 round on the rim (r 0.328 at the tip), 0.03 on the bore mouth, a base flare from r 0.43 at
 // 0.19 to 0.333 at 0.36 — as ONE lathe arm cloned onto ±x/±y/±z around a core sphere of
-// r 0.48, which protrudes 0.0–0.03 between two arms and 0.06–0.09 in the three-arm crotch:
-// the rounded junction. The v1 recipe (arms 0.42, bore 0.24, sphere hidden inside the arm
-// union) was 26% fatter than the reference with a 2.4× bore.
+// r 0.48, which lies INSIDE the arm union between two arms and protrudes ≤ 0.013 u only in
+// the three-arm crotches (measured on buildJackGeometry(); an earlier figure here said
+// 0.06–0.09): the rounded junction. Opaque, the core is invisible; alpha-blended with every
+// surface composited it stacks 6–10 layers at the junction (see glassLook.ts). The v1 recipe
+// (arms 0.42, bore 0.24, sphere hidden inside the arm union) was 26% fatter than the reference
+// with a 2.4× bore.
 //
 // Per-vertex `ao` is Lusion's baked occlusion (cross.buf's ao attribute, mean 0.63): the
 // bore floor 0.01–0.02, the wall ~0.2, the mouth 0.70, the rim 0.99, arm mid 0.78–0.82,

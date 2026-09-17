@@ -31,9 +31,10 @@ export default function HeroAnimations({ children }: { children: ReactNode }) {
 
       {/* ================= RIGHT — visitor intel rail ================= */}
       {/* The CARD centers on the name; the CTA hangs just below it on desktop (absolute, so
-          it doesn't drag the card's centering up) and stacks normally on mobile. */}
+          it doesn't drag the card's centering up) and stacks normally on mobile. data-hero-card
+          is the rect the jack field keeps half-clear while it is on screen (JackFieldScene.tsx). */}
       <div className="md:col-span-5 pointer-events-auto">
-        <div className="relative mx-auto w-full max-w-sm md:mx-0 md:max-w-none">
+        <div data-hero-card className="relative mx-auto w-full max-w-sm md:mx-0 md:max-w-none">
           <VisitorIntel />
           <div className="mt-4 md:absolute md:inset-x-0 md:top-full md:mt-4">
             <MagneticButton

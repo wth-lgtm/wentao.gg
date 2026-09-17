@@ -7,6 +7,7 @@ import Projects from "./components/Projects";
 import Footer from "./components/Footer";
 import MatrixRain from "./components/MatrixRain";
 import HeroMeta from "./components/HeroMeta";
+import JackField from "./components/JackField";
 
 // Code-split heavy/below-fold components into separate chunks
 const InteractiveEffects = dynamic(
@@ -38,9 +39,11 @@ export default function Home() {
     <>
       <a href="#main" className="skip-link">Skip to content</a>
       <ScrollProgress />
-      {/* Back-to-front fixed layers: matrix rain (z-0) → fluid (z-10) → content (z-20). */}
+      {/* Back-to-front fixed layers: matrix rain (z-0) → fluid (z-10) → the jack field (z-10,
+          later in the DOM so it paints over the fluid) → content (z-20). */}
       <MatrixRain />
       <InteractiveEffects />
+      <JackField />
       <Navigation />
       <HeroMeta />
       <main id="main" tabIndex={-1} className="relative overflow-x-clip">

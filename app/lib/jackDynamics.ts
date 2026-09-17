@@ -1,8 +1,10 @@
 // The jacks' dynamics: Lusion's sphere-body model (lusion.co's hero, HomeBalloonsBody /
 // HomeBalloonsPhysics), ported as RATES so the feel is the same at 30, 60 and 120 Hz, with
 // the two additions the house rule "a resting scene costs nothing" needs — a resting-contact
-// treatment so touching bodies can actually stop, and a rest test on what moved. Pure, no
-// physics library: 66 sphere pairs a substep is nothing, and every rule below runs in node.
+// treatment so touching bodies can actually stop, and a rest test on what moved — and one the
+// hero needs: an optional keep-out band that holds bodies off a rectangle of text (the card
+// passes none and is untouched). Pure, no physics library: 66 sphere pairs a substep is
+// nothing, and every rule below runs in node.
 //
 // Mass is (4/3)·π·r³ (Lusion: volume = π·r·1.333, mass = volume·r²). It is what makes the
 // central pull K 40 read as ω 2.87 rad/s, ζ 0.28 and a 2.2 s period for a unit jack — heavy
@@ -18,7 +20,7 @@ export interface Body {
   pos: Vec3;
   vel: Vec3;
   quat: Quat;
-  /** the pull's target: (i − 5.5)·0.6 along x, so the pack keeps a statistical oldest-left drift */
+  /** the pull's target: (i − 5.5)·0.6 along x by default, so the card's pack keeps a statistical oldest-left drift; the jack field places its own (fieldLayout.ts) */
   target: Vec3;
   /** the collision radius, BODY_R × the mesh scale */
   r: number;
@@ -40,6 +42,21 @@ export interface Pointer {
   vel: Vec3;
 }
 
+/**
+ * A box on the z = 0 plane bodies are held off, in world units. Each body inflates it by its
+ * own radius plus KEEP_PAD, which makes the inflated shape a rounded rectangle with corners of
+ * that radius — the set of centres whose disc touches the box — so no corner radius is stored.
+ */
+export interface KeepOut {
+  cx: number;
+  cy: number;
+  /** half-extents */
+  hw: number;
+  hh: number;
+  /** the band's acceleration for this box as a fraction of K_KEEP; absent = 1 (the jack field's visitor card runs at 0.5) */
+  strength?: number;
+}
+
 export interface World {
   bodies: Body[];
   seed: number;
@@ -53,6 +70,10 @@ export interface World {
   clicks: number;
   /** sim seconds of consecutive frames that met the rest test */
   still: number;
+  /** boxes bodies are held off (the hero's wordmark); empty for the card */
+  keepOut: KeepOut[];
+  /** the camera's z the keep-out is seen from, so a body is tested where the camera projects it onto z = 0; 0 tests x, y as they are */
+  eyeZ: number;
 }
 
 export interface StepResult {
@@ -141,6 +162,41 @@ export const DYN = {
   /** spawn box (viewW × 2·viewH × SPAWN_DEPTH) about the origin, vel = SPAWN_VEL·pos — Lusion's 12×12×6 with −2·pos */
   SPAWN_DEPTH: 6,
   SPAWN_VEL: -2,
+  /**
+   * The keep-out band: inside KEEP_BAND of a KeepOut box (inflated by the body's radius and
+   * KEEP_PAD) a body gets an OUTWARD acceleration K_KEEP·s², s = 1 − d/KEEP_BAND, identically
+   * zero at d ≥ KEEP_BAND and full strength over the letters. An acceleration, not a force
+   * over m, so a 0.86 and a 1.2 jack decelerate alike. The s² ramp integrates to
+   * K_KEEP·KEEP_BAND/3 of v²/2 across the band: a CAP 20 flick carries 200, so the panel's 120
+   * absorbed 60 and a body went 0.49–0.59 u INTO the inflated box (scales 0.86–1.2) before the
+   * pull and the τ 0.62 s damping stopped it; 200 still let the 1.2 jack reach 0.21 u; 240 is
+   * the first round step that holds every cast scale under 0.2 u — 0.07–0.10 u at CAP 20,
+   * stopped 0.12 s after entering the band (node, straight approach from the band's edge, the
+   * pull behind the body). The band is not a wall, and the setup decides the depth. A click
+   * burst is the hard case: for CAP_CLICK_S after a click the cap is 25, and a body launched
+   * at 25 WITH the cap lifted (capUntil ahead, as clickWorld leaves it — two earlier comments
+   * quoted 0.10–0.14 u here, measured with capUntil still −1, so the first substep had clipped
+   * the launch to 20) reaches 0.40 / 0.43 / 0.46 u from the band's edge (scales 0.86 / 1 /
+   * 1.2), 0.57–0.59 u from mid-band, and 0.91–0.92 u when it was already parked at the
+   * inflated edge — most of a radius over the letters for a tenth of a second, once, after a
+   * click followed by a flick inside 0.3 s. K_KEEP is not raised for that case: 480 would
+   * still leave 0.2 u there and would make every ordinary flick read as a wall, and the text
+   * sits above the canvas in z-order regardless.
+   */
+  KEEP_BAND: 1.5,
+  K_KEEP: 240,
+  KEEP_PAD: 0.15,
+  /**
+   * The band may STOP a body at any speed, but it never drives one OUTWARD faster than this.
+   * A box can appear over resting bodies (the headline scrolled onto the jack field's
+   * homes): measured in node with the box's strength ramped in over 0.4 s, a body 1.75 u
+   * inside still left at 20.4 u/s — the ramp only delays the moment full K_KEEP meets a body
+   * that is still deep inside. Capping the outward component at 6 u/s (a third of the flick
+   * cap; ~1.5 viewport-heights per second at 58 px/u is still brisk) makes that exit a nudge,
+   * and costs a flick nothing: the deceleration of an incoming body is the push against its
+   * motion, which the cap never touches.
+   */
+  KEEP_VOUT: 6,
 } as const;
 
 const AXIS = 1 / Math.sqrt(3); // the swirl axis (1,1,1) normalised
@@ -154,12 +210,14 @@ export function clampDelta(delta: number): number {
 /**
  * Twelve bodies in Lusion's spawn box, flying toward the centre, with a random initial
  * orientation each (texture, not data: a six-way jack is symmetric under 90° turns, so
- * twelve identity quaternions would fly in as one aligned set).
+ * twelve identity quaternions would fly in as one aligned set). `bodyR` is the unit body's
+ * collision radius — BODY_R for the jack, whose arm tips lie on the 1.05 sphere; another
+ * object would pass its own.
  */
-export function createWorld(scales: readonly number[], view: { viewW: number; viewH: number }, seed: number): World {
+export function createWorld(scales: readonly number[], view: { viewW: number; viewH: number }, seed: number, bodyR: number = DYN.BODY_R): World {
   const n = scales.length;
   const bodies: Body[] = scales.map((s, i) => {
-    const r = DYN.BODY_R * s;
+    const r = bodyR * s;
     const m = (4 / 3) * Math.PI * r * r * r;
     const pos = {
       x: (rand(i, seed + 1) - 0.5) * view.viewW,
@@ -190,6 +248,8 @@ export function createWorld(scales: readonly number[], view: { viewW: number; vi
     capUntil: -1,
     clicks: 0,
     still: 0,
+    keepOut: [],
+    eyeZ: 0,
   };
 }
 
@@ -197,6 +257,17 @@ export function createWorld(scales: readonly number[], view: { viewW: number; vi
 export function setView(world: World, view: { viewW: number; viewH: number }): void {
   world.boundX = (DYN.BOUND_VIEW * view.viewW) / 2;
   world.boundY = (DYN.BOUND_VIEW * view.viewH) / 2;
+}
+
+/**
+ * The boxes bodies are held off, replaced whole (the hero re-measures its DOM on resize).
+ * `eyeZ` > 0 tests each body where a camera on the z axis at that height sees it on z = 0 —
+ * a body 3 u nearer a z 32 camera projects 10% further from the centre, and it is the
+ * projection that must stay off the letters, not the world x.
+ */
+export function setKeepOut(world: World, boxes: readonly KeepOut[], eyeZ = 0): void {
+  world.keepOut = boxes.map((k) => ({ ...k }));
+  world.eyeZ = Number.isFinite(eyeZ) && eyeZ > 0 ? eyeZ : 0;
 }
 
 /**
@@ -329,6 +400,27 @@ export function stepWorld(world: World, delta: number, pointer: Pointer | null, 
       if (Math.abs(p.z) > DYN.Z_BOUND) v.z -= (p.z - DYN.Z_BOUND * Math.sign(p.z)) * DYN.K_BOUND * h;
       if (Math.abs(p.x) > world.boundX) v.x -= (p.x - world.boundX * Math.sign(p.x)) * DYN.K_BOUND * h;
       if (Math.abs(p.y) > world.boundY) v.y -= (p.y - world.boundY * Math.sign(p.y)) * DYN.K_BOUND * h;
+      // the keep-out band (DYN.KEEP_BAND): the rounded-box distance from the body's disc to each
+      // box, and an outward push along the nearest face (the corner's diagonal outside a corner)
+      for (let k = 0; k < world.keepOut.length; k++) {
+        const box = world.keepOut[k];
+        const proj = world.eyeZ > 0 ? world.eyeZ / (world.eyeZ - p.z) : 1;
+        const qx = p.x * proj - box.cx, qy = p.y * proj - box.cy;
+        const ex = Math.abs(qx) - box.hw, ey = Math.abs(qy) - box.hh;
+        const outside = Math.hypot(Math.max(ex, 0), Math.max(ey, 0));
+        const d = outside + Math.min(Math.max(ex, ey), 0) - (b.r + DYN.KEEP_PAD);
+        if (d >= DYN.KEEP_BAND) continue;
+        const t = 1 - Math.max(d, 0) / DYN.KEEP_BAND;
+        const a = DYN.K_KEEP * (box.strength ?? 1) * t * t * h;
+        let gx: number, gy: number;
+        if (ex > 0 && ey > 0) { gx = (ex / outside) * Math.sign(qx); gy = (ey / outside) * Math.sign(qy); }
+        else if (ex > ey) { gx = Math.sign(qx) || 1; gy = 0; }
+        else { gx = 0; gy = Math.sign(qy) || 1; }
+        // full push against an incoming body; outward, only up to KEEP_VOUT
+        const vn = v.x * gx + v.y * gy;
+        const push = Math.min(a, Math.max(0, DYN.KEEP_VOUT - vn));
+        v.x += gx * push; v.y += gy * push;
+      }
       p.x += v.x * h; p.y += v.y * h; p.z += v.z * h;
       // 6. the tumble: bodies roll with their travel about the target, never spin in place
       const rx = p.x - b.target.x, ry = p.y - b.target.y, rz = p.z - b.target.z;
