@@ -4,8 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { DYN, clampDelta, clickWorld, createWorld, isResting, setKeepOut, setView, stepWorld, type KeepOut, type Pointer, type Vec3, type World } from "../lib/jackDynamics";
-import { FIELD, LIGHT_WHITE, SEED_FIELD, atPageTop, fieldCamera, fieldCasting, fieldScales, keepOutFor, onScreen, placeWorld, retarget, solveTargets, type FieldFit, type Rect, type Slot } from "../lib/fieldLayout";
-import { DRIFT, driftOffset } from "../lib/fieldDrift";
+import { FIELD, LIGHT_WHITE, SEED_FIELD, atPageTop, fieldCamera, fieldScales, keepOutFor, onScreen, placeWorld, repivot, retarget, solveTargets, type FieldFit, type Rect, type Slot } from "../lib/fieldLayout";
+import { packCasting, packCentroids, packCount, packOf, packTargets, type Pack } from "../lib/fieldPacks";
+import { DRIFT, driftOffset, packDriftOffset } from "../lib/fieldDrift";
 import { GLASS, GLASS_FRESNEL_GLSL, GLASS_RIM_GLSL, GLASS_UNIFORM_GLSL, glassFinish, glassRecipe } from "../lib/glassLook";
 import { KEY, environmentScene, jackGeometry } from "../lib/jackMaterials";
 import type { PointerRig } from "../lib/pointerRig";
@@ -29,9 +30,35 @@ import { createSampler, sampleFrame } from "../lib/scenePerf";
 // envelope, the parked-pointer rule, the keep-out band, the shared perf sampler — plus the
 // idle drift (fieldDrift.ts): the homes wander a little and the bodies follow, so at rest the
 // field idles at DRIFT.IDLE_HZ instead of freezing. What differs from the card is the frame
-// (fieldLayout.ts: sixteen letter-sized jacks on a lattice in VIEWPORT space, an edge spawn,
-// no dolly) and a transparent canvas that is a fixed layer of the page rather than a panel in
-// a section.
+// (fieldLayout.ts, fieldPacks.ts: letter-sized jacks in VIEWPORT space, an edge spawn, no
+// dolly) and a transparent canvas that is a fixed layer of the page rather than a panel in a
+// section.
+//
+// THE COMPOSITION (fieldPacks.ts) is the card's pack under the name and a smaller one above it.
+// The card feels alive because its twelve targets sit on a 6.6 u line for 1.8–2.5 u bodies: they
+// can never all reach them, so they pack, press and regather — 0.113 u/s mean body speed at
+// E = 1, measured; the lattice's 4.8 × 3 u cells never touched, 0.002 u/s. What reaches the
+// card's number is member count under compression (fourteen on a 2 u disc: 0.114), so the field
+// is fourteen targets on a 2 u disc below the h1 on the left — the hero's only pack-sized free
+// area — and seven on a 0.9 u disc above it (three sevens behind ?jacksDebug=1&jacksPacks=quads;
+// one ten below 1280 × 800). The swirl turns each pack about ITS OWN SOLVED CENTROID
+// (Body.pivot, set at birth and on every relayout — the h1's band shifts the lower pack ≈ 0.3 u
+// off its nominal centre, and a swirl about the nominal centre would turn about a point outside
+// the pack), gained ×3 for the small pack (a seven on 0.9 u ungained moves at 0.025 u/s, 4.5×
+// quieter than the card; ×3 lifts it; ×4 breaks the jam). It is the members' compression that
+// moves a pack, and the swirl's shear that keeps the jam alive. The keep-out flattens the lower
+// pack's top row against the name — the per-target push keeps x and sets y to the band's edge —
+// so it hugs the h1 from below; the upper pack's top touches the viewport edge and three or four
+// of its discs sit behind the nav's text (the nav has no background, and the lattice already put
+// a jack under "INDEX"). Packs stack in DEPTH once they jam: body centres span ≈ 3.8 u (seven) /
+// 4.1–4.8 u (fourteen) of z, bodies to |z| 2.6 — a column toward the camera, three or four glass
+// layers deep at the core, which is why the depth pre-pass matters here and why the glass table
+// (glassLook.ts) is clearer than the lattice's. Fourteen converging on one disc overlap by up to
+// ≈ 0.9–1.1 u for two frames of the entrance (the card's fly-in peaks at 0.48 u for one) —
+// accepted; settled, the worst interpenetration is 0.001 u. Twenty-one bodies step in 0.011 ms
+// per 1/30 frame in node (twenty-eight: 0.017). The drift adds a per-pack COMMON-MODE term
+// (fieldDrift.packDriftOffset) to every member's own: a jammed pack absorbs ≈ 70% of the
+// per-body sway, and the common term lets the whole pack breathe at "ever slightly".
 //
 // The keep-out protects the headline ONLY while the hero's h1 is on screen, and the field
 // does not scroll while the page does, so three rules keep that honest:
@@ -105,7 +132,7 @@ interface GlassMaterial { material: THREE.MeshPhysicalMaterial; glass: { uGlassO
  * hollow), depth-write off, depthFunc LessEqual (three's default, stated) so it lands exactly
  * on the depth the pre-pass (depthPrepassMaterial) wrote for the same triangles, the clearcoat
  * reflecting the one-plane environment, with the Fresnel opacity and rim-light terms injected
- * (glassLook.ts). One program for all sixteen AND the pre-pass (GLASS.PROGRAM_KEY): the
+ * (glassLook.ts). One program for all twenty-one AND the pre-pass (GLASS.PROGRAM_KEY): the
  * injected source is the same for every family, only uniforms differ. No polygonOffset: the
  * two passes run one program on one geometry with one matrix, so gl_Position is bit-identical
  * by construction and LessEqual passes exactly; if the Metal-GPU frame ever showed speckle at
@@ -160,7 +187,7 @@ function tintGlass(m: GlassMaterial, slot: Slot, theme: "dark" | "light", accent
  * Metal GPU. Colour writes off, depth writes on, FrontSide, and still `transparent` so it sits
  * in the transparent render list next to the glass (WebGLRenderLists routes by transmission,
  * then material.transparent; colorWrite is not consulted). The physical fragment shader runs
- * with colour writes off — ≈ 16 × 17 k fragments, negligible. Module-level singleton, never
+ * with colour writes off — ≈ 21 × 17 k fragments, negligible. Module-level singleton, never
  * disposed (`dispose={null}` on its meshes).
  *
  * three APPENDS the custom key to its parameter-derived key (WebGLPrograms.getProgramCacheKey),
@@ -197,7 +224,7 @@ interface Debug {
   idle: boolean;
   idleHz: number;
   drifting: boolean;
-  /** DRIFT.AMP / DRIFT.AMP_Z, so the harness bounds the sway from the scene's own numbers */
+  /** the home's total x/y and z excursion bounds — the body's own DRIFT.AMP plus its pack's common-mode DRIFT.AMP (2·AMP, 2·AMP_Z) — so the harness bounds the sway from the scene's own numbers */
   driftAmp: number;
   driftAmpZ: number;
   /** frames that scheduled the next frame at full rate (invalidate) rather than by the idle timer or by freezing: unchanged across a window means nothing woke the loop, whatever the machine's frame rate */
@@ -214,7 +241,7 @@ interface Debug {
   meshes: number;
   /** visible meshes under visible groups: 2 × the jacks drawn (the depth pre-pass and the glass) */
   passes: number;
-  /** the visible groups' renderOrder in body order: the back-to-front rank (a permutation of 0..n−1, ascending with pos.z) */
+  /** the groups' renderOrder in body order: the back-to-front rank (a permutation of 0..n−1, ascending with pos.z) */
   renderOrders: number[];
   /** gl.info.programs.length, and how many of them carry GLASS.PROGRAM_KEY (must be 1: the pre-pass added none) */
   programs: number;
@@ -223,8 +250,18 @@ interface Debug {
   near: number;
   /** how many times layout() has re-solved (mount, resize, the h1 or the card changing size) */
   layouts: number;
-  /** the lattice slots culled at birth (fieldLayout.solveTargets) */
-  culled: number[];
+  /** the packs: each one's SOLVED centroid (view units — the swirl's pivot), member count and gain */
+  packs: { x: number; y: number; z: number; n: number; swirlGain: number }[];
+  /** body → pack index */
+  packOf: number[];
+  /** mean |pos − target| per pack — the gather measure (a lattice rested at < 0.15; a pack under compression sits at 0.8–1.2) */
+  spreadByPack: number[];
+  /** mean |vel| over the bodies, u/s — the "feels like the card" number (the card 0.113 at E = 1; a seven on 0.9 u ungained 0.025) */
+  meanSpeed: number;
+  /** targets the solve left more than 0.25 D inside a band after the view clamp (held off their homes while the box is on screen; 0 at every measured fixture) */
+  inBand: number;
+  /** each pack's CURRENT common-mode drift offset (fieldDrift.packDriftOffset at the world's clock; zeros when the drift is off) — the harness subtracts it from a pack's mean position to read the swirl's own drag on the pack, the number the critics measured without the drift (≤ 0.04 u per 2 s with pivots, 0.14 with the origin swirl) */
+  packDrift: Vec3[];
   fit: FieldFit | null;
   /** the keep-out boxes in force this frame (the h1's, then the card's at half strength), with their ramped strengths */
   keepOuts: KeepOut[];
@@ -234,7 +271,7 @@ interface Debug {
   envIntensity: number;
   /** each body's family and finish */
   casting: Slot[];
-  /** mean |pos − target| over the bodies — the regather measure */
+  /** mean |pos − target| over all bodies (see spreadByPack for the per-pack measure) */
   spread: number;
   /** the least clearance of any body's disc from the HEADLINE's inflated box (Infinity when the h1 is off screen) */
   clearance: number;
@@ -253,6 +290,14 @@ interface Debug {
    * (tintGlass) re-applies glassRecipe's values; the override is a debug-session lever.
    */
   setGlass(t: Partial<GlassTable>): void;
+  /**
+   * the harness's lever for the swirl's own drag on a pack: false pauses the drift (targets = the
+   * undrifted homes on the next step), true resumes. Subtracting `packDrift` from a pack's mean does
+   * not recover the number: a jam absorbs ≈ 70% of the sway, so a pack follows its drifting targets
+   * with 0.1–0.3 u of residual per 2 s (node and browser alike); with the drift paused the same
+   * window reads 0.02–0.03 u. A debug-session lever, like setGlass.
+   */
+  setDrift(on: boolean): void;
 }
 
 /** the rounded-box clearance the keep-out step computes, for the debug hook and the scroll-end check */
@@ -275,8 +320,8 @@ const viewportRect = (el: Element | null): Rect | null => {
 
 interface Ramp { t0: number; cx: number; cy: number }
 
-function Field({ count, accent, theme, visible, rig, debug, tier, onDegrade }: {
-  count: number;
+function Field({ packs, accent, theme, visible, rig, debug, tier, onDegrade }: {
+  packs: readonly Pack[];
   accent: string;
   theme: "dark" | "light";
   visible: boolean;
@@ -287,11 +332,14 @@ function Field({ count, accent, theme, visible, rig, debug, tier, onDegrade }: {
 }) {
   const { gl, scene, camera, size, invalidate } = useThree();
   const geometry = useMemo(jackGeometry, []);
+  const count = packCount(packs);
   const scales = useMemo(() => fieldScales(count, SEED_FIELD), [count]);
-  const slots = useMemo(() => fieldCasting(count, SEED_FIELD), [count]);
-  // Materials are born once per count; the theme and the accent recolour IN PLACE (the card's
-  // reason: rebuilding disposed the program and recompiled it on every toggle). Sixteen glass
-  // materials, one program (GLASS.PROGRAM_KEY).
+  const slots = useMemo(() => packCasting(packs, SEED_FIELD), [packs]);
+  /** body → pack index (bodies are numbered in pack order, members in spiral order) */
+  const owners = useMemo(() => packOf(packs), [packs]);
+  // Materials are born once per composition; the theme and the accent recolour IN PLACE (the
+  // card's reason: rebuilding disposed the program and recompiled it on every toggle).
+  // Twenty-one glass materials, one program (GLASS.PROGRAM_KEY).
   const mats = useMemo(() => slots.map((s) => makeGlassMaterial(s, "dark", "#3b82f6")), [slots]);
   useEffect(() => {
     invalidate();
@@ -305,16 +353,18 @@ function Field({ count, accent, theme, visible, rig, debug, tier, onDegrade }: {
   const groups = useRef<(THREE.Group | null)[]>([]);
   const prepassMaterial = useMemo(depthPrepassMaterial, []);
 
-  // The world is born in layout() below, once, from the slots the first solve KEEPS (a slot the
-  // view's edge cannot free from a band is culled): body j is slot slotOf[j]. Later layouts
-  // (a resize, the h1 or the card changing size) re-solve without culling and retarget —
-  // bodies are pulled to the new lattice, never moved — and WAKE the loop: no pointermove
-  // reaches the page during a drag-resize, and a frozen (AMP = 0) or idling pack would
-  // otherwise sit over reflowed letters until the next move.
+  // The world is born in layout() below, once: every slot is a body (nothing is culled — a
+  // target the band leaves inside is counted, `inBand`). Later layouts (a resize, the h1 or the
+  // card changing size) re-solve, retarget and re-pivot — bodies are pulled to the new targets,
+  // never moved — and WAKE the loop: no pointermove reaches the page during a drag-resize, and a
+  // frozen (AMP = 0) or idling pack would otherwise sit over reflowed letters until the next move.
   const fitRef = useRef<FieldFit>(fieldCamera(size.width, size.height, null));
   const worldRef = useRef<World | null>(null);
-  const slotOf = useRef<number[]>([]);
-  const culledRef = useRef<number[]>([]);
+  /** the packs' solved centroids — the pivots — from the last layout */
+  const centroids = useRef<Vec3[]>([]);
+  const inBand = useRef(0);
+  /** the harness's drift pause (Debug.setDrift) */
+  const driftPaused = useRef(false);
   const enteredAt = useRef<number | null>(null);
   const frozen = useRef(false);
   const idle = useRef(false);
@@ -324,6 +374,7 @@ function Field({ count, accent, theme, visible, rig, debug, tier, onDegrade }: {
   /** the undrifted targets per body: copies of what placeWorld / retarget were handed (both assign fresh objects, so these never drift); fieldDrift adds the wander on top each frame */
   const homes = useRef<Vec3[]>([]);
   const driftTmp = useMemo<Vec3>(() => ({ x: 0, y: 0, z: 0 }), []);
+  const packTmp = useMemo<Vec3>(() => ({ x: 0, y: 0, z: 0 }), []);
   /** the bodies' back-to-front order, re-sorted in place each frame (no allocation) */
   const order = useRef<number[]>([]);
   const frames = useRef(0);
@@ -375,9 +426,10 @@ function Field({ count, accent, theme, visible, rig, debug, tier, onDegrade }: {
   }, [theme, scene, invalidate]);
 
   // layout(): the camera from the wordmark's computed font size (or the 9 u fallback when no
-  // h1 is on the page), the lattice solved against the h1 and the visitor card at their PAGE
-  // position (fieldLayout.solveTargets, atPageTop), the soft bounds. The first call births the
-  // world from the kept slots and spawns it beyond the edges; later calls retarget and wake.
+  // h1 is on the page), the packs' spirals (fieldPacks.packTargets) solved against the h1 and
+  // the visitor card at their PAGE position (fieldLayout.solveTargets, atPageTop), the pivots
+  // from the solved centroids (packCentroids → repivot), the soft bounds. The first call births
+  // the world and spawns it beyond the edges; later calls retarget, re-pivot and wake.
   const layout = useRef(() => {});
   layout.current = () => {
     layouts.current++;
@@ -391,23 +443,21 @@ function Field({ count, accent, theme, visible, rig, debug, tier, onDegrade }: {
     if (h1) { const p = atPageTop(h1, sy); if (onScreen(p, fit.width, fit.height)) avoid.push(keepOutFor(p, fit, 1)); }
     const card = viewportRect(document.querySelector("[data-hero-card]"));
     if (card) { const p = atPageTop(card, sy); if (onScreen(p, fit.width, fit.height)) avoid.push(keepOutFor(p, fit, CARD_STRENGTH)); }
+    const { targets, inBand: deep } = solveTargets(fit, packTargets(fit, packs, SEED_FIELD), scales, avoid);
+    const cents = packCentroids(targets, packs);
     let world = worldRef.current;
     if (!world) {
-      const { targets, culled } = solveTargets(fit, count, SEED_FIELD, scales, avoid, true);
-      const kept = scales.map((_, i) => i).filter((i) => !culled.includes(i));
-      slotOf.current = kept;
-      culledRef.current = culled;
-      world = createWorld(kept.map((i) => scales[i]), fit, SEED_FIELD);
+      world = createWorld(scales, fit, SEED_FIELD);
       placeWorld(world, targets, fit);
-      homes.current = targets.map((t) => ({ x: t.x, y: t.y, z: t.z }));
       worldRef.current = world;
     } else {
       setView(world, fit);
-      const { targets } = solveTargets(fit, count, SEED_FIELD, scales, avoid, false);
-      const mine = slotOf.current.map((slot) => targets[slot]);
-      retarget(world, mine);
-      homes.current = mine.map((t) => ({ x: t.x, y: t.y, z: t.z }));
+      retarget(world, targets);
     }
+    repivot(world, owners.map((p) => cents[p]), owners.map((p) => packs[p].swirlGain));
+    homes.current = targets.map((t) => ({ x: t.x, y: t.y, z: t.z }));
+    centroids.current = cents;
+    inBand.current = deep.length;
     keep.current.stale = true;
     const cam = camera as THREE.PerspectiveCamera;
     cam.fov = FIELD.FOV;
@@ -466,22 +516,29 @@ function Field({ count, accent, theme, visible, rig, debug, tier, onDegrade }: {
     k.settled = settled;
   };
 
-  // The drift (fieldDrift.ts): every body's target is its undrifted home plus the wander at the
-  // world's clock, written INTO the existing target object (no allocation per frame). The pull,
-  // the tumble and the click read b.target, so the body follows the wandering home with the
-  // dynamics' own lag — that is the "not rigid". Runs before every stepWorld, the harness's
-  // step() included, so a stepped second advances the drift too.
+  // The drift (fieldDrift.ts): every body's target is its undrifted home plus its own wander plus
+  // its PACK's common-mode wander at the world's clock, written INTO the existing target object
+  // (no allocation per frame; the pack term is evaluated once per pack — bodies run in pack
+  // order). The pull, the tumble and the click read b.target, so the body follows the wandering
+  // home with the dynamics' own lag — that is the "not rigid" — and the pack term moves the whole
+  // jam, which absorbs most of the per-body sway. Runs before every stepWorld, the harness's
+  // step() included, so a stepped second advances the drift too. Paused (Debug.setDrift) the
+  // targets are the homes exactly.
   const applyDrift = useCallback((world: World) => {
     if (!DRIFTING) return;
-    const hs = homes.current, slots_ = slotOf.current, bodies = world.bodies;
+    const hs = homes.current, bodies = world.bodies;
+    let lastPack = -1;
     for (let j = 0; j < bodies.length; j++) {
       const h = hs[j];
       if (!h) continue;
-      driftOffset(slots_[j], world.time, SEED_FIELD, driftTmp);
       const tg = bodies[j].target;
-      tg.x = h.x + driftTmp.x; tg.y = h.y + driftTmp.y; tg.z = h.z + driftTmp.z;
+      if (driftPaused.current) { tg.x = h.x; tg.y = h.y; tg.z = h.z; continue; }
+      const p = owners[j];
+      if (p !== lastPack) { packDriftOffset(p, world.time, SEED_FIELD, packTmp); lastPack = p; }
+      driftOffset(j, world.time, SEED_FIELD, driftTmp);
+      tg.x = h.x + driftTmp.x + packTmp.x; tg.y = h.y + driftTmp.y + packTmp.y; tg.z = h.z + driftTmp.z + packTmp.z;
     }
-  }, [driftTmp]);
+  }, [driftTmp, packTmp, owners]);
 
   // Scroll-end: re-measure the boxes for the new scroll; wake (full rate) only if a jack is
   // inside a live band (the headline landed on resting jacks) — otherwise the scroll changes
@@ -550,8 +607,8 @@ function Field({ count, accent, theme, visible, rig, debug, tier, onDegrade }: {
       get idle() { return idle.current; },
       get idleHz() { return DRIFT.IDLE_HZ; },
       get drifting() { return DRIFTING; },
-      get driftAmp() { return DRIFT.AMP; },
-      get driftAmpZ() { return DRIFT.AMP_Z; },
+      get driftAmp() { return 2 * DRIFT.AMP; },
+      get driftAmpZ() { return 2 * DRIFT.AMP_Z; },
       get busyFrames() { return busyFrames.current; },
       get homes() { return homes.current.map((h) => ({ x: h.x, y: h.y, z: h.z })); },
       get dPerFont() { return FIELD.D_PER_FONT; },
@@ -562,21 +619,26 @@ function Field({ count, accent, theme, visible, rig, debug, tier, onDegrade }: {
       get tier() { return tier; },
       get meshes() { return groups.current.filter((g) => g && g.visible).length; },
       get passes() { return groups.current.reduce((n, g) => n + (g && g.visible ? g.children.filter((c) => c.visible).length : 0), 0); },
-      get renderOrders() { return slotOf.current.map((slot) => groups.current[slot]?.renderOrder ?? -1); },
+      get renderOrders() { return groups.current.map((g) => g?.renderOrder ?? -1); },
       get programs() { return gl.info.programs?.length ?? 0; },
       get glassPrograms() { return (gl.info.programs ?? []).filter((p) => p.cacheKey.includes(GLASS.PROGRAM_KEY)).length; },
       get near() { return NEAR_COUNT_GLASS; },
       get layouts() { return layouts.current; },
-      get culled() { return culledRef.current; },
+      get packs() { return centroids.current.map((c, p) => ({ x: c.x, y: c.y, z: c.z, n: packs[p].n, swirlGain: packs[p].swirlGain })); },
+      get packOf() { return owners.slice(); },
+      get spreadByPack() { const bs = bodies(); return packs.map((_, p) => { let s = 0, n = 0; bs.forEach((b, j) => { if (owners[j] === p) { s += Math.hypot(b.pos.x - b.target.x, b.pos.y - b.target.y, b.pos.z - b.target.z); n++; } }); return n ? s / n : 0; }); },
+      get meanSpeed() { const bs = bodies(); return bs.length ? bs.reduce((s, b) => s + Math.hypot(b.vel.x, b.vel.y, b.vel.z), 0) / bs.length : 0; },
+      get inBand() { return inBand.current; },
+      get packDrift() { const t = world()?.time ?? 0; return packs.map((_, p) => { const o = { x: 0, y: 0, z: 0 }; if (DRIFTING && !driftPaused.current) packDriftOffset(p, t, SEED_FIELD, o); return o; }); },
       get fit() { return worldRef.current ? fitRef.current : null; },
       get keepOuts() { return keep.current.boxes; },
       get keepOutsSettled() { return keep.current.settled; },
       get scrollY() { return keep.current.scrollY; },
       get envIntensity() { return scene.environmentIntensity; },
-      get casting() { return slotOf.current.map((slot) => slots[slot]); },
+      get casting() { return slots.map((s) => ({ ...s })); },
       get spread() { const bs = bodies(); return bs.length ? bs.reduce((n, b) => n + Math.hypot(b.pos.x - b.target.x, b.pos.y - b.target.y, b.pos.z - b.target.z), 0) / bs.length : 0; },
       get clearance() { const wd = world(); return wd && keep.current.h1 ? clearanceOf(wd, keep.current.h1, wd.eyeZ) : Infinity; },
-      bodies: () => bodies().map((b, j) => ({ x: b.pos.x, y: b.pos.y, z: b.pos.z, vx: b.vel.x, vy: b.vel.y, vz: b.vel.z, v: Math.hypot(b.vel.x, b.vel.y, b.vel.z), scale: scales[slotOf.current[j]], r: b.r })),
+      bodies: () => bodies().map((b, j) => ({ x: b.pos.x, y: b.pos.y, z: b.pos.z, vx: b.vel.x, vy: b.vel.y, vz: b.vel.z, v: Math.hypot(b.vel.x, b.vel.y, b.vel.z), scale: scales[j], r: b.r })),
       step: (dt: number) => { const wd = world(); if (!wd) return; measureKeepOut(wd.time); applyDrift(wd); stepWorld(wd, dt, null, self.E); invalidate(); },
       kick: (i: number, vx: number, vy: number, vz: number) => { const wd = world(); const b = wd?.bodies[i]; if (wd && b) { b.vel = { x: vx, y: vy, z: vz }; wd.still = 0; wake.current(); } },
       setEnvIntensity: (v: number) => { envOverride.current = v; scene.environmentIntensity = v; invalidate(); },
@@ -593,9 +655,10 @@ function Field({ count, accent, theme, visible, rig, debug, tier, onDegrade }: {
         });
         invalidate();
       },
+      setDrift: (on: boolean) => { driftPaused.current = !on; invalidate(); },
     };
     return () => { delete w.__field; };
-  }, [debug, scales, slots, mats, camera, scene, tier, rig, invalidate, gl, applyDrift]);
+  }, [debug, packs, owners, scales, slots, mats, camera, scene, tier, rig, invalidate, gl, applyDrift]);
 
   useFrame((_, rawDelta) => {
     frames.current++;
@@ -679,27 +742,22 @@ function Field({ count, accent, theme, visible, rig, debug, tier, onDegrade }: {
       }
     }
 
-    // The groups follow the bodies by slot (spawn positions included, so the first frame shows
-    // the set arriving); a culled slot's group stays invisible. Then the back-to-front rank: each
-    // visible group's renderOrder is its body's rank by pos.z ascending (the camera sits at
-    // (0, 0, fit.z) unrotated, so pos.z is exact view depth), ties by body index — a stable
-    // order. three's transparent list sorts by groupOrder (a Group's renderOrder, inherited by
-    // its subtree), then renderOrder, then z, so the list interleaves per jack, farthest first:
-    // depth pass (renderOrder 0), colour pass (1), next jack… A nearer jack's pre-pass overwrites
-    // the depth where it is nearer and its colour pass blends over the farther jack: glass still
-    // shows through glass between jacks. Slots k and k + 8 share a lattice z (the cell order is a
-    // seeded shuffle, so they may sit in adjacent cells and touch) and the z drift (±0.10) makes
-    // them cross — harmless: two bodies at equal depth cannot interpenetrate (the collision keeps
-    // them apart), so their silhouettes only touch in screen space and a rank flip between them
-    // changes no pixel. Distinct z levels are 0.5 u apart, so no other resting pair crosses.
+    // The groups follow the bodies (spawn positions included, so the first frame shows the set
+    // arriving); every slot is a body. Then the back-to-front rank: each group's renderOrder is
+    // its body's rank by pos.z ascending (the camera sits at (0, 0, fit.z) unrotated, so pos.z is
+    // exact view depth), ties by body index — a stable order. three's transparent list sorts by
+    // groupOrder (a Group's renderOrder, inherited by its subtree), then renderOrder, then z, so
+    // the list interleaves per jack, farthest first: depth pass (renderOrder 0), colour pass (1),
+    // next jack… A nearer jack's pre-pass overwrites the depth where it is nearer and its colour
+    // pass blends over the farther jack: glass still shows through glass between jacks — and a
+    // pack is three or four jacks deep, so this interleave is what draws it. Members of a pack
+    // share z slots (±0.35 / 0.8 / 1.25) and the jam moves them in z anyway, so ranks flip every
+    // frame — harmless: two bodies at equal depth cannot interpenetrate (the collision keeps them
+    // apart), so their silhouettes only touch in screen space and a rank flip changes no pixel.
     const bodies = world.bodies;
-    const slots_ = slotOf.current;
-    for (let slot = 0; slot < groups.current.length; slot++) {
-      const g = groups.current[slot];
+    for (let j = 0; j < bodies.length; j++) {
+      const g = groups.current[j];
       if (!g) continue;
-      const j = slots_.indexOf(slot);
-      g.visible = j >= 0;
-      if (j < 0) continue;
       const b = bodies[j];
       g.position.set(b.pos.x, b.pos.y, b.pos.z);
       g.quaternion.set(b.quat.x, b.quat.y, b.quat.z, b.quat.w);
@@ -709,28 +767,28 @@ function Field({ count, accent, theme, visible, rig, debug, tier, onDegrade }: {
     for (let j = 0; j < bodies.length; j++) ord[j] = j;
     ord.sort((a, b) => bodies[a].pos.z - bodies[b].pos.z || a - b);
     for (let k = 0; k < ord.length; k++) {
-      const g = groups.current[slots_[ord[k]]];
+      const g = groups.current[ord[k]];
       if (g) g.renderOrder = k;
     }
   });
 
   return (
     <>
-      {slots.map((s, i) => (
-        // one group per slot, moved by the frame loop; two meshes on the shared geometry, both at
-        // the slot's scale: the depth pre-pass (renderOrder 0) and the glass (1) — see the header
-        <group key={`${count}-${i}-${s.family}-${s.finish}`} ref={(el) => { groups.current[i] = el; }}>
-          <mesh geometry={geometry} material={prepassMaterial} scale={scales[i]} renderOrder={0} dispose={null} />
-          <mesh geometry={geometry} material={mats[i].material} scale={scales[i]} renderOrder={1} dispose={null} />
+      {slots.map((s, j) => (
+        // one group per body, moved by the frame loop; two meshes on the shared geometry, both at
+        // the body's scale: the depth pre-pass (renderOrder 0) and the glass (1) — see the header
+        <group key={`${count}-${j}-${s.family}-${s.finish}`} ref={(el) => { groups.current[j] = el; }}>
+          <mesh geometry={geometry} material={prepassMaterial} scale={scales[j]} renderOrder={0} dispose={null} />
+          <mesh geometry={geometry} material={mats[j].material} scale={scales[j]} renderOrder={1} dispose={null} />
         </group>
       ))}
     </>
   );
 }
 
-export default function JackFieldScene({ count, accent, theme, visible, rig }: {
-  /** 16 at ≥ 1280 × 800, 10 below (fieldLayout.fieldCount) */
-  count: number;
+export default function JackFieldScene({ packs, accent, theme, visible, rig }: {
+  /** the composition (fieldPacks.fieldPacks): 21 in two packs at ≥ 1280 × 800, one ten below; decided once by the gate */
+  packs: readonly Pack[];
   /** the theme's --accent token */
   accent: string;
   theme: "dark" | "light";
@@ -768,7 +826,7 @@ export default function JackFieldScene({ count, accent, theme, visible, rig }: {
       style={{ width: "100%", height: "100%", pointerEvents: "none" }}
     >
       <directionalLight position={KEY.position} intensity={KEY.intensity} />
-      <Field count={count} accent={accent} theme={theme} visible={visible} rig={rig} debug={debug} tier={tier} onDegrade={() => setTier((t) => Math.min(2, t + 1))} />
+      <Field packs={packs} accent={accent} theme={theme} visible={visible} rig={rig} debug={debug} tier={tier} onDegrade={() => setTier((t) => Math.min(2, t + 1))} />
     </Canvas>
   );
 }

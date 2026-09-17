@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { DRIFT, driftOffset } from "../app/lib/fieldDrift";
+import { DRIFT, PACK_DRIFT_BASE, driftOffset, packDriftOffset } from "../app/lib/fieldDrift";
 import { SEED_FIELD } from "../app/lib/fieldLayout";
 
 const STEP = 0.05;
@@ -81,4 +81,26 @@ test("slow: the PER-AXIS finite-difference speed never exceeds A·2π·(0.65/T_S
     }
   }
   assert.ok(vmax < DRIFT.IDLE_V, `3-D drift speed ${vmax} u/s`);
+});
+
+test("the pack's common-mode term: packDriftOffset(p) is driftOffset at k = PACK_DRIFT_BASE + p (1000 — no body index reaches it), bounded like a body's own, smooth, and different for each pack", () => {
+  assert.equal(PACK_DRIFT_BASE, 1000);
+  const a = zero(), b = zero(), prev = zero();
+  for (const p of [0, 1, 2, 3]) {
+    let vmax = 0, reach = 0;
+    for (let t = 0; t <= T_END; t += STEP) {
+      packDriftOffset(p, t, SEED_FIELD, a);
+      driftOffset(PACK_DRIFT_BASE + p, t, SEED_FIELD, b);
+      assert.deepEqual(a, b);
+      assert.ok(Math.abs(a.x) <= DRIFT.AMP + 1e-12 && Math.abs(a.y) <= DRIFT.AMP + 1e-12 && Math.abs(a.z) <= DRIFT.AMP_Z + 1e-12);
+      if (t > 0) vmax = Math.max(vmax, Math.hypot(a.x - prev.x, a.y - prev.y, a.z - prev.z) / STEP);
+      reach = Math.max(reach, Math.abs(a.x), Math.abs(a.y));
+      prev.x = a.x; prev.y = a.y; prev.z = a.z;
+    }
+    assert.ok(vmax < DRIFT.IDLE_V, `pack ${p} term moves at ${vmax} u/s`);
+    assert.ok(reach > 0.5 * DRIFT.AMP, `pack ${p} term reaches ${reach}`);
+  }
+  let differ = 0;
+  for (let t = 0; t < 60; t += 0.5) { packDriftOffset(0, t, SEED_FIELD, a); packDriftOffset(1, t, SEED_FIELD, b); if (Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z) > 0.01) differ++; }
+  assert.ok(differ > 100, `packs 0 and 1 differ at ${differ} of 120 samples`);
 });

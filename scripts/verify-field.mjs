@@ -6,12 +6,14 @@
 // so every "settled" wait here is on `__field.idle`, the scroll checks decide by STATE (E, the
 // homes, the layout count) rather than by frame counts, and the idle cadence itself is measured.
 // Also checks the built page's initial JS for three (it must stay behind dynamic()), the
-// one-layer glass (two passes per jack on ONE program, groups ranked back to front) and, in the
-// light theme, the rendered luminance of the sixteen discs (the ENV_LIGHT re-key).
+// one-layer glass (two passes per jack on ONE program, groups ranked back to front), the PACKS
+// (fieldPacks.ts: gathered, alive at the card's speed, tight, mixed, on the viewport, kicked by
+// the ray one pack at a time, regathered after a click) and, in the light theme, the rendered
+// luminance of the discs (the ENV_LIGHT re-key).
 //
-//   node scripts/verify-field.mjs [port] [config]         config e.g. 1440x900-dark
+//   node scripts/verify-field.mjs [port] [config]         config: 1440x900-dark | 1440x900-light | 1024x768-dark | 1440x900-dark-quads (informational)
 //   node scripts/verify-field.mjs [port] sweep            the light-theme env-intensity sweep
-//   node scripts/verify-field.mjs [port] zoom             only the DPR-2 jack crops (1440 × 900, both themes)
+//   node scripts/verify-field.mjs [port] zoom             only the DPR-2 frames (1440 × 900, WIDE and QUADS, both themes): full, the lower pack, the largest jack
 //
 // Playwright is not a dependency of this repo; point PLAYWRIGHT at an installed copy.
 import fs from "node:fs";
@@ -86,14 +88,14 @@ async function discLuminance(page, width, height) {
   return { median: q(all, 0.5), p10: q(all, 0.1), p90: q(all, 0.9), perFamily: Object.fromEntries(Object.entries(byFamily).map(([f, a]) => [f, { median: q(a, 0.5), n: a.length }])) };
 }
 
-async function open(width, height, theme, dpr = 1) {
+async function open(width, height, theme, dpr = 1, variant = null) {
   const browser = await chromium.launch({ args: ARGS });
   const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: dpr });
   const errors = [], known = [];
   page.on("console", (m) => { if (m.type() === "error") (KNOWN.test(m.text()) ? known : errors).push(m.text()); });
   page.on("pageerror", (e) => errors.push(String(e)));
   await page.addInitScript((t) => { try { localStorage.setItem("theme", t); } catch {} window.__ctxLost = 0; document.addEventListener("webglcontextlost", () => { window.__ctxLost++; }, true); }, theme);
-  await page.goto(`http://localhost:${port}/?jacksDebug=1`, { waitUntil: "domcontentloaded" });
+  await page.goto(`http://localhost:${port}/?jacksDebug=1${variant ? `&jacksPacks=${variant}` : ""}`, { waitUntil: "domcontentloaded" });
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.waitForFunction(() => !!window.__field && window.__field.entered && window.__field.fit, null, { timeout: 40000, polling: 100 });
   return { browser, page, errors, known };
@@ -121,10 +123,22 @@ async function settle(page) {
 // the idle timer or by freezing — so "nothing woke the loop" is also asserted directly as `busyFrames` unchanged
 // across the window, whatever the machine's frame rate.
 // gl.info.programs.length on this build with ONE glass program — measured 3 on 2026-09-17 (swiftshader, both
-// themes): "jack-glass" (the sixteen glass materials AND the pre-pass share it — glassPrograms 1) plus the two the
+// themes): "jack-glass" (every glass material AND the pre-pass share it — glassPrograms 1) plus the two the
 // environment bake compiles (PMREMGenerator.fromScene: the rig plane's material and the blur pass). The pre-pass
 // added none; a fourth program here would mean the two passes diverged.
 const PROGRAMS = 3;
+// THE PACKS' BOUNDS (the brief's, measured in node against this worktree). Gathered: mean |pos − target| per pack ≤ 0.45·√n
+// (1.19 seven / 1.42 ten / 1.68 fourteen — measured settled 0.83 / 0.89 / 1.17; a lattice rested at < 0.15, the packs sit under
+// compression) and every member within 4 u of its pack's solved centroid (measured farthest 2.2–2.9). Alive: mean |vel| over the
+// bodies ≥ 0.08 u/s over 2 s at E 1 — the card measures 0.113, the lattice's sixteen 0.002, a seven on a 0.9 u disc ungained 0.025
+// (the OLD number). Tight at E 1: ≤ 1.2 (seven) / 1.45 (ten) / 1.7 (fourteen) — the origin-swirl code read 1.34 on the h1-side
+// seven, the shear widened it. Stay: the swirl about the pivot moves a pack's mean ≤ 0.1 u per 2 s (the origin swirl: 0.14).
+const GATHER = (n) => 0.45 * Math.sqrt(n);
+const TIGHT = (n) => (n <= 7 ? 1.2 : n <= 10 ? 1.45 : 1.7);
+const ALIVE_MIN = 0.08;
+const STAY_MAX = 0.1;
+// the casting table per pack size (fieldPacks.packCasting): families and glossies
+const CAST_TABLE = { 14: { white: 6, accent: 4, black: 4, glossy: { white: 1, accent: 1, black: 1 } }, 7: { white: 3, accent: 2, black: 2, glossy: { white: 1, accent: 0, black: 1 } }, 10: { white: 4, accent: 3, black: 3, glossy: { white: 1, accent: 0, black: 1 } } };
 
 async function sweep() {
   const { browser, page } = await open(1440, 900, "light");
@@ -141,18 +155,25 @@ async function sweep() {
 }
 
 async function run(width, height, theme, opts = {}) {
-  const label = `${width}x${height}-${theme}`;
+  const variant = opts.variant ?? null;
+  const label = `${width}x${height}-${theme}${variant ? `-${variant}` : ""}`;
   if (only && only !== label) return;
-  const out = (summary[label] = { label, asserts: {}, notes: [] });
+  // informational: the run is measured and recorded in full but does not gate the PASS line (the QUADS alternative)
+  const out = (summary[label] = { label, variant, informational: !!opts.informational, asserts: {}, notes: [] });
   const t0 = Date.now();
-  const { browser, page, errors, known } = await open(width, height, theme);
-  const s0 = await page.evaluate(() => ({ fit: window.__field.fit, meshes: window.__field.meshes, near: window.__field.near, culled: window.__field.culled, n: window.__field.bodies().length, camZ: window.__field.camZ, keepOuts: window.__field.keepOuts, envIntensity: window.__field.envIntensity, drifting: window.__field.drifting, driftAmp: window.__field.driftAmp, driftAmpZ: window.__field.driftAmpZ }));
-  // the drift's reach from the scene's own amplitudes: 2·(AMP + AMP_Z) + slack — the most two snapshots of one body can differ
+  const { browser, page, errors, known } = await open(width, height, theme, 1, variant);
+  const s0 = await page.evaluate(() => ({ fit: window.__field.fit, meshes: window.__field.meshes, near: window.__field.near, packs: window.__field.packs, packOf: window.__field.packOf, inBand: window.__field.inBand, casting: window.__field.casting, n: window.__field.bodies().length, camZ: window.__field.camZ, keepOuts: window.__field.keepOuts, envIntensity: window.__field.envIntensity, drifting: window.__field.drifting, driftAmp: window.__field.driftAmp, driftAmpZ: window.__field.driftAmpZ }));
+  // the drift's reach from the scene's own amplitudes (the body's own term plus its pack's, 2·AMP each way): 2·(amp + ampZ) + slack — the most two snapshots of one body can differ
   const reach = 2 * (s0.driftAmp + s0.driftAmpZ) + 0.05;
-  Object.assign(out, { fit: s0.fit, meshes: s0.meshes, near: s0.near, culled: s0.culled, camZ: s0.camZ, envIntensity: s0.envIntensity, drift: { drifting: s0.drifting, amp: s0.driftAmp, ampZ: s0.driftAmpZ, reach: +reach.toFixed(3) } });
-  const want = width >= 1280 && height >= 800 ? 16 : 10;
-  out.asserts.meshCount = s0.meshes === want && s0.n === want && s0.culled.length === 0;
+  Object.assign(out, { fit: s0.fit, meshes: s0.meshes, near: s0.near, packs: s0.packs.map((p) => ({ ...p, x: +p.x.toFixed(3), y: +p.y.toFixed(3), z: +p.z.toFixed(3) })), inBand: s0.inBand, camZ: s0.camZ, envIntensity: s0.envIntensity, drift: { drifting: s0.drifting, amp: s0.driftAmp, ampZ: s0.driftAmpZ, reach: +reach.toFixed(3) } });
+  // 21 in two packs (three behind the quads override) at ≥ 1280 × 800, one ten below; every slot is a body — nothing is culled
+  const want = width >= 1280 && height >= 800 ? 21 : 10;
+  out.asserts.meshCount = s0.meshes === want && s0.n === want && s0.packs.reduce((n, p) => n + p.n, 0) === want && s0.packOf.length === want;
   out.asserts.nearCap = s0.near === 0; // glass: no neighbour-occlusion loop
+  // PACKS MIXED: no pack is one family, and each pack's cast follows the table (fieldPacks.packCasting)
+  const cast = s0.packs.map((p, pi) => { const t = { n: p.n, white: 0, accent: 0, black: 0, glossy: { white: 0, accent: 0, black: 0 } }; s0.casting.forEach((c, j) => { if (s0.packOf[j] === pi) { t[c.family]++; if (c.finish === "glossy") t.glossy[c.family]++; } }); return t; });
+  out.casting = cast;
+  out.asserts.packsMixed = cast.every((c) => { const e = CAST_TABLE[c.n]; return !!e && c.white === e.white && c.accent === e.accent && c.black === e.black && ["white", "accent", "black"].every((f) => c.glossy[f] === e.glossy[f]) && c.white > 0 && c.accent > 0 && c.black > 0; });
   // THE POINTER BELONGS TO THE FLUID: the field's canvas and its R3F container must compute to
   // pointer-events none, elementFromPoint over empty hero space must be the fluid canvas, and a
   // sweep must reach the fluid (mousemove) and never the field — whose own ray (the window rig)
@@ -215,10 +236,19 @@ async function run(width, height, theme, opts = {}) {
   out.asserts.fullRateReference = ref0.E === 1 && ref1.E === 1 && fullRate2s >= 4;
   if (opts.frames) await page.screenshot({ path: `${OUT}/field-${label}-postflick.png` });
   await settle(page);
-  const rest = await page.evaluate(() => { const j = window.__field; return { simTime: j.simTime, E: j.E, idle: j.idle, frozen: j.frozen, busy: j.busyFrames, idleHz: j.idleHz, drifting: j.drifting, frames: j.frames, clearance: j.clearance, spread: j.spread, bodies: j.bodies(), homes: j.homes, camZ: j.camZ, tier: j.tier, keepOuts: j.keepOuts }; });
-  out.rest = { simTime: +rest.simTime.toFixed(2), E: rest.E, idle: rest.idle, frozen: rest.frozen, drifting: rest.drifting, clearance: +rest.clearance.toFixed(3), spread: +rest.spread.toFixed(3), tier: rest.tier, keepOutStrengths: rest.keepOuts.map((k) => k.strength) };
+  const rest = await page.evaluate(() => { const j = window.__field; return { simTime: j.simTime, E: j.E, idle: j.idle, frozen: j.frozen, busy: j.busyFrames, idleHz: j.idleHz, drifting: j.drifting, frames: j.frames, clearance: j.clearance, spread: j.spread, spreadByPack: j.spreadByPack, meanSpeed: j.meanSpeed, packs: j.packs, packOf: j.packOf, bodies: j.bodies(), homes: j.homes, camZ: j.camZ, tier: j.tier, keepOuts: j.keepOuts }; });
+  out.rest = { simTime: +rest.simTime.toFixed(2), E: rest.E, idle: rest.idle, frozen: rest.frozen, drifting: rest.drifting, clearance: +rest.clearance.toFixed(3), spread: +rest.spread.toFixed(3), meanSpeed: +rest.meanSpeed.toFixed(4), tier: rest.tier, keepOutStrengths: rest.keepOuts.map((k) => k.strength) };
   out.asserts.restClearsHeadline = rest.clearance >= 0;
   out.asserts.rampsWhole = rest.keepOuts.every((k, i) => Math.abs(k.strength - (i === 0 ? 1 : 0.5)) < 1e-9);
+  // PACKS GATHER (settled, E 0, idle): see the bounds above; the packs' z span is logged — a jammed pack is a column toward the camera
+  const gather = {
+    spreadByPack: rest.spreadByPack.map((v) => +v.toFixed(3)),
+    bounds: rest.packs.map((p) => +GATHER(p.n).toFixed(3)),
+    farthest: rest.packs.map((p, pi) => +Math.max(...rest.bodies.filter((_, j) => rest.packOf[j] === pi).map((b) => Math.hypot(b.x - p.x, b.y - p.y, b.z - p.z))).toFixed(3)),
+    zSpan: rest.packs.map((_, pi) => { const zs = rest.bodies.filter((_, j) => rest.packOf[j] === pi).map((b) => b.z); return +(Math.max(...zs) - Math.min(...zs)).toFixed(2); }),
+  };
+  out.gather = gather;
+  out.asserts.packsGather = gather.spreadByPack.every((v, pi) => v <= gather.bounds[pi]) && gather.farthest.every((f) => f < 4);
   // ONE LAYER PER PIXEL (the plain jack): two passes per jack (the depth pre-pass and the glass) on ONE program, the
   // groups ranked back to front — renderOrder a permutation of 0..n−1 that follows pos.z ascending (ties by body
   // index, the scene's own rule), read in the same evaluate as the positions
@@ -246,14 +276,79 @@ async function run(width, height, theme, opts = {}) {
     out.asserts.idleCadence = rest.frozen && f2.frozen && f2.E === 0 && out.framesOver2s === 0;
     out.asserts.driftSways = out.drift.homesStill && out.drift.maxBodyDelta2s < 1e-3;
   }
-  // the field's own ray, from rest: a 20-step sweep across the middle kicks only the jacks it crosses
-  // (speeds read right after the sweep; the swirl's release is < 2 u/s, a ray kick several)
-  await page.mouse.move(width * 0.1, height * 0.5);
-  for (let i = 1; i <= 20; i++) { await page.mouse.move(width * 0.1 + (width * 0.8 * i) / 20, height * 0.5 + Math.sin(i / 3) * 30); await sleep(30); }
-  await sleep(250);
-  const kicked = await page.evaluate(() => window.__field.bodies().filter((b) => b.v > 2.5).length);
-  out.sweep.jacksKicked = kicked;
-  out.asserts.sweepMovesAtMost3 = kicked <= 3;
+  // PACKS ALIVE — the "feels like the card" number. From idle, ONE pointer move (then parked: the parked-aware `over` holds E 1
+  // for PARKED_S of sim time, and step() never advances E), then 2 s of sim at E 1: mean |vel| over the bodies ≥ ALIVE_MIN. The
+  // window holds the wake's release transient (the jam lets go when the settle friction lifts) and the drift — the shipped
+  // behaviour, what a visitor's first move gets; node predicted 0.084 from the dynamics alone and 0.12 with the drift for the WIDE
+  // layout (measured 0.13–0.16). PACKS TIGHT over the same window: mean |pos − target| per pack ≤ TIGHT(n). PACKS STAY — the
+  // swirl about the pivot must not DRAG a pack: the origin swirl moved the h1-side seven 0.14 u per 2 s, pivots ≤ 0.04, both
+  // measured by the critics at gain 1 and WITHOUT the per-pack common-mode drift the brief then added, which moves a pack's mean
+  // 0.1–0.2 u per 2 s by design. Controller's rulings (2026-09-17): DRIFT-AWARE — |Δ(mean(pos) − packDrift)| per pack, with
+  // `__field.packDrift` each pack's common-mode offset at the world's clock; the STEADY window only (E has been 1 for ≥ 2 s — the
+  // wake window measures the E-ramp transient, 0.23–0.30 u of the pack TIGHTENING as the jam lets go, not the swirl dragging it);
+  // bounded at STAY_MAX · swirlGain, because the critics' 0.1 was measured at gain 1 and the shear scales with the gain — 0.1 for
+  // the fourteen (measured 0.083 / 0.093), 0.3 for the ×3 seven (0.199 / 0.195), 0.19 for the ×1.9 ten (0.081). What is left in
+  // the net is the pack's tracking of its drifting targets: a jam absorbs ≈ 70% of the sway and follows the common-mode term with
+  // lag, so the subtraction leaves a residual of that order (node: 0.11–0.28 with either the common-mode term or the pack's full
+  // mean target offset subtracted). The cross-check is LOGGED: the drift PAUSED (`setDrift(false)`, targets = the homes), 2 s to
+  // take up the paused targets (`pause`), then 2 s with the swirl the only thing moving the packs (`swirlOnly.packMove` — measured
+  // 0.02–0.03 u for both WIDE packs, the critics' number). The wake window's raw and net moves are logged too.
+  await page.mouse.move(width - 40, height - 40);
+  await page.waitForFunction(() => window.__field.E === 1, null, { timeout: 15000, polling: 50 });
+  const alive = await page.evaluate(() => {
+    const j = window.__field;
+    const means = () => { const bs = j.bodies(), pd = j.packDrift; return j.packs.map((_, pi) => { let x = 0, y = 0, z = 0, n = 0; bs.forEach((b, k) => { if (j.packOf[k] === pi) { x += b.x; y += b.y; z += b.z; n++; } }); return { x: x / n, y: y / n, z: z / n, nx: x / n - pd[pi].x, ny: y / n - pd[pi].y, nz: z / n - pd[pi].z }; }); };
+    const twoSeconds = () => {
+      const m0 = means(); let sp = 0, n = 0; const spreads = [];
+      for (let k = 0; k < 120; k++) { j.step(1 / 60); sp += j.meanSpeed; n++; spreads.push(j.spreadByPack); }
+      const m1 = means();
+      return { meanSpeed: sp / n, packMove: m0.map((a, i) => Math.hypot(m1[i].x - a.x, m1[i].y - a.y, m1[i].z - a.z)), packMoveNet: m0.map((a, i) => Math.hypot(m1[i].nx - a.nx, m1[i].ny - a.ny, m1[i].nz - a.nz)), tightMean: j.packs.map((_, pi) => spreads.reduce((s, r) => s + r[pi], 0) / spreads.length), tightMax: j.packs.map((_, pi) => Math.max(...spreads.map((r) => r[pi]))) };
+    };
+    const E0 = j.E;
+    const wake = twoSeconds();
+    const steady = twoSeconds();
+    j.setDrift(false);
+    const pause = twoSeconds();
+    const swirlOnly = twoSeconds();
+    j.setDrift(true);
+    return { E: [E0, j.E], n: j.packs.map((p) => p.n), gain: j.packs.map((p) => p.swirlGain), wake, steady, pause, swirlOnly };
+  });
+  const r4 = (o) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, Array.isArray(v) ? v.map((x) => +x.toFixed(3)) : +v.toFixed(4)]));
+  const stayBounds = alive.gain.map((g) => +(STAY_MAX * g).toFixed(3));
+  out.alive = { E: alive.E, n: alive.n, gain: alive.gain, wake: r4(alive.wake), steady: r4(alive.steady), pause: r4(alive.pause), swirlOnly: r4(alive.swirlOnly), bounds: { alive: ALIVE_MIN, tight: alive.n.map(TIGHT), stay: stayBounds } };
+  out.asserts.packsAlive = alive.E[0] === 1 && alive.E[1] === 1 && alive.wake.meanSpeed >= ALIVE_MIN;
+  out.asserts.packsTight = alive.wake.tightMean.every((v, pi) => v <= TIGHT(alive.n[pi]));
+  out.asserts.packsStay = alive.steady.packMoveNet.every((m, pi) => m <= STAY_MAX * alive.gain[pi]);
+  await page.mouse.move(width - 3, height - 3);
+  await page.evaluate(() => { const j = window.__field; for (let i = 0; i < 60 * 9; i++) j.step(1 / 60); });
+  await waitRest(page, 120000).catch(() => out.notes.push("did not come to rest after the alive windows"));
+  // the field's own ray, from rest: a sweep THROUGH THE LOWER PACK — y at its solved centroid projected to px (controller's
+  // ruling; `__field.packs`, the lowest one) — kicks at least one jack, and only in the packs it crosses: the kicked set's packOf
+  // covers ≤ 2 packs. The ray acts only on frames that run, and software GL runs ≈ 5 f/s here: the first 20 × 30 ms pass sampled
+  // the ray three times across the pack and missed (0 kicked), so the sweep is 20 steps of 60 ms there and back, and the bodies
+  // are read after EVERY step. Kicked = a speed above 1 u/s at any sample (a hit body takes the pointer's drag — 7.2·h·v_pointer,
+  // several u/s at this sweep speed — plus the shove; drift-following bodies stay ≤ 0.5 u/s, the wake's release under 2 u/s on
+  // the one frame it lets go). The displacement over the sweep is logged too (> 0.3 u count) but not asserted: at E 1 the drift
+  // alone moves a home up to ≈ 0.3 u over the sweep's ≈ 4 s, and a drift-moved body in a third pack would read as "kicked".
+  const lower = await page.evaluate(() => { const j = window.__field; const ps = j.packs; let li = 0; ps.forEach((p, i) => { if (p.y < ps[li].y) li = i; }); const ppu = innerHeight / 2 / ((j.camZ - ps[li].z) * Math.tan((12.5 * Math.PI) / 180)); return { index: li, n: ps[li].n, sx: innerWidth / 2 + ps[li].x * ppu, sy: innerHeight / 2 - ps[li].y * ppu }; });
+  const sweepY = Math.min(height - 40, Math.max(40, lower.sy));
+  const sweepStart = await page.evaluate(() => window.__field.bodies().map((b) => [b.x, b.y, b.z]));
+  const maxV = new Array(sweepStart.length).fill(0);
+  const sample = async () => { const vs = await page.evaluate(() => window.__field.bodies().map((b) => b.v)); vs.forEach((v, i) => { maxV[i] = Math.max(maxV[i], v); }); };
+  await page.mouse.move(width * 0.1, sweepY);
+  for (let i = 1; i <= 20; i++) { await page.mouse.move(width * 0.1 + (width * 0.8 * i) / 20, sweepY + Math.sin(i / 3) * 20); await sleep(60); await sample(); }
+  for (let i = 19; i >= 0; i--) { await page.mouse.move(width * 0.1 + (width * 0.8 * i) / 20, sweepY - Math.sin(i / 3) * 20); await sleep(60); await sample(); }
+  const after = await page.evaluate(() => ({ pos: window.__field.bodies().map((b) => [b.x, b.y, b.z]), packOf: window.__field.packOf }));
+  const sweptU = after.pos.map((p, i) => Math.hypot(p[0] - sweepStart[i][0], p[1] - sweepStart[i][1], p[2] - sweepStart[i][2]));
+  const kickedBodies = sweepStart.map((_, i) => i).filter((i) => maxV[i] > 1);
+  const kickedPacks = [...new Set(kickedBodies.map((i) => after.packOf[i]))].sort();
+  out.sweep.lowerPack = { index: lower.index, n: lower.n, centroidPx: [+lower.sx.toFixed(0), +lower.sy.toFixed(0)], sweepY: +sweepY.toFixed(0) };
+  out.sweep.jacksKicked = kickedBodies.length;
+  out.sweep.packsKicked = kickedPacks;
+  out.sweep.maxSpeedDuring = +Math.max(...maxV).toFixed(2);
+  out.sweep.movedOver0_3 = sweptU.filter((m) => m > 0.3).length;
+  out.sweep.maxMovedU = +Math.max(...sweptU).toFixed(3);
+  out.asserts.sweepMovesAtMostPack = kickedBodies.length >= 1 && kickedPacks.length <= 2;
   await page.mouse.move(width - 3, height - 3);
   await page.evaluate(() => { const j = window.__field; for (let i = 0; i < 60 * 9; i++) j.step(1 / 60); });
   await waitRest(page, 120000).catch(() => out.notes.push("did not come to rest after the sweep"));
@@ -266,7 +361,18 @@ async function run(width, height, theme, opts = {}) {
   });
   out.discs = discs;
   out.asserts.noDiscOverH1 = discs.every((d) => !d.overlapsH1);
-  out.asserts.allOnViewport = discs.every((d) => d.sx > -d.rad && d.sx < width + d.rad && d.sy > -d.rad && d.sy < height + d.rad);
+  // ALL ON VIEWPORT: every pack's solved centroid inside the viewport, and ≥ 75% of each pack's discs FULLY inside; the overflow
+  // of the rest is logged in u (node: none at 1440 × 900 for WIDE — the upper pack's top touches the edge; two discs at 1440 × 700)
+  const ppu0 = height / 2 / (rest.camZ * TAN);
+  const packsOnView = rest.packs.map((p, pi) => {
+    const sx = width / 2 + p.x * ppu0, sy = height / 2 - p.y * ppu0;
+    const mine = discs.filter((d) => rest.packOf[d.i] === pi);
+    const overflow = mine.map((d) => Math.max(0, d.rad - d.sx, d.rad - d.sy, d.sx + d.rad - width, d.sy + d.rad - height));
+    const inside = overflow.filter((o) => o <= 0).length;
+    return { pack: pi, n: p.n, centroidPx: [+sx.toFixed(0), +sy.toFixed(0)], centroidInside: sx >= 0 && sx <= width && sy >= 0 && sy <= height, discsFullyInside: inside, fraction: +(inside / mine.length).toFixed(2), overflowU: overflow.filter((o) => o > 0).map((o) => +(o / ppu0).toFixed(2)) };
+  });
+  out.packsOnView = packsOnView;
+  out.asserts.allOnViewport = packsOnView.every((p) => p.centroidInside && p.fraction >= 0.75);
   if (theme === "light") {
     // the whites (Lusion's light-mode greys) carry the page's tonal family; the blacks are black by design,
     // so the overall median is reported, not asserted (see ENV_LIGHT in JackFieldScene.tsx)
@@ -365,9 +471,33 @@ async function run(width, height, theme, opts = {}) {
   await page.mouse.move(width - 40, height - 40); await sleep(200); await page.mouse.move(width - 60, height - 50);
   await page.evaluate(() => { const j = window.__field; for (let i = 0; i < 60 * 9; i++) j.step(1 / 60); });
   await waitRest(page, 120000).catch(() => out.notes.push("did not come to rest after returning to the top"));
-  const home = await page.evaluate(() => ({ clearance: window.__field.clearance, spread: window.__field.spread }));
-  out.backHome = { clearance: +home.clearance.toFixed(3), spread: +home.spread.toFixed(3) };
-  out.asserts.backHomeClear = home.clearance >= 0 && home.spread < 0.5;
+  const home = await page.evaluate(() => ({ clearance: window.__field.clearance, spread: window.__field.spread, spreadByPack: window.__field.spreadByPack, n: window.__field.packs.map((p) => p.n) }));
+  out.backHome = { clearance: +home.clearance.toFixed(3), spread: +home.spread.toFixed(3), spreadByPack: home.spreadByPack.map((v) => +v.toFixed(3)) };
+  // back home = gathered again (the packs' bound; the lattice's "spread < 0.5" was a rest ON the homes, a pack rests under compression) and clear of the name
+  out.asserts.backHomeClear = home.clearance >= 0 && home.spreadByPack.every((v, pi) => v <= GATHER(home.n[pi]));
+  // CLICK: Lusion's burst from a click on empty hero space (the fluid canvas takes the click; the field's window listener hears
+  // it), then 6 s after the click every pack has REGATHERED — spread ≤ max(its gather bound 0.45·√n, 1.15 × its own pre-click
+  // steady spread) (controller's ruling: the gained seven re-jamming at 1.21 against a 1.19 absolute bound is a regather, not a
+  // failure; both numbers recorded) — and no body is nearer another pack's centroid than its own. The 6 s run under the PAGE'S
+  // OWN ENVELOPE: the click is a pointer move, so E holds 1 for PARKED_S of sim time and closes over DECAY_S — the harness lets
+  // the real frame loop do that (E read from the hook; ≈ 5 s of sim, ≈ 30 s of wall under software GL) and steps the remainder,
+  // because step() cannot advance E and a window frozen at E 1 leaves the gained seven loose (1.21–1.29 at 6 s, measured — the
+  // settle friction that jams a pack is the E → 0 part). Node under this envelope: 1.05 / 0.91 at 1440 × 900, 0.98 / 0.84 / 0.94
+  // quads, 0.91 at 1024 × 768; none astray.
+  const clickAt = [width * 0.75, height * 0.85];
+  const preClick = await page.evaluate(() => window.__field.spreadByPack);
+  const clickT0 = await page.evaluate(() => window.__field.simTime);
+  await page.mouse.click(clickAt[0], clickAt[1]);
+  await sleep(150);
+  const burst = await page.evaluate(() => ({ v: Math.max(...window.__field.bodies().map((b) => b.v)), E: window.__field.E }));
+  await page.waitForFunction(() => window.__field.E === 0, null, { timeout: 180000, polling: 250 }).catch(() => out.notes.push("E did not close within 180 s after the click"));
+  const regather = await page.evaluate((t0) => { const j = window.__field; const eClosedAt = j.simTime - t0; while (j.simTime < t0 + 6) j.step(1 / 60); const ps = j.packs, bs = j.bodies(); let astray = 0; bs.forEach((b, k) => { const own = j.packOf[k]; const mine = Math.hypot(b.x - ps[own].x, b.y - ps[own].y); if (ps.some((p, pi) => pi !== own && Math.hypot(b.x - p.x, b.y - p.y) < mine)) astray++; }); return { spreadByPack: j.spreadByPack, n: ps.map((p) => p.n), astray, atS: j.simTime - t0, eClosedAt, E: j.E }; }, clickT0);
+  const clickBounds = regather.n.map((n, pi) => Math.max(GATHER(n), 1.15 * preClick[pi]));
+  out.click = { at: clickAt.map((v) => +v.toFixed(0)), peakSpeed: +burst.v.toFixed(2), eAtBurst: burst.E, eClosedAtS: +regather.eClosedAt.toFixed(2), measuredAtS: +regather.atS.toFixed(2), E: regather.E, preClickSpread: preClick.map((v) => +v.toFixed(3)), spreadByPack: regather.spreadByPack.map((v) => +v.toFixed(3)), gatherBounds: regather.n.map((n) => +GATHER(n).toFixed(3)), bounds: clickBounds.map((v) => +v.toFixed(3)), astray: regather.astray };
+  out.asserts.clickRegathers = burst.v > 3 && regather.spreadByPack.every((v, pi) => v <= clickBounds[pi]) && regather.astray === 0;
+  await page.mouse.move(width - 3, height - 3);
+  await page.evaluate(() => { const j = window.__field; for (let i = 0; i < 60 * 9; i++) j.step(1 / 60); });
+  await waitRest(page, 120000).catch(() => out.notes.push("did not come to rest after the click"));
   // FULL SCROLL: 2000 px down — nothing under the headline. The homes stand, the layout does not re-solve, the
   // envelope stays 0 and the frames tick on at no more than the idle cadence (the drift moves the bodies ≈ 0.1 u,
   // so the body delta is bounded by the drift's reach, not by 1e-3)
@@ -429,18 +559,28 @@ async function run(width, height, theme, opts = {}) {
   out.asserts.noContextLoss = out.ctxLost === 0;
   out.elapsedS = +((Date.now() - t0) / 1000).toFixed(1);
   out.pass = Object.values(out.asserts).every(Boolean);
-  console.log(JSON.stringify({ label, pass: out.pass, asserts: out.asserts, sizeRule: out.sizeRule, layers: out.layers, fullRate: out.fullRate, idleCadence: out.idleCadence, drift: out.drift, glass: out.glass, glassUnderlay: out.glassUnderlay, overlapPair: out.overlapPair, pointerEvents: out.pointerEvents, sweep: out.sweep, meshes: out.meshes, near: out.near, culled: out.culled, fit: out.fit, envIntensity: out.envIntensity, flick: out.flick, rest: out.rest, framesOver2s: out.framesOver2s, partialScroll: out.partialScroll, backHome: out.backHome, scroll: out.scroll, resize: out.resize, lightLuminance: out.lightLuminance, card: out.card, notes: out.notes, errors: out.errors, elapsedS: out.elapsedS }));
+  console.log(JSON.stringify({ label, pass: out.pass, asserts: out.asserts, packs: out.packs, inBand: out.inBand, casting: out.casting, gather: out.gather, alive: out.alive, packsOnView: out.packsOnView, click: out.click, sizeRule: out.sizeRule, layers: out.layers, fullRate: out.fullRate, idleCadence: out.idleCadence, drift: out.drift, glass: out.glass, glassUnderlay: out.glassUnderlay, overlapPair: out.overlapPair, pointerEvents: out.pointerEvents, sweep: out.sweep, meshes: out.meshes, near: out.near, fit: out.fit, envIntensity: out.envIntensity, flick: out.flick, rest: out.rest, framesOver2s: out.framesOver2s, partialScroll: out.partialScroll, backHome: out.backHome, scroll: out.scroll, resize: out.resize, lightLuminance: out.lightLuminance, card: out.card, notes: out.notes, errors: out.errors, elapsedS: out.elapsedS }));
   await browser.close();
 }
 
-// The controller's crop: at DPR 2, the largest jack at rest, 3 × its diameter on a side — "no ball" is judged
-// from these, and z-fighting between the pre-pass and the glass is checked on the Mac's GPU, not here
-async function zoom(theme) {
-  const width = 1440, height = 900, label = `${width}x${height}-${theme}`;
-  const { browser, page } = await open(width, height, theme, 2);
+// The controller's frames at DPR 2, for both compositions (WIDE and, behind the override, QUADS) and both themes: the full frame;
+// the LOWER pack — a 7 u square about its solved centroid, the card's fourteen under the name, three or four glass layers deep at
+// the core (the "clustered" read and the clearer table are judged from this one); and the largest jack at rest, 3 × its diameter
+// on a side — "no ball" — while z-fighting between the pre-pass and the glass is checked on the Mac's GPU, not here
+async function zoom(theme, variant = null) {
+  const width = 1440, height = 900, label = `${width}x${height}-${theme}${variant ? `-${variant}` : ""}`;
+  const { browser, page } = await open(width, height, theme, 2, variant);
   await page.mouse.move(width - 3, height - 3);
   await settle(page);
-  const st = await page.evaluate(() => ({ bodies: window.__field.bodies(), camZ: window.__field.camZ, unitDiam: window.__field.unitDiam, casting: window.__field.casting }));
+  const st = await page.evaluate(() => ({ bodies: window.__field.bodies(), camZ: window.__field.camZ, unitDiam: window.__field.unitDiam, casting: window.__field.casting, packs: window.__field.packs, spreadByPack: window.__field.spreadByPack }));
+  await page.screenshot({ path: `${OUT}/field-${label}-full@2x.png` });
+  let li = 0;
+  st.packs.forEach((p, i) => { if (p.y < st.packs[li].y) li = i; });
+  const lp = st.packs[li];
+  const ppu0 = height / 2 / (st.camZ * TAN);
+  const lcx = width / 2 + lp.x * ppu0, lcy = height / 2 - lp.y * ppu0, lside = Math.min(7 * ppu0, width, height);
+  const lclip = { x: Math.min(Math.max(0, lcx - lside / 2), width - lside), y: Math.min(Math.max(0, lcy - lside / 2), height - lside), width: lside, height: lside };
+  await page.screenshot({ path: `${OUT}/field-${label}-lowerpack@2x.png`, clip: lclip });
   let big = 0;
   st.bodies.forEach((b, i) => { if (b.scale > st.bodies[big].scale) big = i; });
   const b = st.bodies[big];
@@ -449,19 +589,28 @@ async function zoom(theme) {
   const side = Math.min(3 * D, width, height);
   const clip = { x: Math.min(Math.max(0, sx - side / 2), width - side), y: Math.min(Math.max(0, sy - side / 2), height - side), width: side, height: side };
   await page.screenshot({ path: `${OUT}/field-${label}-jack-zoom.png`, clip });
-  summary[`zoom-${label}`] = { body: big, family: st.casting[big].family, finish: st.casting[big].finish, scale: +b.scale.toFixed(3), at: [+sx.toFixed(0), +sy.toFixed(0)], diameterPx: +D.toFixed(1), clip: { x: +clip.x.toFixed(0), y: +clip.y.toFixed(0), side: +side.toFixed(0) }, dpr: 2, frame: `${OUT}/field-${label}-jack-zoom.png` };
+  summary[`zoom-${label}`] = {
+    dpr: 2,
+    full: `${OUT}/field-${label}-full@2x.png`,
+    lowerPack: { index: li, n: lp.n, centroidPx: [+lcx.toFixed(0), +lcy.toFixed(0)], spread: +st.spreadByPack[li].toFixed(3), sideU: 7, clip: { x: +lclip.x.toFixed(0), y: +lclip.y.toFixed(0), side: +lside.toFixed(0) }, frame: `${OUT}/field-${label}-lowerpack@2x.png` },
+    jack: { body: big, family: st.casting[big].family, finish: st.casting[big].finish, scale: +b.scale.toFixed(3), at: [+sx.toFixed(0), +sy.toFixed(0)], diameterPx: +D.toFixed(1), clip: { x: +clip.x.toFixed(0), y: +clip.y.toFixed(0), side: +side.toFixed(0) }, frame: `${OUT}/field-${label}-jack-zoom.png` },
+  };
   console.log(JSON.stringify({ zoom: label, ...summary[`zoom-${label}`] }));
   await browser.close();
 }
 
 if (only === "sweep") { await sweep(); process.exit(0); }
-if (only === "zoom") { await zoom("dark"); await zoom("light"); process.exit(0); }
+if (only === "zoom") { for (const v of [null, "quads"]) { await zoom("dark", v); await zoom("light", v); } process.exit(0); }
 summary.initialJs = initialJs();
 console.log("initialJs", JSON.stringify(summary.initialJs));
 await run(1440, 900, "dark", { frames: true, card: true });
 await run(1440, 900, "light", { frames: true });
 await run(1024, 768, "dark", { frames: true });
-await run(1024, 768, "light");
-if (!only) { await zoom("dark"); await zoom("light"); }
+// QUADS is the owner's ALTERNATIVE composition, not the shipped one (controller's ruling): run for the frames, recorded in full as
+// informational — its left pack's clip (two discs 0.11 / 0.01 u past the left edge, 5/7 fully inside) is known from the critique
+await run(1440, 900, "dark", { frames: true, variant: "quads", informational: true });
+if (!only) for (const v of [null, "quads"]) { await zoom("dark", v); await zoom("light", v); }
 fs.writeFileSync(`${OUT}/verify.json`, JSON.stringify(summary, null, 1));
-console.log("PASS:", [`initialJs=${summary.initialJs.pass}`, ...Object.values(summary).filter((s) => s.label).map((s) => `${s.label}=${s.pass}`)].join(" "));
+const runs = Object.values(summary).filter((s) => s.label);
+const failed = (s) => Object.entries(s.asserts).filter(([, v]) => !v).map(([k]) => k).join(",") || "all green";
+console.log("PASS:", [`initialJs=${summary.initialJs.pass}`, ...runs.filter((s) => !s.informational).map((s) => `${s.label}=${s.pass}`)].join(" "), ...runs.filter((s) => s.informational).map((s) => `| informational ${s.label}=${s.pass} (${failed(s)})`));

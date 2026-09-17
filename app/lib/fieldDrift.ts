@@ -2,7 +2,9 @@
 // drifting ever slightly in its position so it appears not as rigid". Not a force on the bodies
 // and not a shader wobble: each body's HOME wanders — a bounded, smooth, deterministic offset
 // added to the solved target every frame (JackFieldScene.tsx) — and the body follows the
-// wandering home through the pull with the dynamics' own lag. Pure and three-free (rand from
+// wandering home through the pull with the dynamics' own lag. Two terms since the packs
+// (fieldPacks.ts): the body's own, and its PACK's common-mode term shared by every member
+// (packDriftOffset), so a jammed pack breathes as a whole. Pure and three-free (rand from
 // seed.ts), so the bounds, the mean and the speed run in node.
 //
 // Response (a critic's numbers, unit jack, E = 0): mass 4.849, K/m 8.25 s⁻², ω_n 2.87 rad/s;
@@ -16,15 +18,20 @@ import { rand } from "./seed";
 
 export const DRIFT = {
   /**
-   * the home's excursion in x and y, view units. A unit jack is 2.2 u across. At E = 0 the
-   * body is heavily overdamped (DAMP · SETTLE) and follows at ≈ 0.5–0.9 of this, so the
-   * visible sway is ≈ 0.09–0.16 u (5–10 px at 1440 × 900).
+   * the home's excursion in x and y, view units, PER TERM — the body's own term and its pack's
+   * common-mode term are each bounded by this, so a home wanders within 2·AMP. A unit jack is
+   * 2.2 u across. At E = 0 a lone body is heavily overdamped (DAMP · SETTLE) and follows at
+   * ≈ 0.5–0.9 of an offset, so its visible sway is ≈ 0.09–0.16 u (6–11 px at 71 px/u). A JAMMED
+   * PACK absorbs ≈ 70% of the per-body sway (p50 0.032 u/s ≈ 2 px/s, measured: the members'
+   * offsets point every way and the contacts cancel most of them), so on top of it every member
+   * of pack p takes the SAME offset, driftOffset(1000 + p, t, seed) — the whole pack breathes at
+   * the owner's "ever slightly" (≈ 8 px) while its members jostle.
    *
-   * Drift vs the keep-out band: a home solved AT the band's edge (fieldLayout.solveTargets
-   * puts nearly every slot exactly there) sways ≈ 0.07 u into it — the band's
-   * K_KEEP · (0.14/1.5)² ≈ 2.1 u/s² against the pull's ≈ 1.15 u/s² at 0.14 u — a smooth,
-   * halved, asymmetric sway, well inside the band test's 0.25 · D tolerance (0.40 u for the
-   * smallest jack). Zero here and in AMP_Z restores rest → freeze (JackFieldScene.tsx).
+   * Drift vs the keep-out band: a home solved AT the band's edge (fieldLayout.solveTargets puts
+   * the lower pack's top row exactly there) sways into it — the band's K_KEEP · (d/1.5)² against
+   * the pull's ≈ 8.25·d u/s² — a smooth, halved, asymmetric sway of a few tenths of a unit at
+   * most with both terms, well inside the band's 1.5 u and the solve's 0.25 · D tolerance (0.40 u
+   * for the smallest jack). Zero here and in AMP_Z restores rest → freeze (JackFieldScene.tsx).
    */
   AMP: 0.18,
   AMP_Z: 0.1,
@@ -45,10 +52,12 @@ const W_SLOW = 0.65;
 const W_FAST = 0.35;
 /**
  * The draws: rand(k, seed + n) for n ∈ FIRST_DRAW … FIRST_DRAW + 11, one per (axis × T1, T2,
- * φ1, φ2). Offsets 1–9, 11–12 and 21–23 are already the spawn, click, scale and lattice draws
- * (jackDynamics.ts, fieldLayout.ts); reusing one would correlate the drift with them.
+ * φ1, φ2). Offsets 1–9, 11–12 and 51–52 are already the spawn, click, scale and pack draws
+ * (jackDynamics.ts, fieldLayout.ts, fieldPacks.ts); reusing one would correlate the drift with them.
  */
 const FIRST_DRAW = 31;
+/** the pack terms' k: body indices run 0..n−1 (n ≤ 28), so 1000 + p never meets a body's own draw */
+export const PACK_DRIFT_BASE = 1000;
 
 function axisOffset(k: number, t: number, seed: number, axis: number, A: number): number {
   const n = FIRST_DRAW + axis * 4;
@@ -60,8 +69,8 @@ function axisOffset(k: number, t: number, seed: number, axis: number, A: number)
 }
 
 /**
- * The home's offset for body (slot) k at sim time t, written into `out` (no allocation): per
- * axis A·(0.65·sin(2πt/T1 + φ1) + 0.35·sin(2πt/T2 + φ2)), T1 ∈ T_SLOW, T2 ∈ T_FAST, φ ∈ [0, 2π),
+ * The home's offset for body k at sim time t, written into `out` (no allocation): per axis
+ * A·(0.65·sin(2πt/T1 + φ1) + 0.35·sin(2πt/T2 + φ2)), T1 ∈ T_SLOW, T2 ∈ T_FAST, φ ∈ [0, 2π),
  * all from rand(k, seed + n). Bounded by A, smooth, deterministic in (k, seed). Its per-axis
  * speed is at most A·2π·(0.65/T_SLOW[0] + 0.35/T_FAST[0]) — 0.18 u/s in x and y at these
  * numbers — a PER-AXIS bound; the 3-D speed can reach ≈ 0.27 u/s.
@@ -71,4 +80,13 @@ export function driftOffset(k: number, t: number, seed: number, out: Vec3): Vec3
   out.y = axisOffset(k, t, seed, 1, DRIFT.AMP);
   out.z = axisOffset(k, t, seed, 2, DRIFT.AMP_Z);
   return out;
+}
+
+/**
+ * Pack p's common-mode offset at sim time t — driftOffset at k = PACK_DRIFT_BASE + p, the same
+ * for every member, added to each member's own term (JackFieldScene.applyDrift). Same bounds,
+ * same periods, its own seeded phases.
+ */
+export function packDriftOffset(p: number, t: number, seed: number, out: Vec3): Vec3 {
+  return driftOffset(PACK_DRIFT_BASE + p, t, seed, out);
 }

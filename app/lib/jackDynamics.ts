@@ -1,10 +1,12 @@
 // The jacks' dynamics: Lusion's sphere-body model (lusion.co's hero, HomeBalloonsBody /
 // HomeBalloonsPhysics), ported as RATES so the feel is the same at 30, 60 and 120 Hz, with
 // the two additions the house rule "a resting scene costs nothing" needs — a resting-contact
-// treatment so touching bodies can actually stop, and a rest test on what moved — and one the
-// hero needs: an optional keep-out band that holds bodies off a rectangle of text (the card
-// passes none and is untouched). Pure, no physics library: 66 sphere pairs a substep is
-// nothing, and every rule below runs in node.
+// treatment so touching bodies can actually stop, and a rest test on what moved — and two the
+// hero needs: an optional keep-out band that holds bodies off a rectangle of text, and an
+// optional per-body swirl PIVOT and GAIN so a pack turns about its own centre (the card passes
+// no band and sets neither: it steps bit for bit as before — tests/jack-dynamics.test.ts holds
+// the fixture). Pure, no physics library: 66–210 sphere pairs a substep is nothing (21 bodies
+// step in ≈ 0.01 ms per 1/30 frame in node), and every rule below runs in node.
 //
 // Mass is (4/3)·π·r³ (Lusion: volume = π·r·1.333, mass = volume·r²). It is what makes the
 // central pull K 40 read as ω 2.87 rad/s, ζ 0.28 and a 2.2 s period for a unit jack — heavy
@@ -20,7 +22,7 @@ export interface Body {
   pos: Vec3;
   vel: Vec3;
   quat: Quat;
-  /** the pull's target: (i − 5.5)·0.6 along x by default, so the card's pack keeps a statistical oldest-left drift; the jack field places its own (fieldLayout.ts) */
+  /** the pull's target: (i − 5.5)·0.6 along x by default, so the card's pack keeps a statistical oldest-left drift; the jack field places its own (fieldPacks.ts, fieldLayout.ts) */
   target: Vec3;
   /** the collision radius, BODY_R × the mesh scale */
   r: number;
@@ -31,6 +33,10 @@ export interface Body {
   frictionTot: number;
   /** the swirl's sign alternates by index — two interleaved counter-rotating streams */
   swirl: 1 | -1;
+  /** the swirl's centre — the jack field sets each body's PACK's solved centroid (fieldPacks.packCentroids); absent → the origin, Lusion's form, the card's */
+  pivot?: Vec3;
+  /** the swirl's gain — the jack field's small packs run ×3 (a seven on a 0.9 u disc ungained moves at 0.025 u/s, the card at 0.113; ×3 reaches 0.074, ×4 breaks the jam); absent → 1 */
+  swirlGain?: number;
 }
 
 /** A ray from the camera through the cursor, and the cursor's velocity on the z = 0 plane. */
@@ -111,7 +117,7 @@ export const DYN = {
    * did nothing for the sliding creep — a terminal speed moves with τ, its drive does not.
    */
   SETTLE: 3e-4,
-  /** the swirl's rate: angle = h·fit(|pos|,0,2,0,1)·SWIRL·(1 − |â·p̂|) about (1,1,1) */
+  /** the swirl's rate: angle = h·gain·fit(|q|,0,2,0,1)·SWIRL·(1 − |â·q̂|) about (1,1,1) through the pivot, q = pos − pivot (the origin when none) */
   SWIRL: 0.5,
   /** Lusion's contact friction T = √(f₁·f₂) with f 2 */
   T_FRICTION: 2,
@@ -299,18 +305,27 @@ export function stepWorld(world: World, delta: number, pointer: Pointer | null, 
       v.x += (b.target.x - p.x) * f;
       v.y += (b.target.y - p.y) * f;
       v.z += (b.target.z - p.z) * f;
-      // 2. the swirl about (1,1,1) through the ORIGIN (Lusion's form — about a per-body home
-      //    it would vanish at rest), scaled by the idle envelope
+      // 2. the swirl about (1,1,1) through the body's PIVOT — the origin when none is set
+      //    (Lusion's form, the card's: about a per-body home it would vanish at rest; about a
+      //    pack's own solved centroid it is the shear that keeps a jam alive) — gained per body
+      //    and scaled by the idle envelope. Its honest size: SWIRL·gain·min(1, |q|/2)·(1 − along)·|q|
+      //    of tangential acceleration, 0.25·gain u/s² at 1 u from the pivot, which the pull
+      //    balances into a small static offset for a body on its target — it is the members'
+      //    COMPRESSION that moves a pack, and the swirl's shear that keeps the jam from setting.
+      //    Step 1 read p separately and nothing else in this block reads it, so with pivot unset
+      //    (q = p) and gain unset (× 1) the arithmetic is today's, bit for bit.
       if (e > 0) {
-        const len = Math.hypot(p.x, p.y, p.z);
+        const pv = b.pivot;
+        const qx = pv ? p.x - pv.x : p.x, qy = pv ? p.y - pv.y : p.y, qz = pv ? p.z - pv.z : p.z;
+        const len = Math.hypot(qx, qy, qz);
         if (len > 1e-9) {
-          const along = Math.abs((p.x + p.y + p.z) * AXIS) / len;
-          const ang = h * Math.min(1, len / 2) * DYN.SWIRL * (1 - along) * b.swirl * e;
-          const c = Math.cos(ang), sn = Math.sin(ang), k = (p.x + p.y + p.z) * AXIS * (1 - c);
-          // Rodrigues: p·cos + (â × p)·sin + â·(â·p)·(1 − cos), minus p
-          v.x += p.x * c + (p.z - p.y) * AXIS * sn + AXIS * k - p.x;
-          v.y += p.y * c + (p.x - p.z) * AXIS * sn + AXIS * k - p.y;
-          v.z += p.z * c + (p.y - p.x) * AXIS * sn + AXIS * k - p.z;
+          const along = Math.abs((qx + qy + qz) * AXIS) / len;
+          const ang = h * Math.min(1, len / 2) * DYN.SWIRL * (1 - along) * b.swirl * e * (b.swirlGain ?? 1);
+          const c = Math.cos(ang), sn = Math.sin(ang), k = (qx + qy + qz) * AXIS * (1 - c);
+          // Rodrigues: q·cos + (â × q)·sin + â·(â·q)·(1 − cos), minus q
+          v.x += qx * c + (qz - qy) * AXIS * sn + AXIS * k - qx;
+          v.y += qy * c + (qx - qz) * AXIS * sn + AXIS * k - qy;
+          v.z += qz * c + (qy - qx) * AXIS * sn + AXIS * k - qz;
         }
       }
     }
