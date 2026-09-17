@@ -6,10 +6,13 @@ import { motion, useMotionValue, useSpring, useTransform, useReducedMotion } fro
 import { GitCommit, Code, Github, Flame, Zap } from "lucide-react";
 import { useTheme } from "./ThemeProvider";
 import { buildDayWindow, currentStreak, utcDayKey, type CommitDay } from "../lib/githubStats";
-import { TRAY, capPieces, fillScale, levelFor, piecesForDays } from "../lib/commitPile";
+import { levelFor } from "../lib/commitLevel";
+import { SEED, jacksForWeeks } from "../lib/connectorJacks";
+import { COLUMN_MIN_PX, PANEL, PANEL_LEGEND } from "../lib/connectorScene";
+import { createPointerRig } from "../lib/pointerRig";
 
-// Interactive physics pile — client-only, lazy (three.js + rapier off the initial bundle).
-const FloatingBackground = dynamic(() => import("./FloatingBackground"), { ssr: false });
+// The floating connector jacks — client-only, lazy (three.js off the initial bundle).
+const ConnectorField = dynamic(() => import("./ConnectorField"), { ssr: false });
 
 interface RepoStats {
   commits: number;
@@ -37,7 +40,7 @@ function formatNumber(num: number): string {
 // 3D bar levels: extrusion height (px) + token-driven face colours.
 //
 // There is ONE key light on this site and it sits up and to the RIGHT (the same
-// direction as the hero's caustic rim and the floating scene's key light). So the
+// direction as the hero's caustic rim and the connector scene's key light). So the
 // three visible faces of a bar can never share a value: the TOP catches most of it,
 // the RIGHT face sits a stop under, and the FRONT face is in shadow. Painting both
 // side faces the same colour — as this did — is a literal lighting lie, and it
@@ -67,11 +70,8 @@ const CELL = 15;
 const GAP = 5;
 const STEP = CELL + GAP;
 const BASE_TILT_X = 52; // 3/4 skyline tilt
-// The tray's column: `gap-x-8` between the board column and the tray, and the tray's fixed
-// height in world units — R3F's viewport half-height at fov 45 from z 11 — so the DOM can run
-// the pile's own fill rule on the tray the grid WOULD give, before mounting a canvas.
-const TRAY_GAP = 32;
-const TRAY_HH = Math.tan((45 / 2) * Math.PI / 180) * 11;
+// The scene's column: `gap-x-8` between the board column and the canvas.
+const COLUMN_GAP = 32;
 const BASE_ROT_Y = -26; // horizontal turn — staggers columns so fewer bars hide
 
 export default function SiteStats() {
@@ -91,25 +91,25 @@ export default function SiteStats() {
   const [bgArmed, setBgArmed] = useState(false);
   const [bgVisible, setBgVisible] = useState(false);
   const [bgBorn, setBgBorn] = useState(false);
-  const [trayInView, setTrayInView] = useState(false);
-  const [blockSize, setBlockSize] = useState<{ w: number; h: number } | null>(null);
-  const [trayShown, setTrayShown] = useState(false);
+  const [sceneInView, setSceneInView] = useState(false);
+  const [blockW, setBlockW] = useState<number | null>(null);
+  const [sceneShown, setSceneShown] = useState(false);
   const [accentHex, setAccentHex] = useState("#3b82f6");
-  const [cardHex, setCardHex] = useState("");
   const reduceMotion = useReducedMotion() ?? false;
   const { resolvedTheme } = useTheme();
 
-  // Background canvas, three stages observed on the card (the tray itself only exists once
+  // Background canvas, three stages observed on the card (the column itself only exists once
   // the data has landed, and the warm stage must fire long before that would matter). WARM
-  // (two viewport heights out): import the module — the pile's chunk group is ~1.07 MB gzip
-  // because rapier inlines its 1.44 MB WASM as base64, and at a 300 px lead a reading-pace
-  // scroll reached the card before the download did. Same specifier as the dynamic() loader,
-  // so Turbopack dedupes it into the same chunks. ARM (300 px): mount once and never unmount
-  // — unmounting rebuilt the WebGL context, the world and ~110 convex hulls and rained the
-  // pile in again on every return. The mount also waits for the fetch: the pile freezes its
-  // layout at mount, and a pile born in the 226 px loading card spawned across ±19 u for
-  // walls that then snapped to ±8.7 u in the 491 px loaded one. VISIBLE (live, both
-  // directions): only gates the frameloop inside. Callback ref → fires when the node attaches.
+  // (one viewport height out): import the module — the scene's chunk group is three + fiber
+  // + the scene, ~230 KB gzip, and a 300 px lead at reading pace is 0.3–0.5 s, which a cold
+  // fetch on a slow desktop link can miss; the pile needed two viewport heights for a 1.07 MB
+  // group. Same specifier as the dynamic() loader, so Turbopack dedupes it into the same
+  // chunks. ARM (300 px): mount once and never unmount — unmounting rebuilt the WebGL context
+  // and the environment and replayed the entrance on every return. The mount also waits for
+  // the fetch: the world is born with the camera fit of the canvas it mounts in, and a scene
+  // born in the 226 px loading card would have spawned for a view the 491 px loaded one does
+  // not have. VISIBLE (live, both directions): only gates the frameloop inside. Callback ref
+  // → fires when the node attaches.
   const bgObserver = useRef<IntersectionObserver | null>(null);
   const warmObserver = useRef<IntersectionObserver | null>(null);
   const attachBg = useCallback((node: HTMLDivElement | null) => {
@@ -120,10 +120,14 @@ export default function SiteStats() {
     if (node) {
       const warm = new IntersectionObserver(([e]) => {
         if (!e.isIntersecting) return;
-        // A failed warm is only a lost head start: dynamic() fetches again at mount and reports.
-        import("./FloatingBackground").catch(() => {});
         warm.disconnect();
-      }, { rootMargin: "200% 0px" });
+        // Only where a canvas can mount at all (the use3D gates, read directly — this ref
+        // callback is created once): a phone or a reduced-motion visitor was downloading the
+        // chunk for a column that never exists.
+        if (window.innerWidth < 640 || !window.matchMedia("(hover: hover) and (pointer: fine)").matches || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+        // A failed warm is only a lost head start: dynamic() fetches again at mount and reports.
+        import("./ConnectorField").catch(() => {});
+      }, { rootMargin: "100% 0px" });
       warm.observe(node);
       warmObserver.current = warm;
       const io = new IntersectionObserver(([e]) => {
@@ -134,45 +138,50 @@ export default function SiteStats() {
       bgObserver.current = io;
     }
   }, []);
-  // The pour waits for the tray, not the card: with a 300 px mount lead the old rain had
-  // finished before a reading-pace scroll reached it. 30% of the tray on screen is enough of
-  // its top edge for the trains to be seen entering.
-  const trayObserver = useRef<IntersectionObserver | null>(null);
-  const attachTray = useCallback((node: HTMLDivElement | null) => {
-    trayObserver.current?.disconnect();
-    trayObserver.current = null;
+  // The entrance waits for the column, not the card: with a 300 px mount lead the fly-in
+  // would have played before a reading-pace scroll reached it. 30% of the column on screen is
+  // enough of it for the jacks to be seen converging.
+  const sceneObserver = useRef<IntersectionObserver | null>(null);
+  const attachScene = useCallback((node: HTMLDivElement | null) => {
+    sceneObserver.current?.disconnect();
+    sceneObserver.current = null;
     if (!node) {
-      // The tray is taken away and given back — the ResizeObserver below drops it when
-      // the block narrows past TRAY.kLegible and restores it when it widens — and this
+      // The column is taken away and given back — the ResizeObserver below drops it when
+      // the block narrows past COLUMN_MIN_PX and restores it when it widens — and this
       // state outlived the node that produced it. The next mount was handed the OLD
-      // answer for the frame or two before the fresh observer's first callback, so a tray
-      // reappearing off-screen could be told to pour where nobody could see it.
-      setTrayInView(false);
+      // answer for the frame or two before the fresh observer's first callback, so a column
+      // reappearing off-screen could be told to start where nobody could see it.
+      setSceneInView(false);
       return;
     }
-    const io = new IntersectionObserver(([e]) => setTrayInView(e.isIntersecting), { threshold: 0.3 });
+    const io = new IntersectionObserver(([e]) => setSceneInView(e.isIntersecting), { threshold: 0.3 });
     io.observe(node);
-    trayObserver.current = io;
+    sceneObserver.current = io;
   }, []);
-  // The activity block's size, in both of its shapes (one column or board + tray), decides
-  // whether a tray fits: the block is what the grid divides, and its height is column 1's.
+  // The activity block's width, in both of its shapes (one column or board + scene), decides
+  // whether the second column exists: the block is what the grid divides.
   const blockObserver = useRef<ResizeObserver | null>(null);
   const attachBlock = useCallback((node: HTMLDivElement | null) => {
     blockObserver.current?.disconnect();
     blockObserver.current = null;
     if (node) {
-      const ro = new ResizeObserver(([e]) => setBlockSize({ w: e.contentRect.width, h: e.contentRect.height }));
+      const ro = new ResizeObserver(([e]) => setBlockW(e.contentRect.width));
       ro.observe(node);
       blockObserver.current = ro;
     }
   }, []);
 
-  // Cursor-parallax tilt for the 3D bar chart (drives the board only).
+  // Cursor-parallax tilt for the 3D bar chart (drives the board only — the scene's camera is
+  // fixed, Lusion's own has no pointer parallax). It listens on the CARD, through the one
+  // pointer rig the scene reads too: a move anywhere over the card wakes the scene's demand
+  // loop, so the jacks are alive before the cursor reaches their column.
   const px = useMotionValue(0);
   const py = useMotionValue(0);
   const springCfg = { stiffness: 120, damping: 18, mass: 0.4 };
   const rotateX = useSpring(useTransform(py, [-0.5, 0.5], [BASE_TILT_X + 5, BASE_TILT_X - 6]), springCfg);
   const rotateY = useSpring(useTransform(px, [-0.5, 0.5], [BASE_ROT_Y - 8, BASE_ROT_Y + 8]), springCfg);
+  // Mutated in place, read by the scene's frame loop — no re-render per pointer move.
+  const rig = useMemo(() => createPointerRig(), []);
 
   useEffect(() => {
     setMounted(true);
@@ -180,22 +189,19 @@ export default function SiteStats() {
     setFinePointer(window.matchMedia("(hover: hover) and (pointer: fine)").matches);
   }, []);
 
-  // Re-read the themed accent and card whenever the theme flips (both differ per theme; the
-  // pile mixes one into the other exactly as the heatmap's LEVELS do). Deferred a microtask:
-  // React runs a child's passive effects before its parent's, so at this point the
-  // ThemeProvider has not yet flipped the <html> class for the theme this effect reacts to,
-  // and a synchronous read returned the OUTGOING theme's tokens — the pile lagged one flip
-  // behind (a light slab on the dark card). The accent alone hid it: #3b82f6 and #2563eb
-  // are a shade apart. A microtask runs after the whole flush, class included.
+  // Re-read the themed accent whenever the theme flips (it differs per theme; the glossy
+  // accent jack is the token and the matte ones 85% of it). Deferred a microtask: React runs
+  // a child's passive effects before its parent's, so at this point the ThemeProvider has
+  // not yet flipped the <html> class for the theme this effect reacts to, and a synchronous
+  // read returned the OUTGOING theme's tokens — the scene lagged one flip behind. #3b82f6
+  // and #2563eb are a shade apart, so the lag hid. A microtask runs after the whole flush,
+  // class included.
   useEffect(() => {
     let live = true;
     queueMicrotask(() => {
       if (!live) return;
-      const style = getComputedStyle(document.documentElement);
-      const a = style.getPropertyValue("--accent").trim();
+      const a = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim();
       if (a) setAccentHex(a);
-      const c = style.getPropertyValue("--card").trim();
-      if (c) setCardHex(c);
     });
     return () => { live = false; };
   }, [resolvedTheme]);
@@ -236,8 +242,8 @@ export default function SiteStats() {
   const unavailable = !loading && error;
   const use3D = mounted && !isMobile && finePointer && !reduceMotion;
   // Latched: once the card has been within its margin with the data landed, the canvas stays
-  // mounted whatever `loading` does later — a re-mount is a re-rain. (setState during render
-  // is React's pattern for state that follows other state; an effect would cascade.)
+  // mounted whatever `loading` does later — a re-mount is a re-entrance. (setState during
+  // render is React's pattern for state that follows other state; an effect would cascade.)
   if (bgArmed && !loading && !bgBorn) setBgBorn(true);
 
   // The grid ends on the day the SNAPSHOT was taken, not the viewer's today. The payload is
@@ -252,15 +258,15 @@ export default function SiteStats() {
   const anchorKey = stale ? snapKey : todayKey;
 
   const weeksToShow = isMobile ? 8 : 12;
-  // Memoised on the day key, not the Date: `days` feeds the pile's layout, and a new array
-  // identity per render would re-lay (re-rain) the pile on every parallax tick.
+  // Memoised on the day key, not the Date: `days` feeds the jacks, and a new array identity
+  // per render would be a new world — a new entrance — on every parallax tick.
   const days = useMemo(
     () => buildDayWindow(new Date(`${anchorKey}T12:00:00Z`), weeksToShow, commitData),
     [anchorKey, weeksToShow, commitData],
   );
-  // Capped at PIECE_CAP bodies (the route can date 300–500); the legend discloses the cut.
-  const pile = useMemo(() => capPieces(piecesForDays(days)), [days]);
-  const pieces = pile.shown;
+  // One jack per week of the same window the board draws, sized by its commits; weeks the
+  // route's paging cut off before are UNKNOWN, and the legend says so.
+  const jacks = useMemo(() => jacksForWeeks(days, weeksToShow, stats.truncated, SEED), [days, weeksToShow, stats.truncated]);
   const weeks: CommitDay[][] = [];
   for (let i = 0; i < days.length; i += 7) weeks.push(days.slice(i, i + 7));
 
@@ -287,14 +293,18 @@ export default function SiteStats() {
 
   const boardW = weeksToShow * STEP - GAP;
   const boardH = 7 * STEP - GAP;
-  const onBoardMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+  const onCardMove = (e: ReactPointerEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    px.set((e.clientX - rect.left) / rect.width - 0.5);
-    py.set((e.clientY - rect.top) / rect.height - 0.5);
+    const x = (e.clientX - rect.left) / rect.width - 0.5;
+    const y = (e.clientY - rect.top) / rect.height - 0.5;
+    px.set(x);
+    py.set(y);
+    rig.move(x, y, e.clientX, e.clientY);
   };
   const resetTilt = () => {
     px.set(0);
     py.set(0);
+    rig.leave();
   };
   const dayTitle = (day: CommitDay) =>
     `${day.date} (UTC): ${day.count} commit${day.count !== 1 ? "s" : ""}`;
@@ -311,35 +321,23 @@ export default function SiteStats() {
     : stats.truncated
       ? `Commit activity (UTC days) — most recent ${windowCommits} commit${plural}; older days not shown${snapshotNote}`
       : `Commit activity for ${span} (UTC days) — ${windowCommits} commit${plural}${snapshotNote}`;
-  // Does the tray the grid would give hold legible pieces? Run the pile's fill rule on it:
-  // the tray is the block minus the board column and the gap, as tall as the block, and the
-  // camera is fixed so its height in world units is always TRAY_HH. Below TRAY.kLegible the
-  // blocks would be under ~10 px, so the tray is hidden and the block is one column rather
-  // than an overfilled tray sliced by its own clip (today's 165 commits need ~470 px of
-  // tray, a ~850 px viewport). A 0.05 band of hysteresis so a drag across the edge does not
-  // mount and unmount a WebGL context on every pixel. (setState during render is React's
-  // pattern for state that follows other state; an effect would cascade.)
-  const trayW = blockSize ? blockSize.w - boardW - TRAY_GAP : 0;
-  const trayH = blockSize ? blockSize.h : 0;
-  const kFit = useMemo(
-    () => (trayW > 0 && trayH > 0 ? fillScale(TRAY_HH * (trayW / trayH), TRAY_HH, pieces) : 0),
-    [trayW, trayH, pieces],
-  );
-  const wantTray = trayShown ? kFit >= TRAY.kLegible : kFit >= TRAY.kLegible + 0.05;
-  if (wantTray !== trayShown) setTrayShown(wantTray);
-  // The pile is a second reading of the same window, so it exists only when the window is
-  // known, there is something to pour, and the tray fits; without it the activity block is
-  // one column, as it is for every non-3D visitor.
-  //
-  // `pieces.length > 0` is the case the other two gates miss. A window that is KNOWN and
-  // genuinely holds no commit is a real state — twelve quiet weeks — and fillScale returns
-  // 1 for an empty pile (no area to fit, so nothing constrains the scale), which clears
-  // TRAY.kLegible and opened an empty tray beside the board under a legend reading "one
-  // block per commit … push them", with nothing in it to push.
-  const showTray = use3D && windowKnown && pieces.length > 0 && trayShown;
+  // Does a second column fit? The column is the block minus the board column and the gap;
+  // under COLUMN_MIN_PX the camera fit (connectorScene.cameraFor) would put twelve 2 u
+  // jacks into ~150 px at a 700 px viewport, so the block is one column instead. A
+  // half-pixel band of hysteresis so a drag across the edge does not mount and unmount a
+  // WebGL context on every pixel. (setState during render is React's pattern for state
+  // that follows other state; an effect would cascade.)
+  const columnW = blockW !== null ? blockW - boardW - COLUMN_GAP : 0;
+  const wantScene = columnW >= COLUMN_MIN_PX - (sceneShown ? 0.5 : 0);
+  if (wantScene !== sceneShown) setSceneShown(wantScene);
+  // The scene is a second reading of the same window, so it exists only when the window is
+  // known and the column fits; without it the activity block is one column, as it is for
+  // every non-3D visitor. A KNOWN window with no commit is a real state — twelve quiet weeks,
+  // twelve floor-sized jacks — and the legend still holds.
+  const showScene = use3D && windowKnown && sceneShown;
   // The legend states the encoding, and the cut when there is one.
-  const cut = pile.total > pieces.length ? ` · ${pieces.length} of ${pile.total} shown` : "";
-  const trayLegend = `one block per commit, shaded by its day's level${cut} · push them`;
+  const unknownWeeks = jacks.filter((j) => !j.known).length;
+  const sceneLegend = `one connector per week, sized by its commits · nudge them${unknownWeeks > 0 ? " · older weeks unknown" : ""}`;
 
   return (
     <section className="py-20 md:py-24 px-6 relative z-20 pointer-events-none">
@@ -354,6 +352,9 @@ export default function SiteStats() {
           viewport={{ once: true }}
           transition={{ duration: 0.5 }}
           className="glass p-6 sm:p-8 pointer-events-auto"
+          // the one pointer rig (board tilt + scene wake) listens on the card, not its halves
+          onPointerMove={onCardMove}
+          onPointerLeave={resetTilt}
         >
           {/* Content — pointer-events pass THROUGH except on interactive bits */}
           <div className="relative z-10 pointer-events-none">
@@ -411,18 +412,18 @@ export default function SiteStats() {
                 </div>
 
                 {/* Activity — 3D bar chart (or flat fallback). On the 3D path the board and the
-                    pile are two columns of one grid: the pile used to be a percent-anchored
-                    overlay (top 30%, left 36%) whose left edge crossed the board's projected
-                    right column below ~760 px viewports and whose top edge landed inside the
-                    language-chip row. Laid out as a sibling they share one frame and cannot
-                    collide at any width; when there is no pile the grid is one column, so no
-                    visitor gets an empty lower-right. */}
+                    scene are two columns of one grid: the old overlay was percent-anchored (top
+                    30%, left 36%) and its left edge crossed the board's projected right column
+                    below ~760 px viewports while its top edge landed inside the language-chip
+                    row. Laid out as a sibling they share one frame and cannot collide at any
+                    width; when there is no scene the grid is one column, so no visitor gets an
+                    empty lower-right. */}
                 <div
                   ref={attachBlock}
-                  className={showTray ? "grid gap-x-8 gap-y-3 items-stretch" : "space-y-3"}
+                  className={showScene ? "grid gap-x-8 gap-y-3 items-stretch" : "space-y-3"}
                   // column 1 is exactly the board's width: a long label ("snapshot from …") wraps
-                  // inside it instead of widening the column and shrinking the tray unmeasured
-                  style={showTray ? { gridTemplateColumns: `${boardW}px 1fr` } : undefined}
+                  // inside it instead of widening the column and shrinking the scene unmeasured
+                  style={showScene ? { gridTemplateColumns: `${boardW}px 1fr` } : undefined}
                 >
                   <div className="col-start-1 row-start-1 text-xs text-muted">
                     Activity (UTC days){stale && <span className="text-[var(--legend)]"> · snapshot from {snapKey}</span>}
@@ -436,8 +437,6 @@ export default function SiteStats() {
                       <div
                         className="relative pointer-events-auto"
                         style={{ width: boardW, paddingTop: 64, paddingBottom: 14, perspective: 900, perspectiveOrigin: "50% 50%" }}
-                        onPointerMove={onBoardMove}
-                        onPointerLeave={resetTilt}
                         role="img"
                         aria-label={boardLabel}
                       >
@@ -453,14 +452,20 @@ export default function SiteStats() {
                                   aria-hidden
                                   title={dayTitle(day)}
                                   className="absolute cursor-default"
-                                  style={{ left: weekIndex * STEP, top: dayIndex * STEP, width: CELL, height: CELL, transformStyle: "preserve-3d", opacity: 0.82 }}
+                                  // opaque: a translucent bar beside a lit, solid scene was the
+                                  // single loudest "vector chart" cue on the card
+                                  style={{ left: weekIndex * STEP, top: dayIndex * STEP, width: CELL, height: CELL, transformStyle: "preserve-3d" }}
                                   initial={{ z: -26 }}
                                   whileInView={{ z: 0 }}
                                   viewport={{ once: true }}
-                                  // one beat per week column: the same left → right sweep the pile pours in
+                                  // one 100 ms beat per week column, oldest first — the same left → right
+                                  // order the jacks' pull targets keep beside it
                                   transition={{ delay: 0.1 * weekIndex, type: "spring", stiffness: 260, damping: 22 }}
                                   whileHover={{ z: 18, scale: 1.08 }}
                                 >
+                                  {/* the bar's shadow on the board, thrown down-left away from the
+                                      upper-right key — the same direction the jacks' creases fall */}
+                                  <div className="absolute inset-0 rounded-[2px]" style={{ boxShadow: `-3px 4px 6px rgba(0,0,0,${resolvedTheme === "light" ? 0.18 : 0.35})` }} />
                                   <div className="absolute inset-0 rounded-[2px]" style={{ background: lvl.top, transform: `translateZ(${lvl.h}px)` }} />
                                   {/* front face — turned away from the key light */}
                                   <div className="absolute left-0 bottom-0" style={{ width: CELL, height: lvl.h, background: lvl.shade, transformOrigin: "bottom", transform: "rotateX(-90deg)" }} />
@@ -496,28 +501,39 @@ export default function SiteStats() {
                     <span>More</span>
                   </div>
 
-                  {/* The tray: one block per commit the grid dates, poured once the data is in.
-                      pointer-events-auto because it sits inside the pointer-events-none content
-                      div — without it the cursor field is dead. Decorative to a reader: the
-                      board's label already states the count. */}
-                  {showTray && (
+                  {/* The scene: one connector jack per week, floating in the panel. The panel colour
+                      is painted here before the canvas mounts so the column never flashes the card;
+                      the rounded clip is what crops the overflowing pack. pointer-events-auto
+                      because it sits inside the pointer-events-none content div — without it the
+                      cursor is dead. Decorative to a reader: the board's label already states the
+                      count, so the column is aria-hidden and gets no second role="img". */}
+                  {showScene && (
                     <div
-                      ref={attachTray}
+                      ref={attachScene}
                       aria-hidden
                       className="relative col-start-2 row-start-1 row-span-3 overflow-hidden rounded-xl pointer-events-auto"
+                      style={{ background: PANEL }}
                     >
                       {bgBorn && (
-                        <FloatingBackground
-                          pieces={pieces}
+                        <ConnectorField
+                          jacks={jacks}
                           accent={accentHex}
-                          card={cardHex}
-                          light={resolvedTheme === "light"}
                           active={bgVisible}
-                          pour={trayInView}
+                          inView={sceneInView}
+                          rig={rig}
                         />
                       )}
-                      <span className="absolute left-3 right-3 top-2 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--legend)] pointer-events-none select-none">
-                        {trayLegend}
+                      {/* The legend's ground. The pack overflows the frame and passes under the
+                          legend, and #a1a1aa on a white jack is 1.3:1 — the encoding statement
+                          lost its words wherever one crossed. A 36 px fade from the panel colour
+                          keeps it on the surface PANEL_LEGEND was chosen for: opaque to 60% (21.6
+                          px) because the 10 px glyphs sit at y ≈ 11–20, and a 30% stop measured
+                          2.3:1 at the baseline row over a white jack (7.1:1 on the panel).
+                          pointer-events-none so the ray beneath stays live; PR B's ribbon
+                          composites under it. */}
+                      <div className="absolute inset-x-0 top-0 pointer-events-none" style={{ height: 36, background: `linear-gradient(to bottom, ${PANEL} 0%, ${PANEL} 60%, transparent 100%)` }} />
+                      <span className="absolute left-3 right-3 top-2 font-mono text-[10px] uppercase tracking-[0.16em] pointer-events-none select-none" style={{ color: PANEL_LEGEND }}>
+                        {sceneLegend}
                       </span>
                     </div>
                   )}
