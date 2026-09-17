@@ -212,7 +212,9 @@ interface Debug {
    * undrifted homes on the next step), true resumes. Subtracting `packDrift` from a pack's mean does
    * not recover the number: a jam absorbs ≈ 70% of the sway, so a pack follows its drifting targets
    * with 0.1–0.3 u of residual per 2 s (node and browser alike); with the drift paused the same
-   * window reads 0.02–0.03 u. A debug-session lever, like setGlass.
+   * window reads 0.037–0.090 u in the browser, 0.039–0.093 in node — a pack's mean has a chaotic
+   * floor of that order at E = 1 with no drift at all (the critics' 0.02–0.03 was the origin
+   * swirl's number). A debug-session lever, like setGlass.
    */
   setDrift(on: boolean): void;
 }

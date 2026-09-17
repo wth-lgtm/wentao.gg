@@ -148,9 +148,10 @@ export function packCasting(packs: readonly Pack[], seed: number): Slot[] {
 
 /**
  * The swirl's pivots: the centroid of each pack's SOLVED targets (fieldLayout.solveTargets —
- * post-push), not the nominal C. The h1's band shifts a pack 0.45–1.1 u off C, and a swirl
- * about C would turn about a point outside the pack. Re-run on every relayout (the scene's
- * `repivot`).
+ * post-push), not the nominal C. The h1's band shifts the lower pack off C — measured 0.32 u
+ * (1440 × 900; the upper seven 0.03), 0.16 (1024 × 768), 0.47 (1440 × 700), 0.44 (1366 × 768);
+ * the brief guessed 0.45–1.1 — and a swirl about C would turn about a point outside the pack's
+ * centre. Re-run on every relayout (the scene's `repivot`).
  */
 export function packCentroids(targets: readonly Vec3[], packs: readonly Pack[]): Vec3[] {
   const out: Vec3[] = [];

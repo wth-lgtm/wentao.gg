@@ -145,7 +145,7 @@ function boxClearance(x: number, y: number, r: number, k: KeepOut): { d: number;
 export interface Solved {
   /** one per body, in body order — every raw target is kept */
   targets: Vec3[];
-  /** the targets whose disc the view clamp left more than 0.25 D inside a band: the band holds that jack off its home while the box is on screen (measured once, at 1440 × 700 for NARROW, 0.57 u deep) */
+  /** the targets whose disc the view clamp left more than 0.25 D inside a band: the band holds that jack off its home while the box is on screen (empty at all four fixtures — 1440 × 900, 1024 × 768, 1440 × 700, 1366 × 768 — with the deepest intrusion 0.000 u; the brief's 0.57 u at 1440 × 700 did not occur) */
   inBand: number[];
 }
 
@@ -154,7 +154,8 @@ export interface Solved {
  * they are solved (mount, resize): each target's disc is pushed out of every `avoid` box's band
  * to exactly KEEP_BAND — where the band's force is zero, so a jack rests ON its target — along
  * the nearest face, or along the perpendicular face when the nearest one would put the disc
- * outside the view (it fires once, at 1440 × 700); four passes because a push out of one box
+ * outside the view (never at the four fixtures or QUADS: every pushed target kept its x, 0
+ * perpendicular pushes measured); four passes because a push out of one box
  * can land in another's band; then the disc is clamped inside the view. The nearest-face push
  * keeps x and sets y to the band edge, so the lower pack's upper targets form a LINE along the
  * h1's band (spiral x kept) — the pack hugs the name from below. Nothing is culled: a target

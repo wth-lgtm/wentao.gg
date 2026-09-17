@@ -131,16 +131,23 @@ async function settle(page) {
 // environment bake compiles (PMREMGenerator.fromScene: the rig plane's material and the blur pass). The pre-pass
 // added none; a fourth program here would mean the two passes diverged.
 const PROGRAMS = 3;
-// THE PACKS' BOUNDS (the brief's, measured in node against this worktree). Gathered: mean |pos − target| per pack ≤ 0.45·√n
-// (1.19 seven / 1.42 ten / 1.68 fourteen — measured settled 0.83 / 0.89 / 1.17; a lattice rested at < 0.15, the packs sit under
-// compression) and every member within 4 u of its pack's solved centroid (measured farthest 2.2–2.9). Alive: mean |vel| over the
-// bodies ≥ 0.08 u/s over 2 s at E 1 — the card measures 0.113, the lattice's sixteen 0.002, a seven on a 0.9 u disc ungained 0.025
-// (the OLD number). Tight at E 1: ≤ 1.2 (seven) / 1.45 (ten) / 1.7 (fourteen) — the origin-swirl code read 1.34 on the h1-side
-// seven, the shear widened it. Stay: the swirl about the pivot moves a pack's mean ≤ 0.1 u per 2 s (the origin swirl: 0.14).
-const GATHER = (n) => 0.45 * Math.sqrt(n);
+// THE PACKS' BOUNDS (the brief's, measured in node against this worktree; the packs review's fixes, 2026-09-17). Gathered: mean
+// |pos − target| per pack ≤ 0.45·√n·(1 + 0.1·(gain − 1)) — 1.68 for the fourteen (gain 1; measured 1.14–1.30), 1.43 for the ×3
+// seven (the gained pack jams LOOSER: an E-frozen seven read 1.17–1.29, a re-jam after the scroll excursion 1.28, a click at a
+// tight pre-click phase 1.226 — all over the flat 1.19), 1.42 for the ten at gain 1.9 → 1.55; a lattice rested at < 0.15, the
+// packs sit under compression — and every member within 4 u of its pack's solved centroid (measured farthest 2.2–2.9). Alive:
+// mean |vel| over the bodies ≥ 0.08 u/s over 2 s at E 1 — the card measures 0.113, the lattice's sixteen 0.002, a seven on a 0.9 u
+// disc ungained 0.025 (the OLD number); node 0.095–0.231 across eight phases. Tight at E 1: ≤ 1.2 (seven) / 1.45 (ten) / 1.7
+// (fourteen) in the wake window and ≤ 1.25× that in the steady window — THIS is the pivot's guard: with the pivots deleted (the
+// origin swirl, gains kept) the seven reads 1.78–1.90 at wake and 2.37–2.47 steady, its farthest member 5.5 u from the centroid
+// (shipped 0.75–0.99 / 0.83–0.99 / ≤ 2.5). The origin swirl does not DRAG a pinned, pulled pack, it WIDENS it. Stay is therefore a
+// WANDER sanity bound on the drift-PAUSED window: a pack's mean has a chaotic floor of 0.04–0.09 u per 2 s at E 1 with no drift at
+// all (node and browser, any gain; the origin swirl reads 0.008–0.096 there too, so no form of Stay discriminates), flat 0.15.
+const GATHER = (n, gain = 1) => 0.45 * Math.sqrt(n) * (1 + 0.1 * (gain - 1));
 const TIGHT = (n) => (n <= 7 ? 1.2 : n <= 10 ? 1.45 : 1.7);
+const TIGHT_STEADY = 1.25;
 const ALIVE_MIN = 0.08;
-const STAY_MAX = 0.1;
+const STAY_MAX = 0.15;
 // the casting table per pack size (fieldPacks.packCasting): families and glossies
 const CAST_TABLE = { 14: { white: 6, accent: 4, black: 4, glossy: { white: 1, accent: 1, black: 1 } }, 7: { white: 3, accent: 2, black: 2, glossy: { white: 1, accent: 0, black: 1 } }, 10: { white: 4, accent: 3, black: 3, glossy: { white: 1, accent: 0, black: 1 } } };
 
@@ -247,7 +254,7 @@ async function run(width, height, theme, opts = {}) {
   // PACKS GATHER (settled, E 0, idle): see the bounds above; the packs' z span is logged — a jammed pack is a column toward the camera
   const gather = {
     spreadByPack: rest.spreadByPack.map((v) => +v.toFixed(3)),
-    bounds: rest.packs.map((p) => +GATHER(p.n).toFixed(3)),
+    bounds: rest.packs.map((p) => +GATHER(p.n, p.swirlGain).toFixed(3)),
     farthest: rest.packs.map((p, pi) => +Math.max(...rest.bodies.filter((_, j) => rest.packOf[j] === pi).map((b) => Math.hypot(b.x - p.x, b.y - p.y, b.z - p.z))).toFixed(3)),
     zSpan: rest.packs.map((_, pi) => { const zs = rest.bodies.filter((_, j) => rest.packOf[j] === pi).map((b) => b.z); return +(Math.max(...zs) - Math.min(...zs)).toFixed(2); }),
   };
@@ -265,17 +272,22 @@ async function run(width, height, theme, opts = {}) {
   // IDLE CADENCE (see WAKE DETECTION): with idle and E 0, an idle 2 s window holds at least one frame (the timer
   // ticked at all), no more than 2·idleHz + 6 (the timer's ceiling), and NO busy frame; when the machine outruns the
   // timer it also holds ≤ 0.8 of the full-rate reference's frames (ratioChecked). And the drift itself: the homes
-  // stand still while the bodies sway — over the same 2 s some body moved, none by more than the reach. Without the
+  // stand still while the bodies sway — the sway is measured against the SIM time the window covered, not the wall's
+  // 2 s (clampDelta caps a frame at 1/30 s, so 6 frames in 2 s of wall is 0.2 s of sim): the largest body move must
+  // exceed 0.006 · simΔ — ≥ 2.8× under the measured floor at any frame rate (node, idle, six phases: 0.0050–0.0074 u
+  // over 6 × 1/30 s, 0.0031–0.0050 over 4, 0.035–0.063 over a full 2 s of sim; the floor per sim second is ≥ 0.017 u/s)
+  // and 0.012 over a full 2 s of sim, the old "> 0.01 in 2 s" in spirit — and none by more than the reach. Without the
   // drift (AMP = AMP_Z = 0) the old rules apply and are verified here too: frozen, zero frames, nothing moves.
   const f1 = rest.frames; await sleep(2000);
-  const f2 = await page.evaluate(() => { const j = window.__field; return { frames: j.frames, idle: j.idle, frozen: j.frozen, busy: j.busyFrames, E: j.E, bodies: j.bodies(), homes: j.homes }; });
+  const f2 = await page.evaluate(() => { const j = window.__field; return { simTime: j.simTime, frames: j.frames, idle: j.idle, frozen: j.frozen, busy: j.busyFrames, E: j.E, bodies: j.bodies(), homes: j.homes }; });
   out.framesOver2s = f2.frames - f1;
+  const simDelta = f2.simTime - rest.simTime;
   const drifted = f2.bodies.map((b, i) => Math.hypot(b.x - rest.bodies[i].x, b.y - rest.bodies[i].y, b.z - rest.bodies[i].z));
   out.idleCadence = { drifting: rest.drifting, idle: rest.idle && f2.idle, frozen: rest.frozen && f2.frozen, E: f2.E, idleHz: rest.idleHz, framesOver2s: out.framesOver2s, ceiling: 2 * rest.idleHz + 6, busyFrames: f2.busy - rest.busy, measuredHz: +(out.framesOver2s / 2).toFixed(1), fullRate2s, ratioToFull: +(out.framesOver2s / Math.max(1, fullRate2s)).toFixed(2), ratioChecked: outruns };
-  out.drift = { ...out.drift, homesStill: JSON.stringify(f2.homes) === JSON.stringify(rest.homes), bodiesMoved: drifted.filter((d) => d > 0.01).length, maxBodyDelta2s: +Math.max(...drifted).toFixed(3), meanBodyDelta2s: +(drifted.reduce((a, b) => a + b, 0) / drifted.length).toFixed(3) };
+  out.drift = { ...out.drift, homesStill: JSON.stringify(f2.homes) === JSON.stringify(rest.homes), simDelta2s: +simDelta.toFixed(3), floor: +(0.006 * simDelta).toFixed(4), bodiesMoved: drifted.filter((d) => d > 0.01).length, maxBodyDelta2s: +Math.max(...drifted).toFixed(4), meanBodyDelta2s: +(drifted.reduce((a, b) => a + b, 0) / drifted.length).toFixed(4) };
   if (rest.drifting) {
     out.asserts.idleCadence = rest.idle && f2.idle && f2.E === 0 && out.framesOver2s >= 1 && out.framesOver2s <= 2 * rest.idleHz + 6 && out.idleCadence.busyFrames === 0 && (!outruns || out.framesOver2s <= 0.8 * fullRate2s);
-    out.asserts.driftSways = out.drift.homesStill && out.drift.bodiesMoved >= 1 && out.drift.maxBodyDelta2s < reach;
+    out.asserts.driftSways = out.drift.homesStill && simDelta > 0 && out.drift.maxBodyDelta2s > 0.006 * simDelta && out.drift.maxBodyDelta2s < reach;
   } else {
     out.asserts.idleCadence = rest.frozen && f2.frozen && f2.E === 0 && out.framesOver2s === 0;
     out.asserts.driftSways = out.drift.homesStill && out.drift.maxBodyDelta2s < 1e-3;
@@ -284,19 +296,19 @@ async function run(width, height, theme, opts = {}) {
   // for PARKED_S of sim time, and step() never advances E), then 2 s of sim at E 1: mean |vel| over the bodies ≥ ALIVE_MIN. The
   // window holds the wake's release transient (the jam lets go when the settle friction lifts) and the drift — the shipped
   // behaviour, what a visitor's first move gets; node predicted 0.084 from the dynamics alone and 0.12 with the drift for the WIDE
-  // layout (measured 0.13–0.16). PACKS TIGHT over the same window: mean |pos − target| per pack ≤ TIGHT(n). PACKS STAY — the
-  // swirl about the pivot must not DRAG a pack: the origin swirl moved the h1-side seven 0.14 u per 2 s, pivots ≤ 0.04, both
-  // measured by the critics at gain 1 and WITHOUT the per-pack common-mode drift the brief then added, which moves a pack's mean
-  // 0.1–0.2 u per 2 s by design. Controller's rulings (2026-09-17): DRIFT-AWARE — |Δ(mean(pos) − packDrift)| per pack, with
-  // `__field.packDrift` each pack's common-mode offset at the world's clock; the STEADY window only (E has been 1 for ≥ 2 s — the
-  // wake window measures the E-ramp transient, 0.23–0.30 u of the pack TIGHTENING as the jam lets go, not the swirl dragging it);
-  // bounded at STAY_MAX · swirlGain, because the critics' 0.1 was measured at gain 1 and the shear scales with the gain — 0.1 for
-  // the fourteen (measured 0.083 / 0.093), 0.3 for the ×3 seven (0.199 / 0.195), 0.19 for the ×1.9 ten (0.081). What is left in
-  // the net is the pack's tracking of its drifting targets: a jam absorbs ≈ 70% of the sway and follows the common-mode term with
-  // lag, so the subtraction leaves a residual of that order (node: 0.11–0.28 with either the common-mode term or the pack's full
-  // mean target offset subtracted). The cross-check is LOGGED: the drift PAUSED (`setDrift(false)`, targets = the homes), 2 s to
-  // take up the paused targets (`pause`), then 2 s with the swirl the only thing moving the packs (`swirlOnly.packMove` — measured
-  // 0.02–0.03 u for both WIDE packs, the critics' number). The wake window's raw and net moves are logged too.
+  // layout (measured 0.13–0.16). PACKS TIGHT — THE PIVOT'S GUARD (the packs review, 2026-09-17): mean |pos − target| per pack
+  // ≤ TIGHT(n) over the wake window AND ≤ TIGHT_STEADY · TIGHT(n) over the steady window (E has been 1 for ≥ 2 s). The origin
+  // swirl does not drag a pinned, pulled pack, it WIDENS it — exactly the brief's 1.34: with the pivots deleted (gains kept) the
+  // h1-side seven reads 1.78–1.90 at wake and 2.37–2.47 steady, its farthest member 5.5 u out (shipped 0.75–0.99 / 0.83–0.99 /
+  // ≤ 2.5); the fourteen's centroid sits where the origin swirl is a fifth strength and is unaffected either way. PACKS STAY is a
+  // WANDER sanity bound, not the pivot's guard: the drift-aware net move on the steady window (the earlier ruling) read over 0.1
+  // in 7 of 8 node phases on the fourteen — the residual is the jam tracking its drifting targets (a jam absorbs ≈ 70% of the
+  // sway and follows the common-mode term with lag, node 0.11–0.28), not the swirl — and no form of Stay tells the swirls apart
+  // (the origin swirl's drift-paused move is 0.008–0.096 too). So: the drift PAUSED (`setDrift(false)`, targets = the homes), 2 s
+  // to take up the paused targets (`pause`), then 2 s with the swirl the only thing moving the packs (`swirlOnly.packMove` —
+  // node 0.039–0.093 fourteen / 0.019–0.063 seven, browser 0.037–0.090; a 4 s pause once read 0.108: a pack's mean has a chaotic
+  // floor of ≈ 0.04–0.1 u per 2 s at E 1 with no drift at all) ≤ STAY_MAX, flat — scaling by the gain bought nothing. The wake and
+  // steady windows' raw and drift-aware net moves (`__field.packDrift`, each pack's common-mode offset) are logged, not asserted.
   await page.mouse.move(width - 40, height - 40);
   await page.waitForFunction(() => window.__field.E === 1, null, { timeout: 15000, polling: 50 });
   const alive = await page.evaluate(() => {
@@ -318,11 +330,11 @@ async function run(width, height, theme, opts = {}) {
     return { E: [E0, j.E], n: j.packs.map((p) => p.n), gain: j.packs.map((p) => p.swirlGain), wake, steady, pause, swirlOnly };
   });
   const r4 = (o) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, Array.isArray(v) ? v.map((x) => +x.toFixed(3)) : +v.toFixed(4)]));
-  const stayBounds = alive.gain.map((g) => +(STAY_MAX * g).toFixed(3));
-  out.alive = { E: alive.E, n: alive.n, gain: alive.gain, wake: r4(alive.wake), steady: r4(alive.steady), pause: r4(alive.pause), swirlOnly: r4(alive.swirlOnly), bounds: { alive: ALIVE_MIN, tight: alive.n.map(TIGHT), stay: stayBounds } };
+  out.alive = { E: alive.E, n: alive.n, gain: alive.gain, wake: r4(alive.wake), steady: r4(alive.steady), pause: r4(alive.pause), swirlOnly: r4(alive.swirlOnly), bounds: { alive: ALIVE_MIN, tight: alive.n.map(TIGHT), tightSteady: alive.n.map((n) => +(TIGHT_STEADY * TIGHT(n)).toFixed(3)), stay: STAY_MAX } };
   out.asserts.packsAlive = alive.E[0] === 1 && alive.E[1] === 1 && alive.wake.meanSpeed >= ALIVE_MIN;
-  out.asserts.packsTight = alive.wake.tightMean.every((v, pi) => v <= TIGHT(alive.n[pi]));
-  out.asserts.packsStay = alive.steady.packMoveNet.every((m, pi) => m <= STAY_MAX * alive.gain[pi]);
+  // packsTight IS the pivot guard: the origin swirl reads 1.8–1.9 on the seven at wake and 2.4 steady vs shipped ≤ 0.99
+  out.asserts.packsTight = alive.wake.tightMean.every((v, pi) => v <= TIGHT(alive.n[pi])) && alive.steady.tightMean.every((v, pi) => v <= TIGHT_STEADY * TIGHT(alive.n[pi]));
+  out.asserts.packsStay = alive.swirlOnly.packMove.every((m) => m <= STAY_MAX);
   await page.mouse.move(width - 3, height - 3);
   await page.evaluate(() => { const j = window.__field; for (let i = 0; i < 60 * 9; i++) j.step(1 / 60); });
   await waitRest(page, 120000).catch(() => out.notes.push("did not come to rest after the alive windows"));
@@ -475,29 +487,34 @@ async function run(width, height, theme, opts = {}) {
   await page.mouse.move(width - 40, height - 40); await sleep(200); await page.mouse.move(width - 60, height - 50);
   await page.evaluate(() => { const j = window.__field; for (let i = 0; i < 60 * 9; i++) j.step(1 / 60); });
   await waitRest(page, 120000).catch(() => out.notes.push("did not come to rest after returning to the top"));
-  const home = await page.evaluate(() => ({ clearance: window.__field.clearance, spread: window.__field.spread, spreadByPack: window.__field.spreadByPack, n: window.__field.packs.map((p) => p.n) }));
-  out.backHome = { clearance: +home.clearance.toFixed(3), spread: +home.spread.toFixed(3), spreadByPack: home.spreadByPack.map((v) => +v.toFixed(3)) };
-  // back home = gathered again (the packs' bound; the lattice's "spread < 0.5" was a rest ON the homes, a pack rests under compression) and clear of the name
-  out.asserts.backHomeClear = home.clearance >= 0 && home.spreadByPack.every((v, pi) => v <= GATHER(home.n[pi]));
+  const home = await page.evaluate(() => ({ clearance: window.__field.clearance, spread: window.__field.spread, spreadByPack: window.__field.spreadByPack, n: window.__field.packs.map((p) => p.n), gain: window.__field.packs.map((p) => p.swirlGain) }));
+  out.backHome = { clearance: +home.clearance.toFixed(3), spread: +home.spread.toFixed(3), spreadByPack: home.spreadByPack.map((v) => +v.toFixed(3)), bounds: home.n.map((n, pi) => +GATHER(n, home.gain[pi]).toFixed(3)) };
+  // back home = gathered again (the packs' gain-aware bound; the lattice's "spread < 0.5" was a rest ON the homes, a pack rests under
+  // compression, and the gained seven re-jammed at 1.28 once after this excursion) and clear of the name
+  out.asserts.backHomeClear = home.clearance >= 0 && home.spreadByPack.every((v, pi) => v <= GATHER(home.n[pi], home.gain[pi]));
   // CLICK: Lusion's burst from a click on empty hero space (the fluid canvas takes the click; the field's window listener hears
-  // it), then 6 s after the click every pack has REGATHERED — spread ≤ max(its gather bound 0.45·√n, 1.15 × its own pre-click
-  // steady spread) (controller's ruling: the gained seven re-jamming at 1.21 against a 1.19 absolute bound is a regather, not a
-  // failure; both numbers recorded) — and no body is nearer another pack's centroid than its own. The 6 s run under the PAGE'S
-  // OWN ENVELOPE: the click is a pointer move, so E holds 1 for PARKED_S of sim time and closes over DECAY_S — the harness lets
-  // the real frame loop do that (E read from the hook; ≈ 5 s of sim, ≈ 30 s of wall under software GL) and steps the remainder,
-  // because step() cannot advance E and a window frozen at E 1 leaves the gained seven loose (1.21–1.29 at 6 s, measured — the
-  // settle friction that jams a pack is the E → 0 part). Node under this envelope: 1.05 / 0.91 at 1440 × 900, 0.98 / 0.84 / 0.94
-  // quads, 0.91 at 1024 × 768; none astray.
+  // it), then 6 s after the click every pack has REGATHERED — spread ≤ max(its gain-aware gather bound GATHER(n, gain), 1.15 × its
+  // own pre-click steady spread) (controller's ruling: the gained seven re-jamming at 1.21 against a 1.19 absolute bound is a
+  // regather, not a failure; the packs review: at a tight pre-click phase 1.15× is BELOW the flat bound and the seven re-jammed at
+  // 1.226 — 1 of 4 node phases — so the gain-scaled 1.43 covers it with ≥ 0.15 u to spare; both numbers recorded) — and no body
+  // is nearer another pack's centroid than its own. The 6 s run under the PAGE'S OWN ENVELOPE: the click is a pointer move, so E
+  // holds 1 for PARKED_S of sim time and closes over DECAY_S — the harness lets the real frame loop do that (E read from the
+  // hook; ≈ 5 s of sim, ≈ 30 s of wall under software GL) and steps the remainder, because step() cannot advance E and a window
+  // frozen at E 1 leaves the gained seven loose (1.21–1.29 at 6 s, measured — the settle friction that jams a pack is the E → 0
+  // part). The envelope is waited OPEN then CLOSED: a wait for E 0 alone could resolve before E ever opened (the light run once
+  // read "E was already 0 at the burst — no frame had run") and a frame then opened it before the 6 s evaluate. Node under this
+  // envelope: 1.05 / 0.91 at 1440 × 900, 0.98 / 0.84 / 0.94 quads, 0.91 at 1024 × 768; none astray.
   const clickAt = [width * 0.75, height * 0.85];
   const preClick = await page.evaluate(() => window.__field.spreadByPack);
   const clickT0 = await page.evaluate(() => window.__field.simTime);
   await page.mouse.click(clickAt[0], clickAt[1]);
   await sleep(150);
   const burst = await page.evaluate(() => ({ v: Math.max(...window.__field.bodies().map((b) => b.v)), E: window.__field.E }));
+  await page.waitForFunction(() => window.__field.E === 1, null, { timeout: 15000, polling: 50 }).catch(() => out.notes.push("E did not open after the click"));
   await page.waitForFunction(() => window.__field.E === 0, null, { timeout: 180000, polling: 250 }).catch(() => out.notes.push("E did not close within 180 s after the click"));
-  const regather = await page.evaluate((t0) => { const j = window.__field; const eClosedAt = j.simTime - t0; while (j.simTime < t0 + 6) j.step(1 / 60); const ps = j.packs, bs = j.bodies(); let astray = 0; bs.forEach((b, k) => { const own = j.packOf[k]; const mine = Math.hypot(b.x - ps[own].x, b.y - ps[own].y); if (ps.some((p, pi) => pi !== own && Math.hypot(b.x - p.x, b.y - p.y) < mine)) astray++; }); return { spreadByPack: j.spreadByPack, n: ps.map((p) => p.n), astray, atS: j.simTime - t0, eClosedAt, E: j.E }; }, clickT0);
-  const clickBounds = regather.n.map((n, pi) => Math.max(GATHER(n), 1.15 * preClick[pi]));
-  out.click = { at: clickAt.map((v) => +v.toFixed(0)), peakSpeed: +burst.v.toFixed(2), eAtBurst: burst.E, eClosedAtS: +regather.eClosedAt.toFixed(2), measuredAtS: +regather.atS.toFixed(2), E: regather.E, preClickSpread: preClick.map((v) => +v.toFixed(3)), spreadByPack: regather.spreadByPack.map((v) => +v.toFixed(3)), gatherBounds: regather.n.map((n) => +GATHER(n).toFixed(3)), bounds: clickBounds.map((v) => +v.toFixed(3)), astray: regather.astray };
+  const regather = await page.evaluate((t0) => { const j = window.__field; const eClosedAt = j.simTime - t0; while (j.simTime < t0 + 6) j.step(1 / 60); const ps = j.packs, bs = j.bodies(); let astray = 0; bs.forEach((b, k) => { const own = j.packOf[k]; const mine = Math.hypot(b.x - ps[own].x, b.y - ps[own].y); if (ps.some((p, pi) => pi !== own && Math.hypot(b.x - p.x, b.y - p.y) < mine)) astray++; }); return { spreadByPack: j.spreadByPack, n: ps.map((p) => p.n), gain: ps.map((p) => p.swirlGain), astray, atS: j.simTime - t0, eClosedAt, E: j.E }; }, clickT0);
+  const clickBounds = regather.n.map((n, pi) => Math.max(GATHER(n, regather.gain[pi]), 1.15 * preClick[pi]));
+  out.click = { at: clickAt.map((v) => +v.toFixed(0)), peakSpeed: +burst.v.toFixed(2), eAtBurst: burst.E, eClosedAtS: +regather.eClosedAt.toFixed(2), measuredAtS: +regather.atS.toFixed(2), E: regather.E, preClickSpread: preClick.map((v) => +v.toFixed(3)), spreadByPack: regather.spreadByPack.map((v) => +v.toFixed(3)), gatherBounds: regather.n.map((n, pi) => +GATHER(n, regather.gain[pi]).toFixed(3)), bounds: clickBounds.map((v) => +v.toFixed(3)), astray: regather.astray };
   out.asserts.clickRegathers = burst.v > 3 && regather.spreadByPack.every((v, pi) => v <= clickBounds[pi]) && regather.astray === 0;
   await page.mouse.move(width - 3, height - 3);
   await page.evaluate(() => { const j = window.__field; for (let i = 0; i < 60 * 9; i++) j.step(1 / 60); });
