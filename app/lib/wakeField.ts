@@ -17,9 +17,21 @@ export const WAKE = {
   /** the blurred copy the advection reads, 1/LOW_DIV (Lusion: width >> 3) */
   LOW_DIV: 8,
   /**
-   * Brush radius = fit(speed, 0..SPEED_FULL px per 60 Hz frame → 0..RADIUS_FULL px), then scaled
-   * by canvasH into field texels (Lusion: radiusDistanceRange 100, minRadius 0, maxRadius 100,
-   * ÷ viewportHeight × texture height). A slow move is a hairline, a flick a 100 px brush.
+   * Lusion's lengths — brush radius, push, smear step, blur radius — are texel counts of a field
+   * that was 225 texels tall (a 1440×900 viewport ≫ 2). This column's field is 68 texels tall,
+   * and the same counts on it are a different picture: a 100 px brush paints 73% of a 273 px
+   * column in one stroke (measured — the flick frame is a full-column smear, not a ribbon) and
+   * the advection crosses the field in three frames. Every length below scales by
+   * fieldH / (REF_H / FIELD_DIV), which is 1 on the reference's own viewport.
+   */
+  REF_H: 900,
+  /**
+   * Brush radius = fit(speed, 0..SPEED_FULL px per frame → 0..RADIUS_FULL px) as a fraction of
+   * REF_H, in field texels (Lusion: radiusDistanceRange 100, minRadius 0, maxRadius 100,
+   * ÷ viewportHeight × texture height). Speed is the pointer rig's px per move event — exact
+   * for a rAF-aligned pointer at 60 Hz, half on a 120 Hz display (the reference's own per-frame
+   * measure has the same property). A 100 px/frame flick is a 30 px brush on the 273 px column;
+   * a 200 px/s move (3.3 px/frame) is a quarter texel and paints nothing.
    */
   SPEED_FULL: 100,
   RADIUS_FULL: 100,
@@ -33,7 +45,7 @@ export const WAKE = {
   INJECT: 0.8,
   /** the injected velocity accumulates with this decay per 60 Hz frame (Lusion accelerationDissipation) */
   ACCEL_DECAY: 0.8,
-  /** advection: sample the previous field at uv + (0.5 − blurred.xy) × PUSH texels per 60 Hz frame (Lusion pushStrength) */
+  /** advection: sample the previous field at uv + (0.5 − blurred.xy) × PUSH × scale texels per 60 Hz frame (Lusion pushStrength) */
   PUSH: 25,
   /** dissipation per 60 Hz frame: velocity, long weight (the ribbon's life), short weight (the fresh-stroke mask) */
   DECAY_V: 0.985,
@@ -49,10 +61,14 @@ export const WAKE = {
    */
   FLOOR: 0.01,
   /**
-   * Composite: TAPS samples from a jittered start, stepping vel × AMOUNT/4 × MULT × one FIELD
-   * texel (Lusion: amount 20, multiplier 1.25, u_screenPaintTexelSize — the paint texture's
-   * texel, 4 CSS px, not the screen's; that is why a saturated stroke smears 25 px a tap, 200 px
-   * over the nine, and why the smear is the same in CSS px at every DPR).
+   * Composite: TAPS samples from a jittered start, stepping vel × AMOUNT/4 × MULT × scale × one
+   * FIELD texel (Lusion: amount 20, multiplier 1.25, u_screenPaintTexelSize — the paint
+   * texture's texel, 4 CSS px, not the screen's; a saturated stroke smears 25 px a tap on the
+   * reference, 7.6 px here, and the same in CSS px at every DPR). In LINEAR light: the fringe
+   * term is bounded by edge(w)·SHADE·w ≤ 0.018, invisible added to display values, while the
+   * reference's frames swing 20–40 levels across a fringe (lusion-raf-flick-03.png, sampled) —
+   * its renderer is NoToneMapping with linear targets, so 0.018 lands before the sRGB encode,
+   * where on the #141518 panel it is +23 levels.
    */
   TAPS: 9,
   AMOUNT: 20,
@@ -64,7 +80,7 @@ export const WAKE = {
   /** the fringe's reversed smoothstep: 0 at weight ≥ FRINGE_HI (the fresh core), rising toward FRINGE_LO */
   FRINGE_HI: 0.4,
   FRINGE_LO: -0.9,
-  /** the 1/8 copy's blur: nine taps at ±k × BLUR_RADIUS / width × 0.25 (Lusion blur.blur(8, 1, …)) */
+  /** the 1/8 copy's blur: nine taps at ±k × BLUR_RADIUS × scale / width × 0.25 (Lusion blur.blur(8, 1, …)) */
   BLUR_RADIUS: 8,
 } as const;
 
@@ -87,21 +103,15 @@ export function fit(x: number, a: number, b: number, c: number, d: number): numb
   return c + (d - c) * t;
 }
 
-/**
- * The brush speed in px per 60 Hz frame: the faster of the pointer rig's own reading (px per
- * move event — exact for a rAF-aligned pointer at 60 Hz) and the frame's travel normalised to
- * 60 Hz (right on a 120 Hz display or a 30 fps GPU, where events and frames disagree). A burst
- * of events inside one frame reads as its own speed, not the frame's average.
- */
-export function brushSpeed(eventSpeedPx: number, travelPx: number, dt: number): number {
-  return Math.max(eventSpeedPx, travelPx / Math.max(1e-6, 60 * dt));
+/** How the reference's texel lengths scale onto a field this tall: 1 on its own 225-texel field. */
+export function fieldScale(fieldH: number): number {
+  return fieldH / (WAKE.REF_H / WAKE.FIELD_DIV);
 }
 
-/** Brush radius in field texels for a speed in px per 60 Hz frame; 0 below half a texel. */
-export function brushRadiusTex(speedPx: number, canvasH: number, fieldH: number): number {
-  if (canvasH <= 0) return 0;
+/** Brush radius in field texels for a speed in px per frame; 0 below half a texel. */
+export function brushRadiusTex(speedPx: number, fieldH: number): number {
   const px = fit(speedPx, 0, WAKE.SPEED_FULL, 0, WAKE.RADIUS_FULL);
-  const tex = (px / canvasH) * fieldH;
+  const tex = (px / WAKE.REF_H) * fieldH;
   return tex < WAKE.RADIUS_MIN_TEX ? 0 : tex;
 }
 
@@ -142,12 +152,13 @@ export function lifetimeS(dt: number): number {
 /**
  * The composite's per-texel arithmetic, mirrored for the tests and the report: data is the
  * field texel (xy velocity about 0.5, z long weight, w short weight), texelPx one field texel
- * in CSS px. Returns the smear step per tap in CSS px and the fringe amplitude (before the sine).
+ * in CSS px, scale the field's fieldScale. Returns the smear step per tap in CSS px and the
+ * fringe amplitude in linear light (before the sine).
  */
-export function compositeAt(data: readonly [number, number, number, number], texelPx: number): { weight: number; vel: [number, number]; stepPx: number; fringe: number } {
+export function compositeAt(data: readonly [number, number, number, number], texelPx: number, scale = 1): { weight: number; vel: [number, number]; stepPx: number; fringe: number } {
   const weight = (data[2] + data[3]) * 0.5;
   const vel: [number, number] = [(0.5 - data[0]) * 2 * weight, (0.5 - data[1]) * 2 * weight];
-  const stepPx = Math.hypot(vel[0], vel[1]) * (WAKE.AMOUNT / 4) * WAKE.MULT * texelPx;
+  const stepPx = Math.hypot(vel[0], vel[1]) * (WAKE.AMOUNT / 4) * WAKE.MULT * texelPx * scale;
   // Lusion writes smoothstep(0.4, −0.9, w) — undefined by the spec for edge0 > edge1; this is the same curve spelled legally
   const t = Math.min(1, Math.max(0, (WAKE.FRINGE_HI - weight) / (WAKE.FRINGE_HI - WAKE.FRINGE_LO)));
   const fringe = (3 * t * t - 2 * t * t * t) * WAKE.SHADE * Math.max(Math.abs(vel[0]), Math.abs(vel[1]));

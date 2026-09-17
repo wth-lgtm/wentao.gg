@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { WAKE, awake, brushRadiusTex, brushSpeed, compositeAt, fieldSize, lifetimeS, paintOrDecay, perFrame, stepWeight } from "../app/lib/wakeField";
+import { WAKE, awake, brushRadiusTex, compositeAt, fieldScale, fieldSize, lifetimeS, paintOrDecay, perFrame, stepWeight } from "../app/lib/wakeField";
 
 // the GitHub card's column at 1440: 691 × 273 CSS px
 const CANVAS = { w: 691, h: 273 };
@@ -13,30 +13,28 @@ test("the field is a quarter of the canvas's CSS size and its blurred copy an ei
   assert.deepEqual(fieldSize(0, 0), { w: 1, h: 1, lowW: 1, lowH: 1 }, "a not-yet-measured canvas gets a 1×1 field, never a 0×0 target");
 });
 
-test("brush radius: 0..100 px per 60 Hz frame maps to 0..100 px, clamped, scaled by the canvas height into field texels", () => {
-  assert.equal(brushRadiusTex(0, CANVAS.h, FIELD.h), 0);
-  // 50 px/frame → 50 px → 50/273 of the canvas height → 12.45 texels of the 68-texel field
-  assert.ok(Math.abs(brushRadiusTex(50, CANVAS.h, FIELD.h) - (50 / 273) * 68) < 1e-9);
-  // 100 and 400 px/frame are the same full brush
-  assert.equal(brushRadiusTex(100, CANVAS.h, FIELD.h), brushRadiusTex(400, CANVAS.h, FIELD.h));
-  assert.ok(Math.abs(brushRadiusTex(100, CANVAS.h, FIELD.h) - (100 / 273) * 68) < 1e-9);
-  // a slow move is a hairline (200 px/s at 60 Hz = 3.3 px/frame → 0.83 texels), a crawl is nothing
-  assert.ok(brushRadiusTex(3.33, CANVAS.h, FIELD.h) > 0.8 && brushRadiusTex(3.33, CANVAS.h, FIELD.h) < 0.85);
-  assert.equal(brushRadiusTex(1, CANVAS.h, FIELD.h), 0, "a brush thinner than half a texel cannot be drawn and paints nothing");
-  // the same speed on the 519 px column paints the same fraction of the canvas height
-  assert.ok(Math.abs(brushRadiusTex(50, 273, fieldSize(519, 273).h) - brushRadiusTex(50, CANVAS.h, FIELD.h)) < 1e-9);
+test("the reference's texel lengths scale by the field's height: 1 on Lusion's own 1440×900, 0.30 on the 273 px column", () => {
+  assert.equal(fieldScale(fieldSize(1440, 900).h), 1);
+  assert.ok(Math.abs(fieldScale(FIELD.h) - 68 / 225) < 1e-12);
+  // the same column height at any width is the same scale
+  assert.equal(fieldScale(fieldSize(519, 273).h), fieldScale(FIELD.h));
 });
 
-test("brush speed is px per 60 Hz frame: the faster of the pointer's own event reading and the frame's travel normalised to 60 Hz", () => {
-  // a rAF-aligned pointer at 60 Hz: one event per frame, both readings agree
-  assert.equal(brushSpeed(40, 40, 1 / 60), 40);
-  // a 120 Hz display: half the travel per frame, so the frame reading is doubled back to the 60 Hz figure
-  assert.equal(brushSpeed(20, 20, 1 / 120), 40);
-  // a 30 fps GPU under a 60 Hz pointer: two events per frame, the frame's travel is halved
-  assert.equal(brushSpeed(40, 80, 1 / 30), 40);
-  // a burst of events inside one frame (a harness, or an uncoalesced mouse): the event reading wins
-  assert.equal(brushSpeed(158, 950, 1 / 30), 475);
-  assert.equal(brushSpeed(0, 0, 1 / 60), 0);
+test("brush radius: 0..100 px per frame maps to 0..100 px of a 900 px reference, clamped, as field texels — 30 px on this column", () => {
+  assert.equal(brushRadiusTex(0, FIELD.h), 0);
+  // 50 px/frame → 50/900 of the field's height → 3.78 texels (15 CSS px)
+  assert.ok(Math.abs(brushRadiusTex(50, FIELD.h) - (50 / 900) * 68) < 1e-9);
+  // 100 and 400 px/frame are the same full brush: 7.56 texels, 30 CSS px, 11% of the column
+  assert.equal(brushRadiusTex(100, FIELD.h), brushRadiusTex(400, FIELD.h));
+  assert.ok(Math.abs(brushRadiusTex(100, FIELD.h) - (100 / 900) * 68) < 1e-9);
+  // on the reference's own field the full brush is Lusion's 25 texels
+  assert.ok(Math.abs(brushRadiusTex(100, fieldSize(1440, 900).h) - 25) < 1e-9);
+  // a 200 px/s move at 60 Hz (3.3 px/frame) is a quarter texel: nothing is painted
+  assert.equal(brushRadiusTex(3.33, FIELD.h), 0);
+  // the brush appears at half a texel — 6.6 px/frame, 400 px/s — and is a hairline until a real flick
+  assert.equal(brushRadiusTex(6.5, FIELD.h), 0);
+  assert.ok(brushRadiusTex(6.7, FIELD.h) > 0.5);
+  assert.ok(brushRadiusTex(25, FIELD.h) < 2, "1500 px/s: under two texels");
 });
 
 test("per-frame rates are frame-rate independent: 0.985 per 60 Hz frame reaches 1/e at the same sim time for dt 1/30, 1/60, 1/120", () => {
@@ -101,19 +99,22 @@ test("awake: a painting frame or a live weight keeps the demand loop up; a still
 
 test("composite at zero weight is a pass-through: no smear step, no fringe (the shader's uniform branch, mirrored)", () => {
   const texelPx = CANVAS.w / FIELD.w; // 4.02 CSS px per field texel
-  const rest = compositeAt([0.5, 0.5, 0, 0], texelPx);
+  const scale = fieldScale(FIELD.h);
+  const rest = compositeAt([0.5, 0.5, 0, 0], texelPx, scale);
   assert.deepEqual([rest.weight, rest.vel, rest.stepPx, rest.fringe], [0, [0, 0], 0, 0]);
   // a stale velocity under a dead weight is also nothing — the weight multiplies everything
-  const stale = compositeAt([0.9, 0.1, 0, 0], texelPx);
+  const stale = compositeAt([0.9, 0.1, 0, 0], texelPx, scale);
   assert.deepEqual([stale.stepPx, stale.fringe], [0, 0]);
-  // a fresh saturated stroke: 25 CSS px per tap (Lusion: amount 20 / 4 × multiplier 1.25 × a 4 px paint texel)
-  const fresh = compositeAt([1, 0.5, 1, 1], texelPx);
-  assert.ok(Math.abs(fresh.stepPx - 25 * texelPx / 4) < 1e-9);
+  // a fresh saturated stroke: 25 CSS px per tap on the reference (amount 20 / 4 × 1.25 × a 4 px paint texel), 7.6 px here
+  const fresh = compositeAt([1, 0.5, 1, 1], texelPx, scale);
+  assert.ok(Math.abs(fresh.stepPx - 25 * (texelPx / 4) * scale) < 1e-9);
+  assert.ok(Math.abs(compositeAt([1, 0.5, 1, 1], 4, 1).stepPx - 25) < 1e-9, "Lusion's own: 25 px a tap");
   assert.equal(fresh.fringe, 0, "the fresh core (weight ≥ 0.4) has no rainbow; the fringe belongs to the aged edge");
   // the aged ribbon: weight 0.2 → the reversed smoothstep is up, the rainbow is on
-  const aged = compositeAt([0.7, 0.5, 0.4, 0], texelPx);
+  const aged = compositeAt([0.7, 0.5, 0.4, 0], texelPx, scale);
   assert.ok(aged.weight === 0.2 && aged.fringe > 0);
-  // a slow sweep's hairline (velocity 0.011 at full weight) smears about half a pixel per tap
-  const slow = compositeAt([0.511, 0.5, 1, 1], texelPx);
-  assert.ok(slow.stepPx > 0.4 && slow.stepPx < 0.7, `slow sweep smear ${slow.stepPx.toFixed(3)} px per tap`);
+  // the fringe is bounded by edge(w)·1.25·w: under 0.019 for every field value — visible only added in linear light
+  let peak = 0;
+  for (let w = 0; w <= 1; w += 0.001) peak = Math.max(peak, compositeAt([1, 1, w, w], texelPx, scale).fringe);
+  assert.ok(peak > 0.017 && peak < 0.019, `fringe peak ${peak.toFixed(4)}`);
 });

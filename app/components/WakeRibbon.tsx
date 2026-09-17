@@ -5,7 +5,7 @@ import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { clampDelta } from "../lib/jackDynamics";
 import type { PointerRig } from "../lib/pointerRig";
-import { WAKE, awake, brushRadiusTex, brushSpeed, fieldSize, paintOrDecay, perFrame, type FieldSize } from "../lib/wakeField";
+import { WAKE, awake, brushRadiusTex, fieldScale, fieldSize, paintOrDecay, perFrame, type FieldSize } from "../lib/wakeField";
 
 // The pointer's wake ribbon — Lusion's "fluid" (lusion.co's hero: ScreenPaint + the
 // ScreenPaintDistortion post pass, quoted from its bundle). A fast flick leaves a screen-space
@@ -23,10 +23,16 @@ import { WAKE, awake, brushRadiusTex, brushSpeed, fieldSize, paintOrDecay, perFr
 // stops R3F's own): the scene is drawn to the canvas exactly as before, the drawing buffer is
 // copied into a texture (one GPU blit; the MSAA resolve rides along), and a full-screen quad
 // writes it back smeared along the field's velocity (nine taps from a noise-jittered start)
-// with Lusion's sine fringes. Display-referred, like Lusion's own post pass, and the reason the
-// pass is a byte-exact no-op wherever the field is empty: the same 8-bit texel is read and
-// written. When the whole field is empty the copy and the quad are skipped altogether, so a
-// still pointer costs nothing and the resting frame is PR A's, pixel for pixel.
+// with Lusion's sine fringes. The taps are decoded to linear light and re-encoded on the way
+// out — Lusion's renderer is NoToneMapping over linear targets, and its fringe term (≤ 0.018)
+// is only visible added before the sRGB encode (wakeField.ts). Wherever the field is empty
+// the pass is a byte-exact no-op: the same 8-bit texel is read and written, no decode. When
+// the whole field is empty the copy and the quad are skipped altogether, so a still pointer
+// costs nothing and the resting frame is PR A's, pixel for pixel.
+//
+// Lengths are the reference's texel counts scaled by fieldScale (wakeField.ts): on this 273 px
+// column a 100 px brush painted 73% of the height in one stroke and read as a full-column
+// smear, not a ribbon (flick-0s.png in the report's first run).
 //
 // House rule: a resting scene costs nothing. The field is the one new reason for the demand
 // loop to stay awake, and it knows its own life without a readback — a CPU bound on the long
@@ -105,18 +111,20 @@ void main() { gl_FragColor = vec4(0.5, 0.5, 0.0, 0.0); }
 
 const f = (n: number) => n.toFixed(4);
 // Lusion's frag$1. weight is the MEAN of the long and short weights; the smear step is in
-// FIELD texels (4 CSS px), which is why it is the same size at every DPR; the fringe's
-// smoothstep(0.4, −0.9, w) is spelled as the legal reversed form of the same curve. The one
-// omission is Lusion's −0.001 velocity bias, an 8-bit texel's correction for a 0.5 that the
-// byte format cannot store; the half-float field stores it exactly, and with the bias a still
-// field would not be a pass-through. The zero-weight branch is what makes the pass-through
-// byte-exact (nine identical taps averaged would round back to the same byte, but a branch
-// says so). The jitter is a per-pixel hash with a per-frame offset, standing in for Lusion's
-// 128² blue-noise texture — it hides the nine-tap banding the same way and costs no asset.
+// FIELD texels (4 CSS px) × uScale, which is why it is the same size at every DPR; the
+// fringe's smoothstep(0.4, −0.9, w) is spelled as the legal reversed form of the same curve.
+// The taps are sRGB bytes (three's own EOTF/OETF, in every fragment prefix) decoded to linear,
+// averaged, fringed, clamped and re-encoded. The one omission is Lusion's −0.001 velocity bias,
+// an 8-bit texel's correction for a 0.5 that the byte format cannot store; the half-float field
+// stores it exactly, and with the bias a still field would not be a pass-through. The zero-
+// weight branch is what makes the pass-through byte-exact: a raw copy, no decode, no average.
+// The jitter is a per-pixel hash with a per-frame offset, standing in for Lusion's 128²
+// blue-noise texture — it hides the nine-tap banding the same way and costs no asset.
 const COMPOSITE_FRAG = /* glsl */ `
 uniform sampler2D tFrame;
 uniform sampler2D tField;
 uniform vec2 uFieldTexel;
+uniform float uScale;
 uniform vec2 uSeed;
 varying vec2 vUv;
 vec2 hash22(vec2 p) {
@@ -129,15 +137,15 @@ void main() {
   float weight = (data.z + data.w) * 0.5;
   if (weight <= 0.0) { gl_FragColor = texture2D(tFrame, vUv); return; }
   vec2 vel = (0.5 - data.xy) * 2.0 * weight;
-  vec2 stp = vel * (${f(WAKE.AMOUNT)} / 4.0) * uFieldTexel * ${f(WAKE.MULT)};
+  vec2 stp = vel * (${f(WAKE.AMOUNT)} / 4.0) * uFieldTexel * ${f(WAKE.MULT)} * uScale;
   vec2 uv = vUv + hash22(floor(gl_FragCoord.xy) + uSeed) * stp;
-  vec4 c = vec4(0.0);
-  for (int i = 0; i < ${WAKE.TAPS}; i++) { c += texture2D(tFrame, uv); uv += stp; }
+  vec3 c = vec3(0.0);
+  for (int i = 0; i < ${WAKE.TAPS}; i++) { c += sRGBTransferEOTF(texture2D(tFrame, uv)).rgb; uv += stp; }
   c /= ${f(WAKE.TAPS)};
   float t = clamp((${f(WAKE.FRINGE_HI)} - weight) / ${f(WAKE.FRINGE_HI - WAKE.FRINGE_LO)}, 0.0, 1.0);
   float edge = t * t * (3.0 - 2.0 * t);
-  c.rgb += sin(vec3(vel.x + vel.y) * ${f(WAKE.FRINGE_FREQ)} + vec3(0.0, 2.0, 4.0) * ${f(WAKE.RGB_SHIFT)}) * edge * ${f(WAKE.SHADE)} * max(abs(vel.x), abs(vel.y));
-  gl_FragColor = vec4(c.rgb, 1.0);
+  c += sin(vec3(vel.x + vel.y) * ${f(WAKE.FRINGE_FREQ)} + vec3(0.0, 2.0, 4.0) * ${f(WAKE.RGB_SHIFT)}) * edge * ${f(WAKE.SHADE)} * max(abs(vel.x), abs(vel.y));
+  gl_FragColor = sRGBTransferOETF(vec4(clamp(c, 0.0, 1.0), 1.0));
 }
 `;
 
@@ -173,9 +181,11 @@ interface Debug {
   alive: boolean;
   /** composited frames so far */
   frames: number;
-  /** the last frame's brush: speed in px per 60 Hz frame and radius in field texels */
+  /** the last frame's brush: the rig's speed in px per move and the radius in field texels */
   speed: number;
   radius: number;
+  /** the last frame's clamped delta, the field's clock */
+  dt: number;
   /** run the copy + composite even over an empty field (the pass-through hash test) */
   force: boolean;
   /** the next composited (or forced) frame's canvas before and after the pass, as data URLs */
@@ -197,7 +207,7 @@ export default function WakeRibbon({ rig, debug }: {
   const prev = useRef({ x: 0, y: 0, valid: false, radius: 0 });
   const uVel = useRef(new THREE.Vector2());
   const weight = useRef(0);
-  const dbg = useRef({ frames: 0, speed: 0, radius: 0, force: false, pending: null as null | ((r: { plain: string; post: string; simDt: number }) => void) });
+  const dbg = useRef({ frames: 0, speed: 0, radius: 0, dt: 0, force: false, pending: null as null | ((r: { plain: string; post: string; simDt: number }) => void) });
   const drawSize = useRef(new THREE.Vector2());
 
   const quadFor = () => {
@@ -212,7 +222,7 @@ export default function WakeRibbon({ rig, debug }: {
     const copy = material(COPY_FRAG, { tSrc: { value: null } });
     const blur = material(BLUR_FRAG, { tSrc: { value: null }, uDelta: { value: new THREE.Vector2() } });
     const reset = material(RESET_FRAG, {});
-    const composite = material(COMPOSITE_FRAG, { tFrame: { value: null }, tField: { value: null }, uFieldTexel: { value: new THREE.Vector2() }, uSeed: { value: new THREE.Vector2() } });
+    const composite = material(COMPOSITE_FRAG, { tFrame: { value: null }, tField: { value: null }, uFieldTexel: { value: new THREE.Vector2() }, uScale: { value: 1 }, uSeed: { value: new THREE.Vector2() } });
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), copy);
     mesh.frustumCulled = false;
     s.add(mesh);
@@ -283,6 +293,7 @@ export default function WakeRibbon({ rig, debug }: {
       get frames() { return d.frames; },
       get speed() { return d.speed; },
       get radius() { return d.radius; },
+      get dt() { return d.dt; },
       get force() { return d.force; },
       set force(v: boolean) { d.force = v; },
       capture: () => new Promise((resolve) => { d.pending = resolve; invalidate(); }),
@@ -298,7 +309,8 @@ export default function WakeRibbon({ rig, debug }: {
     const q = quadFor();
     const canvas = gl.domElement;
 
-    // ---- the brush: this frame's travel over the CARD, in canvas CSS px → field texels ----
+    // ---- the brush: this frame's travel over the CARD, in canvas CSS px → field texels; the
+    // radius from the rig's speed (px per move), nothing when the pointer did not move ----
     const p = prev.current;
     let radius = 0, speed = 0;
     let fromX = 0, fromY = 0, toX = 0, toY = 0;
@@ -306,10 +318,9 @@ export default function WakeRibbon({ rig, debug }: {
       const r = canvas.getBoundingClientRect();
       const x = rig.cx - r.left, y = rig.cy - r.top;
       if (p.valid) {
-        const travel = Math.hypot(x - p.x, y - p.y);
-        if (travel > 0) {
-          speed = brushSpeed(rig.speed, travel, dt);
-          radius = brushRadiusTex(speed, fd.cssH, fd.size.h);
+        if (x !== p.x || y !== p.y) {
+          speed = rig.speed;
+          radius = brushRadiusTex(speed, fd.size.h);
         }
         fromX = p.x; fromY = p.y;
       } else {
@@ -325,6 +336,8 @@ export default function WakeRibbon({ rig, debug }: {
     const d = dbg.current;
     d.speed = speed;
     d.radius = radius;
+    d.dt = dt;
+    const scale = fieldScale(fd.size.h);
 
     const alive = awake(weight.current, radius);
     if (!alive && !d.force) {
@@ -353,7 +366,7 @@ export default function WakeRibbon({ rig, debug }: {
       (u.uFrom.value as THREE.Vector4).set(tx(fromX), ty(fromY), p.radius, 1);
       (u.uTo.value as THREE.Vector4).set(tx(toX), ty(toY), radius, 1);
       p.radius = radius;
-      u.uPush.value = WAKE.PUSH * 60 * dt;
+      u.uPush.value = WAKE.PUSH * scale * 60 * dt;
       (u.uDecay.value as THREE.Vector3).set(perFrame(WAKE.DECAY_V, dt), perFrame(WAKE.DECAY_LONG, dt), perFrame(WAKE.DECAY_SHORT, dt));
       u.uFloor.value = WAKE.FLOOR * 60 * dt;
       const v = uVel.current;
@@ -367,10 +380,10 @@ export default function WakeRibbon({ rig, debug }: {
       q.copy.uniforms.tSrc.value = currT.texture;
       pass(q.copy, fd.low);
       q.blur.uniforms.tSrc.value = fd.low.texture;
-      (q.blur.uniforms.uDelta.value as THREE.Vector2).set((WAKE.BLUR_RADIUS / fs.lowW) * 0.25, 0);
+      (q.blur.uniforms.uDelta.value as THREE.Vector2).set(((WAKE.BLUR_RADIUS * scale) / fs.lowW) * 0.25, 0);
       pass(q.blur, fd.lowTmp);
       q.blur.uniforms.tSrc.value = fd.lowTmp.texture;
-      (q.blur.uniforms.uDelta.value as THREE.Vector2).set(0, (WAKE.BLUR_RADIUS / fs.lowH) * 0.25);
+      (q.blur.uniforms.uDelta.value as THREE.Vector2).set(0, ((WAKE.BLUR_RADIUS * scale) / fs.lowH) * 0.25);
       pass(q.blur, fd.low);
       weight.current = paintOrDecay(weight.current, radius, dt);
     }
@@ -388,6 +401,7 @@ export default function WakeRibbon({ rig, debug }: {
       c.tFrame.value = tex;
       c.tField.value = fd.a.texture;
       (c.uFieldTexel.value as THREE.Vector2).set(1 / fd.size.w, 1 / fd.size.h);
+      c.uScale.value = scale;
       (c.uSeed.value as THREE.Vector2).set(Math.random() * 1024, Math.random() * 1024);
       pass(q.composite, null);
       d.frames++;
