@@ -4,26 +4,28 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { DYN, clampDelta, clickWorld, createWorld, isResting, setKeepOut, setView, stepWorld, type KeepOut, type Pointer, type Vec3, type World } from "../lib/jackDynamics";
-import { FIELD, LIGHT_WHITE, SEED_FIELD, atPageTop, fieldCamera, fieldScales, keepOutFor, onScreen, placeWorld, repivot, retarget, solveTargets, type FieldFit, type Rect, type Slot } from "../lib/fieldLayout";
+import { FIELD, SEED_FIELD, atPageTop, fieldCamera, fieldScales, keepOutFor, onScreen, placeWorld, repivot, retarget, solveTargets, type FieldFit, type Rect, type Slot } from "../lib/fieldLayout";
 import { packCasting, packCentroids, packCount, packOf, packTargets, type Pack } from "../lib/fieldPacks";
 import { DRIFT, driftOffset, packDriftOffset } from "../lib/fieldDrift";
-import { GLASS, GLASS_FRESNEL_GLSL, GLASS_RIM_GLSL, GLASS_UNIFORM_GLSL, glassFinish, glassRecipe } from "../lib/glassLook";
+import { GLASS, glassFinish } from "../lib/glassLook";
+import { depthPrepassMaterial, makeGlassMaterial, rankByDepth, tintGlass } from "../lib/jackGlass";
 import { KEY, environmentScene, jackGeometry } from "../lib/jackMaterials";
 import type { PointerRig } from "../lib/pointerRig";
 import { createSampler, sampleFrame } from "../lib/scenePerf";
 
 // The three.js side of the jack field (JackField.tsx is the gate). The card's object — the
 // shared geometry, the one key and the one-plane environment (jackMaterials.ts) — worn as
-// TINTED GLASS (glassLook.ts: the owner found the card's plastic solid here; the card keeps
-// it), ONE layer per pixel: each jack is a depth pre-pass (colour writes off) and then the
-// glass at depthFunc LessEqual on the SAME program, so only its nearest front surface is
+// TINTED GLASS (glassLook.ts is the table, jackGlass.ts builds it: the owner found the card's
+// plastic solid here, then asked for the card to wear the same glass, so both scenes import
+// one module), ONE layer per pixel: each jack is a depth pre-pass (colour writes off) and then
+// the glass at depthFunc LessEqual on the SAME program, so only its nearest front surface is
 // composited and the interior — the core sphere, the arm bases, the far walls — is culled by
 // the depth test. The first glass round composited every surface of a DoubleSide mesh (three
 // draws a transparent DoubleSide mesh as a BackSide pass then a FrontSide pass with depth
 // writes off): an arm stacked 2 layers, a tip 4, the junction 6–10 at ≈ 0.99 alpha — the
 // dense ball, wider than the arms, the owner asked about; the core itself protrudes ≤ 0.013 u
-// (jackGeometry.ts), sub-pixel here, so with one layer the jack is plain. The card's AO bake
-// and neighbour-occlusion injection are NOT on the glass either (composed with alpha blending
+// (jackGeometry.ts), sub-pixel here, so with one layer the jack is plain. The plastic round's AO
+// bake and neighbour-occlusion injection are NOT on the glass either (composed with alpha blending
 // they read as a dark solid ball inside every jack — the crotch bakes at 0.65, the bores at
 // 0.01–0.2), and glass takes no contact crease. And the card's motion: Lusion's dynamics, the
 // ray-only pointer push with the cursor's velocity, the click burst, the swirl × idle
@@ -104,7 +106,7 @@ const MOVED_U = 0.5;
 // The scroll-end debounce: one rect read per scroll, not per scroll event.
 const SCROLL_END_MS = 120;
 // Occlusion neighbours per jack: none — the glass carries no neighbour-occlusion loop (see the
-// header). For the record, the plastic round ran 8 of a possible 15 (the card runs 11 for its
+// header). For the record, the plastic round ran 8 of a possible 15 (the card ran 11 for its
 // packed dozen): jackSphereOcc falls as (r/l)², a 0.55 u core three units away darkens ≤ 3%,
 // so past the eight nearest the loop was paid for and invisible — 6.7 M sphere-occlusion
 // evaluations a frame at 1440 × 900, DPR 2 instead of 12.5 M. Glass: 0.
@@ -123,91 +125,6 @@ const NEAR_COUNT_GLASS = 0;
 // sweep with no blown highlight on the glossy white in the frame.
 const ENV_DARK = 1.0;
 const ENV_LIGHT = 3.0;
-
-interface GlassMaterial { material: THREE.MeshPhysicalMaterial; glass: { uGlassOpacity: { value: number }; uGlassRim: { value: number }; uGlassPow: { value: number }; uGlassRimLight: { value: number } } }
-
-/**
- * A slot's glass: a MeshPhysicalMaterial, transparent, alpha-blended, FrontSide (the bore's
- * far wall and floor are front faces seen through the mouth, so the tips still read as
- * hollow), depth-write off, depthFunc LessEqual (three's default, stated) so it lands exactly
- * on the depth the pre-pass (depthPrepassMaterial) wrote for the same triangles, the clearcoat
- * reflecting the one-plane environment, with the Fresnel opacity and rim-light terms injected
- * (glassLook.ts). One program for all twenty-one AND the pre-pass (GLASS.PROGRAM_KEY): the
- * injected source is the same for every family, only uniforms differ. No polygonOffset: the
- * two passes run one program on one geometry with one matrix, so gl_Position is bit-identical
- * by construction and LessEqual passes exactly; if the Metal-GPU frame ever showed speckle at
- * the arm edges, the fallback is polygonOffset on THIS colour pass (factor −1, units −1).
- */
-function makeGlassMaterial(slot: Slot, theme: "dark" | "light", accent: string): GlassMaterial {
-  const r = glassRecipe(slot.family, slot.finish, accent, theme === "light" ? LIGHT_WHITE[slot.finish] : null);
-  const material = new THREE.MeshPhysicalMaterial({
-    color: r.color,
-    transparent: true,
-    opacity: r.opacity,
-    metalness: 0,
-    roughness: r.roughness,
-    clearcoat: GLASS.CLEARCOAT,
-    clearcoatRoughness: GLASS.CLEARCOAT_ROUGHNESS,
-    ior: GLASS.IOR,
-    specularIntensity: GLASS.SPECULAR_INTENSITY,
-    envMapIntensity: GLASS.ENV_MAP_INTENSITY,
-    side: THREE.FrontSide,
-    depthWrite: false,
-    depthTest: true,
-    depthFunc: THREE.LessEqualDepth,
-  });
-  const glass = { uGlassOpacity: { value: r.opacity }, uGlassRim: { value: GLASS.RIM_OPACITY }, uGlassPow: { value: GLASS.FRESNEL_POWER }, uGlassRimLight: { value: GLASS.RIM_LIGHT } };
-  material.onBeforeCompile = (shader) => {
-    Object.assign(shader.uniforms, glass);
-    shader.fragmentShader = shader.fragmentShader
-      .replace("#include <common>", "#include <common>\n" + GLASS_UNIFORM_GLSL)
-      .replace("#include <normal_fragment_begin>", "#include <normal_fragment_begin>\n" + GLASS_FRESNEL_GLSL)
-      .replace("#include <opaque_fragment>", GLASS_RIM_GLSL + "\n#include <opaque_fragment>");
-  };
-  material.customProgramCacheKey = () => GLASS.PROGRAM_KEY;
-  return { material, glass };
-}
-
-/** recolour a slot's glass in place for a theme/accent flip: tint, opacity and roughness are uniforms */
-function tintGlass(m: GlassMaterial, slot: Slot, theme: "dark" | "light", accent: string): void {
-  const r = glassRecipe(slot.family, slot.finish, accent, theme === "light" ? LIGHT_WHITE[slot.finish] : null);
-  m.material.color.set(r.color);
-  m.material.opacity = r.opacity;
-  m.glass.uGlassOpacity.value = r.opacity;
-  m.material.roughness = r.roughness;
-}
-
-/**
- * The depth pre-pass, one material for every jack: the SAME program as the glass — built by
- * makeGlassMaterial (any slot; its tint is never written) with the same onBeforeCompile
- * injection and customProgramCacheKey — so three hands both meshes one WebGLProgram and their
- * gl_Position is bit-identical by construction. Two DIFFERENT programs (a MeshBasicMaterial
- * pre-pass, say) are not guaranteed identical positions by GLSL ES (§4.6.1: invariance only
- * for `invariant` outputs), and a swiftshader frame cannot clear that risk for the owner's
- * Metal GPU. Colour writes off, depth writes on, FrontSide, and still `transparent` so it sits
- * in the transparent render list next to the glass (WebGLRenderLists routes by transmission,
- * then material.transparent; colorWrite is not consulted). The physical fragment shader runs
- * with colour writes off — ≈ 21 × 17 k fragments, negligible. Module-level singleton, never
- * disposed (`dispose={null}` on its meshes).
- *
- * three APPENDS the custom key to its parameter-derived key (WebGLPrograms.getProgramCacheKey),
- * so the share also depends on `transparent: true` (the `opaque` parameter) and FrontSide
- * matching the glass — `programsUnchanged` in the harness is the guard; do not "optimise" the
- * pre-pass to opaque or DoubleSide.
- */
-let prepass: THREE.MeshPhysicalMaterial | null = null;
-function depthPrepassMaterial(): THREE.MeshPhysicalMaterial {
-  if (!prepass) {
-    const m = makeGlassMaterial({ family: "black", finish: "glossy" }, "dark", "#3b82f6").material;
-    m.colorWrite = false;
-    m.depthWrite = true;
-    m.depthTest = true;
-    m.side = THREE.FrontSide;
-    m.transparent = true;
-    prepass = m;
-  }
-  return prepass;
-}
 
 /** the glass table's knobs, as the debug hook exposes them: the family bases, the rim's extra opacity, the frosted finish's extra */
 interface GlassTable { black: number; accent: number; white: number; rim: number; frosted: number }
@@ -339,7 +256,7 @@ function Field({ packs, accent, theme, visible, rig, debug, tier, onDegrade }: {
   const owners = useMemo(() => packOf(packs), [packs]);
   // Materials are born once per composition; the theme and the accent recolour IN PLACE (the
   // card's reason: rebuilding disposed the program and recompiled it on every toggle).
-  // Twenty-one glass materials, one program (GLASS.PROGRAM_KEY).
+  // Twenty-one glass materials (jackGlass.ts, shared with the card), one program (GLASS.PROGRAM_KEY).
   const mats = useMemo(() => slots.map((s) => makeGlassMaterial(s, "dark", "#3b82f6")), [slots]);
   useEffect(() => {
     invalidate();
@@ -375,8 +292,8 @@ function Field({ packs, accent, theme, visible, rig, debug, tier, onDegrade }: {
   const homes = useRef<Vec3[]>([]);
   const driftTmp = useMemo<Vec3>(() => ({ x: 0, y: 0, z: 0 }), []);
   const packTmp = useMemo<Vec3>(() => ({ x: 0, y: 0, z: 0 }), []);
-  /** the bodies' back-to-front order, re-sorted in place each frame (no allocation) */
-  const order = useRef<number[]>([]);
+  /** the bodies' depths this frame, for the back-to-front rank (jackGlass.rankByDepth; no allocation past the first frame) */
+  const zs = useRef<number[]>([]);
   const frames = useRef(0);
   const layouts = useRef(0);
   const firstFrame = useRef(true);
@@ -743,33 +660,26 @@ function Field({ packs, accent, theme, visible, rig, debug, tier, onDegrade }: {
     }
 
     // The groups follow the bodies (spawn positions included, so the first frame shows the set
-    // arriving); every slot is a body. Then the back-to-front rank: each group's renderOrder is
-    // its body's rank by pos.z ascending (the camera sits at (0, 0, fit.z) unrotated, so pos.z is
-    // exact view depth), ties by body index — a stable order. three's transparent list sorts by
-    // groupOrder (a Group's renderOrder, inherited by its subtree), then renderOrder, then z, so
-    // the list interleaves per jack, farthest first: depth pass (renderOrder 0), colour pass (1),
-    // next jack… A nearer jack's pre-pass overwrites the depth where it is nearer and its colour
-    // pass blends over the farther jack: glass still shows through glass between jacks — and a
-    // pack is three or four jacks deep, so this interleave is what draws it. Members of a pack
-    // share z slots (±0.35 / 0.8 / 1.25) and the jam moves them in z anyway, so ranks flip every
-    // frame — harmless: two bodies at equal depth cannot interpenetrate (the collision keeps them
-    // apart), so their silhouettes only touch in screen space and a rank flip changes no pixel.
+    // arriving); every slot is a body. Then the back-to-front rank (jackGlass.rankByDepth): each
+    // group's renderOrder is its body's rank by pos.z ascending (the camera sits at (0, 0, fit.z)
+    // unrotated, so pos.z is exact view depth), ties by body index, so three's transparent list
+    // interleaves per jack, farthest first — a pack is three or four jacks deep, and this
+    // interleave is what draws it. Members of a pack share z slots (±0.35 / 0.8 / 1.25) and the
+    // jam moves them in z anyway, so ranks flip every frame — harmless: two bodies at equal depth
+    // cannot interpenetrate (the collision keeps them apart), so their silhouettes only touch in
+    // screen space and a rank flip changes no pixel.
     const bodies = world.bodies;
+    const depth = zs.current;
+    depth.length = bodies.length;
     for (let j = 0; j < bodies.length; j++) {
+      const b = bodies[j];
+      depth[j] = b.pos.z;
       const g = groups.current[j];
       if (!g) continue;
-      const b = bodies[j];
       g.position.set(b.pos.x, b.pos.y, b.pos.z);
       g.quaternion.set(b.quat.x, b.quat.y, b.quat.z, b.quat.w);
     }
-    const ord = order.current;
-    ord.length = bodies.length;
-    for (let j = 0; j < bodies.length; j++) ord[j] = j;
-    ord.sort((a, b) => bodies[a].pos.z - bodies[b].pos.z || a - b);
-    for (let k = 0; k < ord.length; k++) {
-      const g = groups.current[ord[k]];
-      if (g) g.renderOrder = k;
-    }
+    rankByDepth(groups.current, depth);
   });
 
   return (

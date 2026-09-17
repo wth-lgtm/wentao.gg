@@ -8,12 +8,16 @@
 // Also checks the built page's initial JS for three (it must stay behind dynamic()), the
 // one-layer glass (two passes per jack on ONE program, groups ranked back to front), the PACKS
 // (fieldPacks.ts: gathered, alive at the card's speed, tight, mixed, on the viewport, kicked by
-// the ray one pack at a time, regathered after a click) and, in the light theme, the rendered
-// luminance of the discs (the ENV_LIGHT re-key).
+// the ray one pack at a time, regathered after a click), in the light theme the rendered
+// luminance of the discs (the ENV_LIGHT re-key), and the GitHub CARD's scene (`__jacks`): its
+// dozen wear the hero's glass from the same module (jackGlass.ts) — two passes per jack on the
+// one glass program, ranked back to front — checked in both themes, and cropped at DPR 2 after
+// the entrance and after a flick (the wake ribbon over glass) by `card`.
 //
 //   node scripts/verify-field.mjs [port] [config]         config: 1440x900-dark | 1440x900-light | 1024x768-dark | 1440x900-dark-quads (informational)
 //   node scripts/verify-field.mjs [port] sweep            the light-theme env-intensity sweep
 //   node scripts/verify-field.mjs [port] zoom             only the DPR-2 frames (1440 × 900, WIDE and QUADS, both themes): full, the lower pack, the largest jack
+//   node scripts/verify-field.mjs [port] card             only the card's DPR-2 crops (both themes: after the entrance, after a flick; dark with three ghosts)
 //
 // Playwright is not a dependency of this repo; point PLAYWRIGHT at an installed copy.
 import fs from "node:fs";
@@ -88,14 +92,14 @@ async function discLuminance(page, width, height) {
   return { median: q(all, 0.5), p10: q(all, 0.1), p90: q(all, 0.9), perFamily: Object.fromEntries(Object.entries(byFamily).map(([f, a]) => [f, { median: q(a, 0.5), n: a.length }])) };
 }
 
-async function open(width, height, theme, dpr = 1, variant = null) {
+async function open(width, height, theme, dpr = 1, variant = null, extra = "") {
   const browser = await chromium.launch({ args: ARGS });
   const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: dpr });
   const errors = [], known = [];
   page.on("console", (m) => { if (m.type() === "error") (KNOWN.test(m.text()) ? known : errors).push(m.text()); });
   page.on("pageerror", (e) => errors.push(String(e)));
   await page.addInitScript((t) => { try { localStorage.setItem("theme", t); } catch {} window.__ctxLost = 0; document.addEventListener("webglcontextlost", () => { window.__ctxLost++; }, true); }, theme);
-  await page.goto(`http://localhost:${port}/?jacksDebug=1${variant ? `&jacksPacks=${variant}` : ""}`, { waitUntil: "domcontentloaded" });
+  await page.goto(`http://localhost:${port}/?jacksDebug=1${variant ? `&jacksPacks=${variant}` : ""}${extra}`, { waitUntil: "domcontentloaded" });
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.waitForFunction(() => !!window.__field && window.__field.entered && window.__field.fit, null, { timeout: 40000, polling: 100 });
   return { browser, page, errors, known };
@@ -545,11 +549,19 @@ async function run(width, height, theme, opts = {}) {
     await page.waitForFunction(() => window.__jacks && window.__jacks.entered, null, { timeout: 60000, polling: 200 });
     await page.evaluate(() => { for (let i = 0; i < 14 * 60; i++) window.__jacks.step(1 / 60); });
     await page.waitForFunction(() => window.__jacks.frozen, null, { timeout: 120000, polling: 250 });
-    const card = await page.evaluate(() => ({ n: window.__jacks.bodies().length, camZ: window.__jacks.camZ, frozen: window.__jacks.frozen, tier: window.__jacks.tier, canvasPointerEvents: getComputedStyle(document.querySelector(".col-start-2.row-span-3 canvas")).pointerEvents }));
+    const card = await page.evaluate(() => { const j = window.__jacks; return { n: j.bodies().length, camZ: j.camZ, frozen: j.frozen, tier: j.tier, canvasPointerEvents: getComputedStyle(document.querySelector(".col-start-2.row-span-3 canvas")).pointerEvents, meshes: j.meshes, passes: j.passes, programs: j.programs, glassPrograms: j.glassPrograms, renderOrders: j.renderOrders, z: j.bodies().map((b) => +b.z.toFixed(3)) }; });
     out.card = card;
     // the card's canvas WANTS the pointer (its pointerenter/leave/click listeners; its column is pointer-events-auto on purpose)
     out.asserts.cardCanvasTakesPointer = card.canvasPointerEvents === "auto";
     out.asserts.cardUnchanged = card.n === 12 && card.frozen && Math.abs(card.camZ - 8.5) < 0.01;
+    // THE CARD WEARS THE HERO'S GLASS (jackGlass.ts, one module for both scenes): two passes per jack — the depth pre-pass
+    // and the glass — on ONE glass program (the pre-pass added none), the groups ranked back to front as the field's are.
+    // `programs` is informational: the glass 1 + the PMREM bake's 2 + the wake ribbon's own, compiled lazily (paint, copy,
+    // blur, reset, composite — 3 to 5 by this point), so the count is reported, not asserted.
+    out.asserts.cardPasses = card.passes === 2 * card.n && card.meshes === card.n;
+    out.asserts.cardGlassPrograms = card.glassPrograms === 1;
+    const cardByDepth = card.z.map((_, i) => i).sort((a, b) => card.z[a] - card.z[b] || a - b);
+    out.asserts.cardRenderOrderBackToFront = [...card.renderOrders].sort((a, b) => a - b).every((v, i) => v === i) && cardByDepth.every((body, rank) => card.renderOrders[body] === rank);
     await sleep(500);
     await page.screenshot({ path: `${OUT}/field-${label}-cardsection.png` });
   }
@@ -599,17 +611,58 @@ async function zoom(theme, variant = null) {
   await browser.close();
 }
 
+// THE CARD at DPR 2 (the owner's "exactly like the jacks on hero", judged by eye): the column's canvas clipped after the
+// entrance — the dolly ends at 2 s of sim (ConnectorField ENTRANCE.T1), stepped to 3 s with the envelope open — then after a
+// FLICK: a sweep across the column at ≥ 20 px per step, the wake ribbon's brush threshold (wakeField.ts: a brush from
+// 20 px/frame up), read through `__wake.capture()` (the next composited frame's canvas before and after the ribbon's pass;
+// `post` is saved as its own PNG) and clipped again from the page, so the ribbon is seen compositing OVER glass jacks and the
+// opaque panel's colour showing through them (no black void). `unknown` > 0 opens with &jacksUnknown=N (ConnectorField's
+// debug override) so the ghost glass — the unknown week's — can be seen on a payload that has no cut.
+async function zoomCard(theme, unknown = 0) {
+  const width = 1440, height = 900, label = `${width}x${height}-${theme}${unknown ? `-ghost${unknown}` : ""}`;
+  const { browser, page, errors } = await open(width, height, theme, 2, null, unknown ? `&jacksUnknown=${unknown}` : "");
+  await page.mouse.move(width - 3, height - 3);
+  await page.evaluate(() => { const el = document.querySelector(".col-start-2.row-span-3"); const r = el.getBoundingClientRect(); window.scrollBy(0, r.top + r.height / 2 - innerHeight / 2); });
+  await page.waitForFunction(() => window.__jacks && window.__jacks.entered, null, { timeout: 60000, polling: 200 });
+  await page.evaluate(() => { const j = window.__jacks; while (j.entranceT < 3) j.step(1 / 60); });
+  await sleep(1500);
+  const rect = await page.evaluate(() => document.querySelector(".col-start-2.row-span-3 canvas").getBoundingClientRect().toJSON());
+  const clip = { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+  const state = () => page.evaluate(() => { const j = window.__jacks; const bs = j.bodies(); return { n: bs.length, ghosts: bs.filter((b) => !b.known).length, meshes: j.meshes, passes: j.passes, programs: j.programs, glassPrograms: j.glassPrograms, camZ: +j.camZ.toFixed(3), E: j.E, entranceT: +j.entranceT.toFixed(2), frozen: j.frozen }; });
+  const entrance = await state();
+  const entrancePath = `${OUT}/card-${label}-entrance@2x.png`;
+  await page.screenshot({ path: entrancePath, clip });
+  const rec = { dpr: 2, theme, unknown, clip: { x: +clip.x.toFixed(0), y: +clip.y.toFixed(0), width: +clip.width.toFixed(0), height: +clip.height.toFixed(0) }, entrance: { frame: entrancePath, ...entrance } };
+  if (!unknown) {
+    // the flick: left to right across the column at mid-height, 12 steps (≈ 55 px each at this width), a little sine in y
+    const y = clip.y + clip.height * 0.5, x0 = clip.x + 8, x1 = clip.x + clip.width - 8, steps = 12;
+    await page.mouse.move(x0, y);
+    for (let i = 1; i <= steps; i++) { await page.mouse.move(x0 + ((x1 - x0) * i) / steps, y + Math.sin(i / 2) * 12); await sleep(16); }
+    const wake = await page.evaluate(() => { const w = window.__wake; if (!w) return null; return Promise.race([w.capture().then((c) => ({ alive: w.alive, weight: +w.weight.toFixed(3), frames: w.frames, speed: +w.speed.toFixed(1), radius: +w.radius.toFixed(2), simDt: +c.simDt.toFixed(4), post: c.post, plain: c.plain })), new Promise((r) => setTimeout(() => r({ alive: w.alive, weight: +w.weight.toFixed(3), frames: w.frames, timedOut: true }), 20000))]); });
+    const flickPath = `${OUT}/card-${label}-flick@2x.png`;
+    await page.screenshot({ path: flickPath, clip });
+    const canvasPath = wake && wake.post ? `${OUT}/card-${label}-flick-canvas@2x.png` : null;
+    if (canvasPath) fs.writeFileSync(canvasPath, Buffer.from(wake.post.split(",")[1], "base64"));
+    rec.flick = { frame: flickPath, canvas: canvasPath, wake: wake ? { alive: wake.alive, weight: wake.weight, frames: wake.frames, speed: wake.speed, radius: wake.radius, simDt: wake.simDt, timedOut: !!wake.timedOut, ribbonInCapture: !!(wake.post && wake.plain && wake.post !== wake.plain) } : null, ...(await state()) };
+  }
+  rec.errors = errors;
+  summary[`card-${label}`] = rec;
+  console.log(JSON.stringify({ card: label, ...rec }));
+  await browser.close();
+}
+
 if (only === "sweep") { await sweep(); process.exit(0); }
 if (only === "zoom") { for (const v of [null, "quads"]) { await zoom("dark", v); await zoom("light", v); } process.exit(0); }
+if (only === "card") { await zoomCard("dark"); await zoomCard("light"); await zoomCard("dark", 3); fs.writeFileSync(`${OUT}/verify-card.json`, JSON.stringify(summary, null, 1)); process.exit(0); }
 summary.initialJs = initialJs();
 console.log("initialJs", JSON.stringify(summary.initialJs));
 await run(1440, 900, "dark", { frames: true, card: true });
-await run(1440, 900, "light", { frames: true });
+await run(1440, 900, "light", { frames: true, card: true });
 await run(1024, 768, "dark", { frames: true });
 // QUADS is the owner's ALTERNATIVE composition, not the shipped one (controller's ruling): run for the frames, recorded in full as
 // informational — its left pack's clip (two discs 0.11 / 0.01 u past the left edge, 5/7 fully inside) is known from the critique
 await run(1440, 900, "dark", { frames: true, variant: "quads", informational: true });
-if (!only) for (const v of [null, "quads"]) { await zoom("dark", v); await zoom("light", v); }
+if (!only) { for (const v of [null, "quads"]) { await zoom("dark", v); await zoom("light", v); } await zoomCard("dark"); await zoomCard("light"); await zoomCard("dark", 3); }
 fs.writeFileSync(`${OUT}/verify.json`, JSON.stringify(summary, null, 1));
 const runs = Object.values(summary).filter((s) => s.label);
 const failed = (s) => Object.entries(s.asserts).filter(([, v]) => !v).map(([k]) => k).join(",") || "all green";

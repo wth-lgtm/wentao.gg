@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { SCALE_MIN, SCALE_SPAN, SEED, castingFor, jacksForWeeks } from "../app/lib/connectorJacks";
+import { SCALE_MIN, SCALE_SPAN, SEED, castingFor, jacksForWeeks, unknownOverride } from "../app/lib/connectorJacks";
 import { buildDayWindow } from "../app/lib/githubStats";
 
 const ANCHOR = new Date("2026-09-16T12:00:00Z");
@@ -94,4 +94,16 @@ test("deterministic: the same inputs give the same jacks, a different seed a dif
   assert.deepEqual(jacksForWeeks(days, 12, false, SEED), jacksForWeeks(days, 12, false, SEED));
   const other = jacksForWeeks(days, 12, false, SEED + 1);
   assert.notDeepEqual(other.map((j) => j.family), jacksForWeeks(days, 12, false, SEED).map((j) => j.family));
+});
+
+test("the ghost override: N oldest weeks as ghosts only with ?jacksDebug present AND jacksUnknown a positive integer", () => {
+  assert.equal(unknownOverride("?jacksDebug=1&jacksUnknown=3"), 3);
+  assert.equal(unknownOverride("?jacksUnknown=3&jacksDebug"), 3);
+  assert.equal(unknownOverride("?jacksUnknown=3"), 0, "never without the debug flag");
+  assert.equal(unknownOverride("?jacksDebug=1"), 0);
+  assert.equal(unknownOverride("?jacksDebug=1&jacksUnknown=0"), 0);
+  assert.equal(unknownOverride("?jacksDebug=1&jacksUnknown=-2"), 0);
+  assert.equal(unknownOverride("?jacksDebug=1&jacksUnknown=2.5"), 0);
+  assert.equal(unknownOverride("?jacksDebug=1&jacksUnknown=all"), 0);
+  assert.equal(unknownOverride(""), 0);
 });

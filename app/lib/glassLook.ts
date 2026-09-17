@@ -1,6 +1,9 @@
-// The jack field's glass. The owner on the served build: "now the object looks like solid
-// plastic, is it possible to make them look like tinted glass?" — for the FIELD only; the
-// card's opaque-panel jacks keep their plastic.
+// The jack's glass — the LOOK TABLE. The owner on the served build: "now the object looks like
+// solid plastic, is it possible to make them look like tinted glass?" — first for the field,
+// then (2026-09-17, on the packs build) "can the jacks in the github card have the same tinted
+// glass effect exactly like the jacks on hero?" — so the card's opaque-panel jacks wear it too,
+// from the one table and the one material module (jackGlass.ts), which is what makes "exactly"
+// true by construction.
 //
 // Not three's `transmission`: the field's canvas is transparent over the DOM (the fluid, the
 // rain, the text), and the transmission pass samples the scene's OWN render target, so glass
@@ -10,13 +13,14 @@
 // environment. FrontSide, ONE layer per pixel: each jack is drawn twice on the same program —
 // a depth pre-pass with colour writes off, then the glass at depthFunc LessEqual — so only
 // its nearest front surface is composited, and the jacks are interleaved back to front by a
-// per-frame groupOrder so a nearer jack still blends over a farther one (JackFieldScene.tsx).
+// per-frame groupOrder so a nearer jack still blends over a farther one (jackGlass.rankByDepth).
 // The first glass round was DoubleSide with every surface composited: an arm stacked 2 layers,
 // a tip 4, the junction 6–10 (≈ 0.99 alpha) — the "ball in the middle" the owner saw. The
-// page — dye, rain, letters — shows THROUGH the jacks, which is the read the owner asked for.
+// page — dye, rain, letters — shows THROUGH the field's jacks, and the card's opaque panel
+// (#141518 in both themes) through the card's, which is the read the owner asked for.
 //
 // Three-free (constants and GLSL strings), so it can be imported by anything and tested in
-// node; the material itself is built in JackFieldScene.tsx.
+// node; the material itself is built in jackGlass.ts.
 
 import type { Family, Finish } from "./connectorJacks";
 

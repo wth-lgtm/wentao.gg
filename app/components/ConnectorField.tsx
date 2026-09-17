@@ -3,10 +3,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
-import { SEED, type Jack } from "../lib/connectorJacks";
+import { SEED, unknownOverride, type Jack } from "../lib/connectorJacks";
 import { CAMERA, PANEL, cameraFor, type CameraFit } from "../lib/connectorScene";
+import { GLASS } from "../lib/glassLook";
 import { DYN, clampDelta, clickWorld, createWorld, isResting, setView, stepWorld, type Pointer, type World } from "../lib/jackDynamics";
-import { KEY, NEAR_CORE, NEAR_FALLBACK, RECIPES, colorFor, environmentScene, jackGeometry, makeMaterial, type Recipe } from "../lib/jackMaterials";
+import { depthPrepassMaterial, dressGlass, makeGlassMaterial, rankByDepth } from "../lib/jackGlass";
+import { KEY, environmentScene, jackGeometry } from "../lib/jackMaterials";
 import type { PointerRig } from "../lib/pointerRig";
 import { createSampler, sampleFrame } from "../lib/scenePerf";
 import WakeRibbon from "./WakeRibbon";
@@ -14,12 +16,20 @@ import WakeRibbon from "./WakeRibbon";
 // Twelve six-way connector jacks, one per week of the board's window, floating in Lusion's
 // dynamics (jackDynamics.ts) under Lusion's framing (connectorScene.ts). What lives here is
 // the three.js side of THIS scene only: the entrance, the idle envelope and the demand loop
-// that stops when nothing moves. The jack's look — the shared geometry, the seven materials
-// and their neighbour-occlusion shader, the one-plane environment and the key light — is
-// jackMaterials.ts, shared with the page's jack field (JackFieldScene.tsx). The pointer's wake
-// ribbon (WakeRibbon.tsx) sits beside it in the Canvas: it owns the render each frame so it
-// can composite over the finished panel, and a decaying field is the one other reason the
-// demand loop stays awake.
+// that stops when nothing moves. The jack's look — the shared geometry, the one-plane
+// environment and the key light (jackMaterials.ts), worn as the hero's TINTED GLASS
+// (jackGlass.ts builds it, glassLook.ts is the table): a depth pre-pass and one glass pass per
+// jack on ONE program, the groups ranked back to front each frame — is the page's jack field's
+// (JackFieldScene.tsx) by construction: both scenes import the one module, which is what makes
+// "exactly like the jacks on hero" (the owner, 2026-09-17) true by a number. The plastic round's
+// seven opaque recipes, AO bake and neighbour-occlusion loop are gone with it (glass takes no
+// contact crease; the hero's header has the measurements). The panel is opaque and #141518 in
+// BOTH themes (connectorScene.PANEL), so the card always wears the DARK recipes and the panel's
+// own colour shows through the glass; the accent token is the one themed input. The pointer's
+// wake ribbon (WakeRibbon.tsx) sits beside it in the Canvas: it owns the render each frame
+// (gl.render at priority 1 — the transparent list's sort and the two-pass draw are three's, so
+// its frame is the frame R3F would draw) so it can composite over the finished panel, and a
+// decaying field is the one other reason the demand loop stays awake.
 
 // The idle envelope E ∈ [0, 1] scales the swirl and gates the friction that lets the pack
 // rest. 1 while the pointer is anywhere over the CARD (the scene is alive before the cursor
@@ -44,11 +54,6 @@ const backOut = (t: number) => {
 // The DPR step-down samples the first frames after the entrance beat (scenePerf.ts has the rule).
 const PERF_WINDOW_S = 5;
 
-// An unknown week (the route's paging cut off before it began) is a ghost: the panel lightened
-// 8%, matte, no clearcoat — outside the casting so it cannot be read as a quiet white or black.
-const GHOST: Recipe = { color: "#2a2a30", roughness: 0.8, clearcoat: 0, clearcoatRoughness: 0 };
-const recipeFor = (jack: Jack): Recipe => (jack.known ? RECIPES[jack.family][jack.finish] : GHOST);
-
 interface Debug {
   simTime: number;
   /** sim seconds since the entrance beat, −1 before it */
@@ -62,6 +67,15 @@ interface Debug {
   tier: number;
   /** mean |pos − target| over the bodies — the regather measure */
   spread: number;
+  /** the jacks drawn: visible groups */
+  meshes: number;
+  /** visible meshes under visible groups: 2 × the jacks drawn (the depth pre-pass and the glass) */
+  passes: number;
+  /** the groups' renderOrder in body order: the back-to-front rank (a permutation of 0..n−1, ascending with pos.z) */
+  renderOrders: number[];
+  /** gl.info.programs.length (the wake ribbon adds its own), and how many of them carry GLASS.PROGRAM_KEY (must be 1: the pre-pass and every glass share it) */
+  programs: number;
+  glassPrograms: number;
   bodies(): { x: number; y: number; z: number; vx: number; vy: number; vz: number; v: number; scale: number; known: boolean }[];
   step(dt: number): void;
 }
@@ -78,21 +92,27 @@ function Field({ jacks, accent, visible, inView, rig, debug, tier, onDegrade }: 
 }) {
   const { gl, scene, camera, size, pointer, invalidate } = useThree();
   const geometry = useMemo(jackGeometry, []);
-  const near = Math.max(1, jacks.length - 1);
-  // The theme's accent is the only themed thing in here (the panel is the same in both), and
-  // a flip recolours IN PLACE: rebuilding the twelve materials disposed the old set before the
-  // new one had rendered, which drove both programs' usedTimes to 0, destroyed them and
-  // recompiled them (~150 ms each) on every toggle. Twelve colour writes and one frame instead.
-  const mats = useMemo(() => jacks.map((j) => makeMaterial(recipeFor(j), near)), [jacks, near]);
+  // The theme's accent is the only themed thing in here (the panel is #141518 in both, so the
+  // card always wears the DARK recipes), and a flip recolours IN PLACE: rebuilding the twelve
+  // materials disposed the old set before the new one had rendered, which drove the program's
+  // usedTimes to 0, destroyed it and recompiled it (~150 ms) on every toggle. Twelve uniform
+  // writes and one frame instead. Twelve glass materials (jackGlass.ts, the hero's), one program
+  // (GLASS.PROGRAM_KEY); a known week wears its slot's tint, an unknown week the ghost
+  // (jackGlass.dressGlass branches, so a flip never wipes the ghost back to its family's tint).
+  const mats = useMemo(() => jacks.map((j) => makeGlassMaterial(j, "dark", "#3b82f6")), [jacks]);
   useEffect(() => {
     invalidate();
     return () => mats.forEach((m) => m.material.dispose());
   }, [mats, invalidate]);
   useEffect(() => {
-    mats.forEach((m, i) => m.material.color.copy(colorFor(recipeFor(jacks[i]), accent)));
+    mats.forEach((m, i) => dressGlass(m, jacks[i], jacks[i].known, "dark", accent));
     invalidate();
   }, [accent, mats, jacks, invalidate]);
-  const meshes = useRef<(THREE.Mesh | null)[]>([]);
+  // one group per jack: the depth pre-pass mesh and the glass mesh on the shared geometry
+  const groups = useRef<(THREE.Group | null)[]>([]);
+  const prepassMaterial = useMemo(depthPrepassMaterial, []);
+  /** the bodies' depths this frame, for the back-to-front rank (jackGlass.rankByDepth; no allocation past the first frame) */
+  const zs = useRef<number[]>([]);
 
   // The world is born once per set of jacks, with the camera fit at that moment; only the
   // soft bounds follow a resize (setView). A new payload (the ISR route refreshing under a
@@ -151,12 +171,6 @@ function Field({ jacks, accent, visible, inView, rig, debug, tier, onDegrade }: 
     cam.updateProjectionMatrix();
     invalidate();
   }, [size, camera, world, invalidate]);
-
-  // Perf tier 2: the neighbour loop off (a uniform, no recompile).
-  useEffect(() => {
-    mats.forEach((m) => { m.uniforms.uNao.value = tier >= 2 ? 0 : 1; });
-    invalidate();
-  }, [tier, mats, invalidate]);
 
   // The card's pointer wakes the loop; a move over the board is enough.
   useEffect(() => {
@@ -217,11 +231,16 @@ function Field({ jacks, accent, visible, inView, rig, debug, tier, onDegrade }: 
       get camZ() { return camera.position.z; },
       get tier() { return tier; },
       get spread() { return world.bodies.reduce((n, b) => n + Math.hypot(b.pos.x - b.target.x, b.pos.y - b.target.y, b.pos.z - b.target.z), 0) / world.bodies.length; },
+      get meshes() { return groups.current.filter((g) => g && g.visible).length; },
+      get passes() { return groups.current.reduce((n, g) => n + (g && g.visible ? g.children.filter((c) => c.visible).length : 0), 0); },
+      get renderOrders() { return groups.current.map((g) => g?.renderOrder ?? -1); },
+      get programs() { return gl.info.programs?.length ?? 0; },
+      get glassPrograms() { return (gl.info.programs ?? []).filter((p) => p.cacheKey.includes(GLASS.PROGRAM_KEY)).length; },
       bodies: () => world.bodies.map((b, i) => ({ x: b.pos.x, y: b.pos.y, z: b.pos.z, vx: b.vel.x, vy: b.vel.y, vz: b.vel.z, v: Math.hypot(b.vel.x, b.vel.y, b.vel.z), scale: jacks[i].scale, known: jacks[i].known })),
       step: (dt: number) => { stepWorld(world, dt, null, self.E); invalidate(); },
     };
     return () => { delete w.__jacks; };
-  }, [debug, world, jacks, camera, tier, invalidate]);
+  }, [debug, world, jacks, camera, tier, gl, invalidate]);
 
   useFrame((_, rawDelta) => {
     frames.current++;
@@ -279,42 +298,34 @@ function Field({ jacks, accent, visible, inView, rig, debug, tier, onDegrade }: 
       else invalidate();
     }
 
-    // meshes and the neighbour uniforms follow the bodies (spawn positions included, so the
-    // first frame already shows the set)
+    // The groups follow the bodies (spawn positions included, so the first frame already shows
+    // the set), then the back-to-front rank (jackGlass.rankByDepth): the camera sits at (0, 0, z)
+    // unrotated, so pos.z is exact view depth, and three's transparent list interleaves per jack,
+    // farthest first — depth pass, glass, next jack — which is what lets a nearer jack's glass
+    // blend over a farther one's in the packed dozen. The hero's exact pattern.
     const bodies = world.bodies;
+    const depth = zs.current;
+    depth.length = bodies.length;
     for (let i = 0; i < bodies.length; i++) {
-      const m = meshes.current[i];
-      if (!m) continue;
       const b = bodies[i];
-      m.position.set(b.pos.x, b.pos.y, b.pos.z);
-      m.quaternion.set(b.quat.x, b.quat.y, b.quat.z, b.quat.w);
-      const u = mats[i].uniforms;
-      let k = 0, scalar = 0;
-      for (let j = 0; j < bodies.length; j++) {
-        if (j === i) continue;
-        const o = bodies[j];
-        const rr = NEAR_CORE * jacks[j].scale;
-        u.uNear.value[k++].set(o.pos.x, o.pos.y, o.pos.z, rr);
-        if (NEAR_FALLBACK) {
-          const d = Math.hypot(o.pos.x - b.pos.x, o.pos.y - b.pos.y, o.pos.z - b.pos.z);
-          scalar += (rr * rr) / Math.max(d * d, rr * rr);
-        }
-      }
-      if (NEAR_FALLBACK) u.uNaoScalar.value = Math.min(0.6, scalar);
+      depth[i] = b.pos.z;
+      const g = groups.current[i];
+      if (!g) continue;
+      g.position.set(b.pos.x, b.pos.y, b.pos.z);
+      g.quaternion.set(b.quat.x, b.quat.y, b.quat.z, b.quat.w);
     }
+    rankByDepth(groups.current, depth);
   });
 
   return (
     <>
       {jacks.map((j, i) => (
-        <mesh
-          key={`${j.week}-${j.family}-${j.finish}`}
-          ref={(el) => { meshes.current[i] = el; }}
-          geometry={geometry}
-          material={mats[i].material}
-          scale={j.scale}
-          dispose={null}
-        />
+        // one group per jack, moved by the frame loop; two meshes on the shared geometry, both at
+        // the jack's scale: the depth pre-pass (renderOrder 0) and the glass (1) — see jackGlass.ts
+        <group key={`${j.week}-${j.family}-${j.finish}`} ref={(el) => { groups.current[i] = el; }}>
+          <mesh geometry={geometry} material={prepassMaterial} scale={j.scale} renderOrder={0} dispose={null} />
+          <mesh geometry={geometry} material={mats[i].material} scale={j.scale} renderOrder={1} dispose={null} />
+        </group>
       ))}
     </>
   );
@@ -346,9 +357,17 @@ export default function ConnectorField({
 }) {
   // Measured step-down, held as Canvas props: R3F re-asserts `dpr` on every Canvas render,
   // so a setDpr() from inside the loop would be undone by the next theme flip. Tier 1 drops
-  // to DPR 1, tier 2 switches the neighbour occlusion off.
+  // to DPR 1; tier 2 has nothing left to switch off on glass (the plastic round's neighbour
+  // loop is gone) — a documented no-op, as the hero's.
   const [tier, setTier] = useState(0);
   const debug = useMemo(() => typeof window !== "undefined" && new URLSearchParams(window.location.search).has("jacksDebug"), []);
+  // ?jacksDebug=1&jacksUnknown=N: the oldest N weeks drawn as ghosts on a payload that has no cut,
+  // so the ghost glass can be seen and cropped (the harness's zoomCard). A debug lever, not data:
+  // the legend is CommitHeatmap's and states only the payload's real cut.
+  const shown = useMemo(() => {
+    const n = debug ? unknownOverride(window.location.search) : 0;
+    return n > 0 ? jacks.map((j, i) => (i < n ? { ...j, known: false } : j)) : jacks;
+  }, [jacks, debug]);
   return (
     <Canvas
       dpr={tier >= 1 ? 1 : [1, 2]}
@@ -371,7 +390,7 @@ export default function ConnectorField({
       style={{ width: "100%", height: "100%" }}
     >
       <directionalLight position={KEY.position} intensity={KEY.intensity} />
-      <Field jacks={jacks} accent={accent} visible={active} inView={inView} rig={rig} debug={debug} tier={tier} onDegrade={() => setTier((t) => Math.min(2, t + 1))} />
+      <Field jacks={shown} accent={accent} visible={active} inView={inView} rig={rig} debug={debug} tier={tier} onDegrade={() => setTier((t) => Math.min(2, t + 1))} />
       <WakeRibbon rig={rig} visible={active} debug={debug} />
     </Canvas>
   );
