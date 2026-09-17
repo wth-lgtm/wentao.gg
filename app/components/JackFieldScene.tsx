@@ -5,14 +5,18 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { DYN, clampDelta, clickWorld, createWorld, isResting, setKeepOut, setView, stepWorld, type KeepOut, type Pointer, type World } from "../lib/jackDynamics";
 import { FIELD, LIGHT_WHITE, SEED_FIELD, atPageTop, fieldCamera, fieldCasting, fieldScales, keepOutFor, onScreen, placeWorld, retarget, solveTargets, type FieldFit, type Rect, type Slot } from "../lib/fieldLayout";
-import { KEY, NEAR_CORE, NEAR_FALLBACK, RECIPES, colorFor, environmentScene, jackGeometry, makeMaterial } from "../lib/jackMaterials";
+import { GLASS, GLASS_FRESNEL_GLSL, GLASS_RIM_GLSL, GLASS_UNIFORM_GLSL, glassRecipe } from "../lib/glassLook";
+import { KEY, environmentScene, jackGeometry } from "../lib/jackMaterials";
 import type { PointerRig } from "../lib/pointerRig";
 import { createSampler, sampleFrame } from "../lib/scenePerf";
 
-// The three.js side of the jack field (JackField.tsx is the gate). The card's object and the
-// card's look, whole — the shared geometry with its baked AO, the seven recipes and the
-// neighbour-occlusion shader, the one key and the one-plane environment (jackMaterials.ts) —
-// and the card's motion: Lusion's dynamics, the ray-only pointer push with the cursor's
+// The three.js side of the jack field (JackField.tsx is the gate). The card's object — the
+// shared geometry, the one key and the one-plane environment (jackMaterials.ts) — worn as
+// TINTED GLASS (glassLook.ts: the owner found the card's plastic solid here; the card keeps
+// it). The card's AO bake and neighbour-occlusion injection are NOT on the glass: composed
+// with alpha blending they read as a dark solid ball inside every jack (the crotch bakes at
+// 0.65, the bores at 0.01–0.2 — the first glass frame showed it), and glass takes no contact
+// crease. And the card's motion: Lusion's dynamics, the ray-only pointer push with the cursor's
 // velocity, the click burst, the swirl × idle envelope, the parked-pointer rule, rest → zero
 // frames, the keep-out band, the shared perf sampler. What differs from the card is the frame
 // (fieldLayout.ts: sixteen letter-sized jacks on a lattice in VIEWPORT space, an edge spawn,
@@ -54,13 +58,12 @@ const RAMP_S = 0.4;
 const MOVED_U = 0.5;
 // The scroll-end debounce: one rect read per scroll, not per scroll event.
 const SCROLL_END_MS = 120;
-// Occlusion neighbours per jack. The card runs count − 1 (11) because its dozen is packed and
-// any of them can touch; on a lattice a quarter-viewport apart, jackSphereOcc falls as (r/l)²
-// — a 0.55 u core three units away darkens ≤ 3% — so past the eight nearest the loop is
-// paid for and invisible. 8 of 15 cuts the fragment loop 47%: at 1440 × 900, DPR 2, the
-// sixteen discs cover ≈ 0.84 M device pixels, 6.7 M sphere-occlusion evaluations a frame
-// instead of 12.5 M (the card's panel: 0.75 M px × 11 = 8.3 M).
-const NEAR_MAX = 8;
+// Occlusion neighbours per jack: none — the glass carries no neighbour-occlusion loop (see the
+// header). For the record, the plastic round ran 8 of a possible 15 (the card runs 11 for its
+// packed dozen): jackSphereOcc falls as (r/l)², a 0.55 u core three units away darkens ≤ 3%,
+// so past the eight nearest the loop was paid for and invisible — 6.7 M sphere-occlusion
+// evaluations a frame at 1440 × 900, DPR 2 instead of 12.5 M. Glass: 0.
+const NEAR_COUNT_GLASS = 0;
 // The environment's intensity per theme. The shared rig is one plane at 4 over a 0.15 floor,
 // tuned against the card's dark panel; in the light theme that is a dark room lighting objects
 // on a white page. More fill there — the white page bouncing light back — is the honest fix;
@@ -76,10 +79,50 @@ const NEAR_MAX = 8;
 const ENV_DARK = 1.0;
 const ENV_LIGHT = 3.0;
 
-/** the slot's colour for a theme: the token for the accents, Lusion's light-mode whites in light, the recipe's hex otherwise */
-function slotColor(slot: Slot, theme: "dark" | "light", accent: string): THREE.Color {
-  if (theme === "light" && slot.family === "white") return new THREE.Color(LIGHT_WHITE[slot.finish]);
-  return colorFor(RECIPES[slot.family][slot.finish], accent);
+interface GlassMaterial { material: THREE.MeshPhysicalMaterial; glass: { uGlassOpacity: { value: number }; uGlassRim: { value: number }; uGlassPow: { value: number }; uGlassRimLight: { value: number } } }
+
+/**
+ * A slot's glass: a MeshPhysicalMaterial, transparent, alpha-blended, double-sided (the bores
+ * and the far walls read as thickness), depth-write off so overlapping jacks blend instead of
+ * cutting, the clearcoat reflecting the one-plane environment, with the Fresnel opacity and
+ * rim-light terms injected (glassLook.ts). One program for all sixteen (GLASS.PROGRAM_KEY):
+ * the injected source is the same for every family, only uniforms differ.
+ */
+function makeGlassMaterial(slot: Slot, theme: "dark" | "light", accent: string): GlassMaterial {
+  const r = glassRecipe(slot.family, slot.finish, accent, theme === "light" ? LIGHT_WHITE[slot.finish] : null);
+  const material = new THREE.MeshPhysicalMaterial({
+    color: r.color,
+    transparent: true,
+    opacity: r.opacity,
+    metalness: 0,
+    roughness: r.roughness,
+    clearcoat: GLASS.CLEARCOAT,
+    clearcoatRoughness: GLASS.CLEARCOAT_ROUGHNESS,
+    ior: GLASS.IOR,
+    specularIntensity: GLASS.SPECULAR_INTENSITY,
+    envMapIntensity: GLASS.ENV_MAP_INTENSITY,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  const glass = { uGlassOpacity: { value: r.opacity }, uGlassRim: { value: GLASS.RIM_OPACITY }, uGlassPow: { value: GLASS.FRESNEL_POWER }, uGlassRimLight: { value: GLASS.RIM_LIGHT } };
+  material.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, glass);
+    shader.fragmentShader = shader.fragmentShader
+      .replace("#include <common>", "#include <common>\n" + GLASS_UNIFORM_GLSL)
+      .replace("#include <normal_fragment_begin>", "#include <normal_fragment_begin>\n" + GLASS_FRESNEL_GLSL)
+      .replace("#include <opaque_fragment>", GLASS_RIM_GLSL + "\n#include <opaque_fragment>");
+  };
+  material.customProgramCacheKey = () => GLASS.PROGRAM_KEY;
+  return { material, glass };
+}
+
+/** recolour a slot's glass in place for a theme/accent flip: tint, opacity and roughness are uniforms */
+function tintGlass(m: GlassMaterial, slot: Slot, theme: "dark" | "light", accent: string): void {
+  const r = glassRecipe(slot.family, slot.finish, accent, theme === "light" ? LIGHT_WHITE[slot.finish] : null);
+  m.material.color.set(r.color);
+  m.material.opacity = r.opacity;
+  m.glass.uGlassOpacity.value = r.opacity;
+  m.material.roughness = r.roughness;
 }
 
 interface Debug {
@@ -94,8 +137,10 @@ interface Debug {
   camZ: number;
   tier: number;
   meshes: number;
-  /** occlusion neighbours per jack */
+  /** occlusion neighbours per jack (0: the glass carries no neighbour loop) */
   near: number;
+  /** how many times layout() has re-solved (mount, resize, the h1 or the card changing size) */
+  layouts: number;
   /** the lattice slots culled at birth (fieldLayout.solveTargets) */
   culled: number[];
   fit: FieldFit | null;
@@ -153,17 +198,16 @@ function Field({ count, accent, theme, visible, rig, debug, tier, onDegrade }: {
   const geometry = useMemo(jackGeometry, []);
   const scales = useMemo(() => fieldScales(count, SEED_FIELD), [count]);
   const slots = useMemo(() => fieldCasting(count, SEED_FIELD), [count]);
-  const near = Math.max(1, Math.min(NEAR_MAX, count - 1));
   // Materials are born once per count; the theme and the accent recolour IN PLACE (the card's
-  // reason: rebuilding disposed the program and recompiled it on every toggle). Sixteen
-  // materials, one program (jackMaterials.makeMaterial's one cache key).
-  const mats = useMemo(() => slots.map((s) => makeMaterial(RECIPES[s.family][s.finish], near)), [slots, near]);
+  // reason: rebuilding disposed the program and recompiled it on every toggle). Sixteen glass
+  // materials, one program (GLASS.PROGRAM_KEY).
+  const mats = useMemo(() => slots.map((s) => makeGlassMaterial(s, "dark", "#3b82f6")), [slots]);
   useEffect(() => {
     invalidate();
     return () => mats.forEach((m) => m.material.dispose());
   }, [mats, invalidate]);
   useEffect(() => {
-    mats.forEach((m, i) => m.material.color.copy(slotColor(slots[i], theme, accent)));
+    mats.forEach((m, i) => tintGlass(m, slots[i], theme, accent));
     invalidate();
   }, [accent, theme, mats, slots, invalidate]);
   const meshes = useRef<(THREE.Mesh | null)[]>([]);
@@ -181,6 +225,7 @@ function Field({ count, accent, theme, visible, rig, debug, tier, onDegrade }: {
   const enteredAt = useRef<number | null>(null);
   const frozen = useRef(false);
   const frames = useRef(0);
+  const layouts = useRef(0);
   const firstFrame = useRef(true);
   const env = useRef({ E: 0, aliveUntil: -Infinity, wasOver: false, wasVisible: false, movedAt: -Infinity, rigX: NaN, rigY: NaN });
   const perf = useMemo(createSampler, []);
@@ -226,6 +271,7 @@ function Field({ count, accent, theme, visible, rig, debug, tier, onDegrade }: {
   // world from the kept slots and spawns it beyond the edges; later calls retarget and wake.
   const layout = useRef(() => {});
   layout.current = () => {
+    layouts.current++;
     const span = document.querySelector<HTMLElement>("[data-hero-h1] span");
     const font = span ? parseFloat(getComputedStyle(span).fontSize) : null;
     const fit = fieldCamera(size.width, size.height, font);
@@ -323,12 +369,6 @@ function Field({ count, accent, theme, visible, rig, debug, tier, onDegrade }: {
     return () => { clearTimeout(timer); window.removeEventListener("scroll", onScroll); };
   }, []);
 
-  // Perf tier 2: the neighbour loop off (a uniform, no recompile).
-  useEffect(() => {
-    mats.forEach((m) => { m.uniforms.uNao.value = tier >= 2 ? 0 : 1; });
-    invalidate();
-  }, [tier, mats, invalidate]);
-
   // The field's pointer wakes the loop; a move anywhere over the page is enough.
   useEffect(() => {
     rig.bind(wake.current);
@@ -379,7 +419,8 @@ function Field({ count, accent, theme, visible, rig, debug, tier, onDegrade }: {
       get camZ() { return camera.position.z; },
       get tier() { return tier; },
       get meshes() { return meshes.current.filter((m) => m && m.visible).length; },
-      get near() { return near; },
+      get near() { return NEAR_COUNT_GLASS; },
+      get layouts() { return layouts.current; },
       get culled() { return culledRef.current; },
       get fit() { return worldRef.current ? fitRef.current : null; },
       get keepOuts() { return keep.current.boxes; },
@@ -395,10 +436,7 @@ function Field({ count, accent, theme, visible, rig, debug, tier, onDegrade }: {
       setEnvIntensity: (v: number) => { envOverride.current = v; scene.environmentIntensity = v; invalidate(); },
     };
     return () => { delete w.__field; };
-  }, [debug, scales, slots, near, camera, scene, tier, rig, invalidate]);
-
-  // scratch for the nearest-neighbour pick, reused across frames
-  const nearScratch = useMemo<{ d: number; q: number }[]>(() => [], []);
+  }, [debug, scales, slots, camera, scene, tier, rig, invalidate]);
 
   useFrame((_, rawDelta) => {
     frames.current++;
@@ -462,10 +500,9 @@ function Field({ count, accent, theme, visible, rig, debug, tier, onDegrade }: {
       else invalidate();
     }
 
-    // meshes and the neighbour uniforms follow the bodies by slot (spawn positions included, so
-    // the first frame shows the set arriving); a culled slot's mesh stays invisible. Each jack
-    // hands its shader the NEAR_MAX nearest others; slots beyond the live neighbours hold a
-    // far, negligible sphere.
+    // meshes follow the bodies by slot (spawn positions included, so the first frame shows the
+    // set arriving); a culled slot's mesh stays invisible. three sorts the transparent meshes
+    // back to front by distance each frame; with depth writes off, an overlap blends.
     const bodies = world.bodies;
     const slots_ = slotOf.current;
     for (let slot = 0; slot < meshes.current.length; slot++) {
@@ -477,23 +514,6 @@ function Field({ count, accent, theme, visible, rig, debug, tier, onDegrade }: {
       const b = bodies[j];
       m.position.set(b.pos.x, b.pos.y, b.pos.z);
       m.quaternion.set(b.quat.x, b.quat.y, b.quat.z, b.quat.w);
-      const u = mats[slot].uniforms;
-      nearScratch.length = 0;
-      for (let q = 0; q < bodies.length; q++) {
-        if (q === j) continue;
-        const o = bodies[q];
-        nearScratch.push({ d: (o.pos.x - b.pos.x) ** 2 + (o.pos.y - b.pos.y) ** 2 + (o.pos.z - b.pos.z) ** 2, q });
-      }
-      nearScratch.sort((a, c) => a.d - c.d);
-      let k = 0, scalar = 0;
-      for (let i = 0; i < nearScratch.length && k < u.uNear.value.length; i++) {
-        const o = bodies[nearScratch[i].q];
-        const rr = NEAR_CORE * scales[slots_[nearScratch[i].q]];
-        u.uNear.value[k++].set(o.pos.x, o.pos.y, o.pos.z, rr);
-        if (NEAR_FALLBACK) scalar += (rr * rr) / Math.max(nearScratch[i].d, rr * rr);
-      }
-      for (; k < u.uNear.value.length; k++) u.uNear.value[k].set(0, 0, 1e3, 1e-3);
-      if (NEAR_FALLBACK) u.uNaoScalar.value = Math.min(0.6, scalar);
     }
   });
 
@@ -525,7 +545,7 @@ export default function JackFieldScene({ count, accent, theme, visible, rig }: {
   rig: PointerRig;
 }) {
   // Measured step-down, held as Canvas props (R3F re-asserts `dpr` on every Canvas render).
-  // Tier 1 drops to DPR 1, tier 2 switches the neighbour occlusion off.
+  // Tier 1 drops to DPR 1; tier 2 has nothing left to switch off on glass (a documented no-op).
   const [tier, setTier] = useState(0);
   const debug = useMemo(() => typeof window !== "undefined" && new URLSearchParams(window.location.search).has("jacksDebug"), []);
   return (
