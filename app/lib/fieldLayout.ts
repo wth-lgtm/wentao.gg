@@ -1,28 +1,37 @@
-// The stone field's frame: a FIXED, page-wide layer, so everything here is in viewport space
-// and nothing is anchored to a section's DOM. How big a stone is (from the wordmark's font
-// size), where the camera sits, where the sixteen settle (a jittered lattice), how they
-// arrive (beyond the nearest edge), and how a DOM rect becomes a keep-out box while it is on
-// screen. Pure — the scene measures and hands things in; every rule runs in node at
-// 1440 × 900, 1024 × 768 and 1440 × 700.
+// The jack field's frame: a FIXED, page-wide layer, so everything here is in viewport space
+// and nothing is anchored to a section's DOM. How big a jack is (from the wordmark's font
+// size), where the camera sits, where the sixteen settle (a jittered lattice, solved against
+// what is on screen), how they arrive (beyond the nearest edge), which recipe each wears, and
+// how a DOM rect becomes a keep-out box while it is on screen. Pure — the scene measures and
+// hands things in; every rule runs in node at 1440 × 900, 1024 × 768, 1440 × 700, 1366 × 768.
+//
+// The object is the card's jack (jackGeometry.ts, jackMaterials.ts) — the owner compared and
+// kept it: "the previous one that's exactly the same as lusion looks better with the black
+// white and blue color scheme". What this module changes about the card is DATA: count, scale,
+// homes, and a casting that means nothing.
 
+import type { Family, Finish } from "./connectorJacks";
 import { DYN, type KeepOut, type Vec3, type World } from "./jackDynamics";
 import { rand } from "./seed";
-import { STONE } from "./stoneGeometry";
 
 export const FIELD = {
   /** Lusion's lens, as on the card: narrow, fixed, no parallax */
   FOV: 25,
   NEAR: 2,
   FAR: 80,
-  /** a unit stone's diameter = this × the h1's computed font size: the largest cast (1.15) ≈ the wordmark's cap height, the smallest (0.72) ≈ a lowercase letter */
-  D_PER_FONT: 1.1,
-  /** a unit stone spans 2·STONE.R */
-  UNIT_DIAM: 2 * STONE.R,
+  /**
+   * a unit jack's diameter = this × the h1's computed font size — between the hero's 1.25
+   * (seven jacks) and the stones' 1.1 (sixteen), because sixteen jacks with arms read larger
+   * than sixteen stones: 129 px beside the 112 px wordmark at 1440 × 900
+   */
+  D_PER_FONT: 1.15,
+  /** the jack's diameter at scale 1, as the card measures it */
+  UNIT_DIAM: 2.2,
   /** without an h1 to measure (a project page), the view is this many units tall */
   FALLBACK_VIEW_H: 9,
   Z_MIN: 24,
   Z_MAX: 40,
-  /** the entrance spawns each stone this many of its own diameters beyond its nearest edge */
+  /** the entrance spawns each jack this many of its own diameters beyond its nearest edge */
   SPAWN_D: 1.5,
   /** sixteen at or above this viewport, ten below */
   WIDE_W: 1280,
@@ -46,7 +55,7 @@ export function fieldCount(viewportW: number, viewportH: number): number {
 }
 
 /**
- * Scales for `count` stones over [SCALE_MIN, SCALE_MAX], stratified — the i-th of sixteen
+ * Scales for `count` jacks over [SCALE_MIN, SCALE_MAX], stratified — the i-th of sixteen
  * draws from the i-th sixteenth of the range, then the order is shuffled — so ten or sixteen
  * cover the whole range and no two draws collide. A prefix of the sixteen for ten.
  */
@@ -59,6 +68,35 @@ export function fieldScales(count: number, seed: number): number[] {
   }
   return strata.slice(0, Math.max(0, Math.min(count, n)));
 }
+
+export interface Slot { family: Family; finish: Finish }
+const cast = (family: Family, finish: Finish, n: number): Slot[] => Array.from({ length: n }, () => ({ family, finish }));
+/**
+ * The casting — the card's black / white / cobalt, matte majority, glossy accents. Sixteen:
+ * accent 5 (4 matte, 1 glossy), white 6 (5 matte, 1 glossy), black 5 (3 matte, 2 glossy).
+ * Ten: accent 3 (2/1), white 4 (3/1), black 3 (2/1). Shuffled once with the seed (Fisher–
+ * Yates, the swap partner drawn per position, as the card's casting) so the families
+ * interleave across the lattice. Never data.
+ */
+export const CAST_16: readonly Slot[] = [...cast("accent", "matte", 4), ...cast("accent", "glossy", 1), ...cast("white", "matte", 5), ...cast("white", "glossy", 1), ...cast("black", "matte", 3), ...cast("black", "glossy", 2)];
+export const CAST_10: readonly Slot[] = [...cast("accent", "matte", 2), ...cast("accent", "glossy", 1), ...cast("white", "matte", 3), ...cast("white", "glossy", 1), ...cast("black", "matte", 2), ...cast("black", "glossy", 1)];
+export function fieldCasting(count: number, seed: number): Slot[] {
+  const base = count >= 16 ? CAST_16 : CAST_10;
+  const out = base.map((s) => ({ ...s }));
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rand(i, seed + 31) * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out.slice(0, Math.max(0, Math.min(count, out.length)));
+}
+
+/**
+ * Light theme: the card's white family was tuned against its opaque panel; on the page's
+ * #ffffff a #d4d6db matte white's lit face vanished (measured in v1: a tenth of its pixels
+ * within 8% of the page). Lusion's own light-mode toggle values for the whites, as a
+ * field-side override — the card is untouched. Roughness and clearcoat stay the recipe's.
+ */
+export const LIGHT_WHITE: Readonly<Record<Finish, string>> = { matte: "#8e9098", glossy: "#a3a5ad" };
 
 export interface FieldFit {
   z: number;
@@ -75,8 +113,8 @@ export interface FieldFit {
  * The camera for a viewport of `width × height`: px/u from the size rule when an h1 is there
  * to measure (`h1FontPx`), else height / FALLBACK_VIEW_H; z from the height at that px/u,
  * clamped to [Z_MIN, Z_MAX], and px/u re-solved from the clamped view when the clamp binds.
- * 1440 × 900 with the 112 px h1: 61.6 px/u, z 32.9; 1024 × 768 (92.16 px): 50.7 px/u,
- * z 34.2; 1440 × 700: z 25.6; no h1 at 900 tall: 100 px/u wants z 20.3, gets 24 → 84.6 px/u.
+ * 1440 × 900 with the 112 px h1: 58.5 px/u, z 34.7; 1024 × 768 (92.16 px): 48.2 px/u,
+ * z 36.0; 1440 × 700: z 27.0; no h1 at 900 tall: 100 px/u wants z 20.3, gets 24 → 84.6 px/u.
  */
 export function fieldCamera(width: number, height: number, h1FontPx: number | null): FieldFit {
   const tan = Math.tan((FIELD.FOV / 2) * (Math.PI / 180));
@@ -112,10 +150,10 @@ export function latticeShape(count: number): { cols: number; rows: number } {
 }
 
 /**
- * Pull targets: a jittered lattice across the viewport inside MARGIN, one stone per cell in
- * a seeded order, each within JITTER of its cell's centre; z alternates in sign down the
+ * Raw pull targets: a jittered lattice across the viewport inside MARGIN, one jack per cell
+ * in a seeded order, each within JITTER of its cell's centre; z alternates in sign down the
  * list with magnitudes 0.25, 0.75, 1.25, 1.75 (of Z_MAX_ABS 2) so no two neighbours share a
- * depth. Re-solved on resize; never anchored to the page's DOM — the layer is fixed.
+ * depth. Never anchored to the page's DOM — the layer is fixed.
  */
 export function latticeTargets(fit: FieldFit, count: number, seed: number): Vec3[] {
   const { cols, rows } = latticeShape(count);
@@ -161,25 +199,25 @@ export interface Solved {
 /**
  * The lattice, made to live with what is on screen when it is solved (mount, resize): each
  * target's disc is pushed out of every `avoid` box's band to exactly KEEP_BAND — where the
- * band's force is zero, so a stone rests ON its target — along the nearest face, or along the
+ * band's force is zero, so a jack rests ON its target — along the nearest face, or along the
  * perpendicular face when the nearest one would put the disc outside the view (on a 700 px
  * viewport the visitor card's band reaches both edges, and a slot in its column can only leave
  * sideways); four passes because a push out of one box can land in another's band; then the
  * disc is clamped inside the view; then a slot whose disc the clamp left more than 0.25 D
- * inside a band is culled (the band would hold that stone off its home for as long as the box
+ * inside a band is culled (the band would hold that jack off its home for as long as the box
  * is on screen). The band is evaluated where the CAMERA sees the target: a slot at depth z
  * projects onto z = 0 by proj = z_cam / (z_cam − z), so the clearance is taken at q·proj with
  * the push divided by proj — a z −1.75 target sits 5% nearer the centre than its world x says,
  * a z +1.75 one 6% further out. Solved once per layout, never on scroll: the layer is fixed,
- * the page moves under it, and a stone's home must not move when the hero scrolls off.
+ * the page moves under it, and a jack's home must not move when the hero scrolls off.
  */
 export function solveTargets(fit: FieldFit, count: number, seed: number, scales: readonly number[], avoid: readonly KeepOut[], cull = true): Solved {
   const raw = latticeTargets(fit, count, seed);
   const targets: Vec3[] = [];
   const culled: number[] = [];
   raw.forEach((t, i) => {
-    const r = STONE.R * (scales[i] ?? 1);
-    const D = 2 * r;
+    const r = DYN.BODY_R * (scales[i] ?? 1);
+    const D = FIELD.UNIT_DIAM * (scales[i] ?? 1);
     const proj = fit.z / (fit.z - t.z);
     const mx = fit.viewW / 2 - r, my = fit.viewH / 2 - r;
     const inView = (px: number, py: number) => Math.abs(px) <= mx + 1e-9 && Math.abs(py) <= my + 1e-9;
@@ -212,14 +250,16 @@ export function solveTargets(fit: FieldFit, count: number, seed: number, scales:
 }
 
 /**
- * The entrance, no dolly: each body spawns beyond its NEAREST viewport edge by SPAWN_D of
- * its own diameter, the other coordinate kept, with Lusion's vel = SPAWN_VEL·(pos − target).
+ * The entrance, no dolly (a dolly changes the CSS→world mapping the keep-out depends on):
+ * each body spawns beyond its NEAREST viewport edge by SPAWN_D of its own diameter, the other
+ * coordinate kept, with Lusion's vel = SPAWN_VEL·(pos − target). Orientations keep
+ * createWorld's seeded draw.
  */
 export function placeWorld(world: World, targets: readonly Vec3[], fit: FieldFit): void {
   world.bodies.forEach((b, i) => {
     const t = targets[i];
     if (!t) return;
-    const D = 2 * b.r;
+    const D = FIELD.UNIT_DIAM * (b.r / DYN.BODY_R);
     const edges = [fit.viewW / 2 + t.x, fit.viewW / 2 - t.x, fit.viewH / 2 + t.y, fit.viewH / 2 - t.y]; // left, right, bottom, top
     const nearest = edges.indexOf(Math.min(...edges));
     const pos = { x: t.x, y: t.y, z: t.z };

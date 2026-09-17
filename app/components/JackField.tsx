@@ -5,17 +5,17 @@ import dynamic from "next/dynamic";
 import { useTheme } from "./ThemeProvider";
 import { fieldCount } from "../lib/fieldLayout";
 import { createPointerRig } from "../lib/pointerRig";
-import type { StoneTokens } from "../lib/stonePalette";
 
-// The stone field — sixteen soft octahedra in Lusion's dynamics (jackDynamics.ts), a FIXED,
-// page-wide layer. The owner's four notes on the hero's jacks: a different object, a palette
-// that matches the page's matte tone, more to play with, and "if the user scrolls, should
-// those objects stay in place as well?" — so the field lives in viewport space, rendered from
-// page.tsx right after the fluid: above the fluid (both z-10, this one later in the DOM),
-// below every section's z-20 content, and it does not scroll — the page scrolls under it and
-// the mouse can play with the stones anywhere. This file is the gate and the plumbing; the
-// three.js side is StoneFieldScene.tsx behind dynamic() so three never enters the page's
-// chunk (page.tsx is a server component, where `ssr: false` is not allowed).
+// The jack field — sixteen of the GitHub card's six-way connector jacks in Lusion's dynamics
+// (jackDynamics.ts), a FIXED, page-wide layer. The owner's notes across three rounds: the
+// card's object and its black / white / cobalt ("the previous one that's exactly the same as
+// lusion looks better"), more to play with, and "if the user scrolls, should those objects
+// stay in place as well?" — so the field lives in viewport space, rendered from page.tsx right
+// after the fluid: above the fluid (both z-10, this one later in the DOM), below every
+// section's z-20 content, and it does not scroll — the page scrolls under it and the mouse
+// can play with the jacks anywhere. This file is the gate and the plumbing; the three.js side
+// is JackFieldScene.tsx behind dynamic() so three never enters the page's chunk (page.tsx is a
+// server component, where `ssr: false` is not allowed).
 //
 // GATE — the card's: a fine hover pointer, no reduced-motion preference, ≥ 640 px. Below it
 // nothing mounts, not even the host div. Init is deferred like the fluid's (requestIdleCallback
@@ -26,25 +26,18 @@ import type { StoneTokens } from "../lib/stonePalette";
 // card's PointerRig shape in viewport fractions; the scene reads it per frame. No scroll
 // listener anywhere: a fixed layer has nothing to do on scroll, and a scroll must not wake it.
 //
-// TOKENS — the palette is computed from --background/--card/--foreground/--accent, read a
-// microtask after the theme flips (the card's reason: a child's passive effect runs before
-// the ThemeProvider has flipped the <html> class), so both themes are first-class by
-// construction and a flip recolours in place.
+// ACCENT — the themed --accent token, re-read a microtask after the theme flips (the card's
+// reason: a child's passive effect runs before the ThemeProvider has flipped the <html> class,
+// and a synchronous read returned the OUTGOING theme's token); the theme itself goes with it
+// so the white family can take its light-mode values (fieldLayout.LIGHT_WHITE).
 
-const StoneFieldScene = dynamic(() => import("./StoneFieldScene"), { ssr: false });
+const JackFieldScene = dynamic(() => import("./JackFieldScene"), { ssr: false });
 
-const readTokens = (): StoneTokens | null => {
-  const cs = getComputedStyle(document.documentElement);
-  const get = (name: string) => cs.getPropertyValue(name).trim();
-  const t = { background: get("--background"), card: get("--card"), foreground: get("--foreground"), accent: get("--accent") };
-  return t.background && t.card && t.foreground && t.accent ? t : null;
-};
-
-export default function StoneField() {
+export default function JackField() {
   const [born, setBorn] = useState(false);
   const [count, setCount] = useState(16);
   const [awake, setAwake] = useState(true);
-  const [tokens, setTokens] = useState<StoneTokens | null>(null);
+  const [accentHex, setAccentHex] = useState("#3b82f6");
   const { resolvedTheme } = useTheme();
   // Mutated in place, read by the scene's frame loop — no re-render per pointer move.
   const rig = useMemo(() => createPointerRig(), []);
@@ -109,16 +102,16 @@ export default function StoneField() {
     let live = true;
     queueMicrotask(() => {
       if (!live) return;
-      const t = readTokens();
-      if (t) setTokens(t);
+      const a = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim();
+      if (a) setAccentHex(a);
     });
     return () => { live = false; };
   }, [resolvedTheme]);
 
-  if (!born || !tokens) return null;
+  if (!born) return null;
   return (
     <div aria-hidden className="fixed inset-0 z-10 pointer-events-none">
-      <StoneFieldScene count={count} tokens={tokens} visible={awake} rig={rig} />
+      <JackFieldScene count={count} accent={accentHex} theme={resolvedTheme} visible={awake} rig={rig} />
     </div>
   );
 }

@@ -53,7 +53,7 @@ export interface KeepOut {
   /** half-extents */
   hw: number;
   hh: number;
-  /** the band's acceleration for this box as a fraction of K_KEEP; absent = 1 (the stone field's visitor card runs at 0.5) */
+  /** the band's acceleration for this box as a fraction of K_KEEP; absent = 1 (the jack field's visitor card runs at 0.5) */
   strength?: number;
 }
 
@@ -196,8 +196,8 @@ export function clampDelta(delta: number): number {
  * Twelve bodies in Lusion's spawn box, flying toward the centre, with a random initial
  * orientation each (texture, not data: a six-way jack is symmetric under 90° turns, so
  * twelve identity quaternions would fly in as one aligned set). `bodyR` is the unit body's
- * collision radius — BODY_R for the jack, whose arm tips lie on the 1.05 sphere; the stone
- * field passes its own (stoneGeometry.ts STONE.R).
+ * collision radius — BODY_R for the jack, whose arm tips lie on the 1.05 sphere; another
+ * object would pass its own.
  */
 export function createWorld(scales: readonly number[], view: { viewW: number; viewH: number }, seed: number, bodyR: number = DYN.BODY_R): World {
   const n = scales.length;

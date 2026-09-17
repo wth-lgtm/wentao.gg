@@ -353,10 +353,10 @@ test("keep-out: a box's strength scales the band — half strength, half the pus
   };
   assert.ok(Math.abs(push(0.5) / push() - 0.5) < 1e-9, `half strength pushed ${push(0.5)} vs full ${push()}`);
   assert.equal(push(undefined), push(1));
-  const stones = createWorld([1, 0.72], { viewW: 24, viewH: 15 }, SEED, 1.0);
-  assert.equal(stones.bodies[0].r, 1.0);
-  assert.ok(Math.abs(stones.bodies[1].r - 0.72) < 1e-12);
-  assert.ok(Math.abs(stones.bodies[0].m - (4 / 3) * Math.PI) < 1e-9, "mass follows the radius passed");
+  const other = createWorld([1, 0.72], { viewW: 24, viewH: 15 }, SEED, 1.0);
+  assert.equal(other.bodies[0].r, 1.0);
+  assert.ok(Math.abs(other.bodies[1].r - 0.72) < 1e-12);
+  assert.ok(Math.abs(other.bodies[0].m - (4 / 3) * Math.PI) < 1e-9, "mass follows the radius passed");
   const jacks = createWorld([1], { viewW: 24, viewH: 15 }, SEED);
   assert.equal(jacks.bodies[0].r, DYN.BODY_R, "the card's default is untouched");
 });

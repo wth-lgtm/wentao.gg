@@ -27,8 +27,6 @@ export const KEY = { position: [6, 8, 2.5] as [number, number, number], intensit
 // lines) rather than drei's Environment, which statically imports gainmap-js, RGBELoader,
 // EXRLoader and GroundProjectedEnv (772 KB dist) even when it fetches nothing.
 export const ENV = { plane: [6, 4] as [number, number], position: [5, 6, 4] as [number, number, number], intensity: 4, floor: 0.15 };
-/** the stone field's environmentIntensity: matte stones (roughness 0.78–0.9, no clearcoat) need less of the plane's sheen than the card's clearcoats at 1.0 */
-export const ENV_INTENSITY_STONES = 0.8;
 
 // Per-mesh neighbour occlusion: the other bodies as spheres of their CORE radius (0.55·scale
 // — the 1.05 body sphere is ~70% empty and at contact subtends 90°, a smudge not a crease),

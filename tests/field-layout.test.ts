@@ -1,9 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { FIELD, SEED_FIELD, fieldCamera, fieldCount, fieldScales, keepOutFor, latticeShape, latticeTargets, onScreen, placeWorld, solveTargets, type Rect } from "../app/lib/fieldLayout";
+import { CAST_10, CAST_16, FIELD, LIGHT_WHITE, SEED_FIELD, fieldCamera, fieldCasting, fieldCount, fieldScales, keepOutFor, latticeShape, latticeTargets, onScreen, placeWorld, solveTargets, type Rect } from "../app/lib/fieldLayout";
 import { DYN, createWorld } from "../app/lib/jackDynamics";
-import { STONE } from "../app/lib/stoneGeometry";
 
 const TAN = Math.tan((FIELD.FOV / 2) * Math.PI / 180);
 
@@ -17,15 +16,15 @@ test("sixteen at ≥ 1280 × 800, ten below; a 4 × 4 lattice for sixteen, 5 × 
   assert.deepEqual(latticeShape(10), { cols: 5, rows: 2 });
 });
 
-test("the size rule: a unit stone's diameter is 1.1 × the h1's font size — 123 px beside a 112 px wordmark — and the camera is solved from it", () => {
+test("the size rule: a unit jack's diameter is 1.15 × the h1's font size — 129 px beside a 112 px wordmark — and the camera is solved from it", () => {
   const a = fieldCamera(1440, 900, 112);
-  assert.ok(Math.abs(a.pxPerUnit * FIELD.UNIT_DIAM - 1.1 * 112) < 1e-9);
-  assert.ok(Math.abs(a.pxPerUnit - 61.6) < 0.01 && Math.abs(a.z - 32.95) < 0.01, `${a.pxPerUnit} px/u, z ${a.z}`);
+  assert.ok(Math.abs(a.pxPerUnit * FIELD.UNIT_DIAM - 1.15 * 112) < 1e-9);
+  assert.ok(Math.abs(a.pxPerUnit - 58.55) < 0.01 && Math.abs(a.z - 34.67) < 0.01, `${a.pxPerUnit} px/u, z ${a.z}`);
   assert.ok(Math.abs(a.viewH - 2 * a.z * TAN) < 1e-9 && Math.abs(a.viewW - a.viewH * 1.6) < 1e-9);
   const b = fieldCamera(1024, 768, 92.16);
-  assert.ok(Math.abs(b.pxPerUnit - 50.69) < 0.01 && Math.abs(b.z - 34.17) < 0.01, `${b.pxPerUnit} px/u, z ${b.z}`);
+  assert.ok(Math.abs(b.pxPerUnit - 48.17) < 0.01 && Math.abs(b.z - 35.96) < 0.01, `${b.pxPerUnit} px/u, z ${b.z}`);
   const c = fieldCamera(1440, 700, 112);
-  assert.ok(Math.abs(c.z - 25.63) < 0.01 && c.z > FIELD.Z_MIN, `z ${c.z}`);
+  assert.ok(Math.abs(c.z - 26.97) < 0.01 && c.z > FIELD.Z_MIN, `z ${c.z}`);
   // the largest cast ≈ the wordmark's cap height, the smallest ≈ a lowercase letter
   assert.ok(FIELD.SCALE_MAX * a.pxPerUnit * FIELD.UNIT_DIAM > 0.7 * 112 * 1.6 && FIELD.SCALE_MIN * a.pxPerUnit * FIELD.UNIT_DIAM < 0.6 * 112 * 1.6);
 });
@@ -50,6 +49,27 @@ test("scales: stratified over 0.72–1.15 so ten or sixteen cover the range; ten
   assert.deepEqual(fieldScales(10, SEED_FIELD), s16.slice(0, 10));
 });
 
+test("casting: sixteen = accent 5 (4 matte, 1 glossy), white 6 (5/1), black 5 (3/2); ten = 3 (2/1), 4 (3/1), 3 (2/1); shuffled by the seed, deterministic, the families interleaved", () => {
+  const tally = (slots: readonly { family: string; finish: string }[]) => {
+    const t: Record<string, number> = {};
+    for (const s of slots) t[`${s.family}-${s.finish}`] = (t[`${s.family}-${s.finish}`] ?? 0) + 1;
+    return t;
+  };
+  assert.deepEqual(tally(CAST_16), { "accent-matte": 4, "accent-glossy": 1, "white-matte": 5, "white-glossy": 1, "black-matte": 3, "black-glossy": 2 });
+  assert.deepEqual(tally(CAST_10), { "accent-matte": 2, "accent-glossy": 1, "white-matte": 3, "white-glossy": 1, "black-matte": 2, "black-glossy": 1 });
+  const c16 = fieldCasting(16, SEED_FIELD), c10 = fieldCasting(10, SEED_FIELD);
+  assert.deepEqual(tally(c16), tally(CAST_16));
+  assert.deepEqual(tally(c10), tally(CAST_10));
+  assert.notDeepEqual(c16, [...CAST_16], "it is shuffled");
+  assert.deepEqual(fieldCasting(16, SEED_FIELD), c16);
+  // interleaved: no run of the same family longer than three in slot order
+  let run = 1, worst = 1;
+  for (let i = 1; i < c16.length; i++) { run = c16[i].family === c16[i - 1].family ? run + 1 : 1; worst = Math.max(worst, run); }
+  assert.ok(worst <= 3, `a run of ${worst} of one family`);
+  // Lusion's light-mode whites, a field-side override
+  assert.deepEqual(LIGHT_WHITE, { matte: "#8e9098", glossy: "#a3a5ad" });
+});
+
 for (const [w, h, font, count] of [[1440, 900, 112, 16], [1024, 768, 92.16, 10], [1440, 700, 112, 10]] as const) {
   test(`lattice at ${w} × ${h}: ${count} targets inside the 8% margins, one per cell, z alternating in [−2, 2]`, () => {
     const fit = fieldCamera(w, h, font);
@@ -67,7 +87,6 @@ for (const [w, h, font, count] of [[1440, 900, 112, 16], [1024, 768, 92.16, 10],
       const d = Math.hypot(t[i].x - t[j].x, t[i].y - t[j].y);
       assert.ok(d >= (1 - 2 * FIELD.JITTER) * Math.min(cellW, cellH) - 1e-9, `T${i} and T${j} share a cell (${d} u apart)`);
     }
-    // every cell used once for sixteen
     if (count === 16) {
       const cells = new Set(t.map((p) => `${Math.floor((p.x + fit.viewW / 2 - fit.viewW * FIELD.MARGIN) / cellW)},${Math.floor((fit.viewH / 2 - fit.viewH * FIELD.MARGIN - p.y) / cellH)}`));
       assert.equal(cells.size, 16);
@@ -87,16 +106,16 @@ test("keep-out from a viewport rect: the h1 at 1440 × 900 becomes a box on z = 
   assert.equal(onScreen({ left: 144, top: 890, right: 799, bottom: 1000 }, 1440, 900), true);
 });
 
-test("the entrance spawns beyond the NEAREST viewport edge by 1.5 D with vel = −2·(pos − target); the body radius is the stone's", () => {
+test("the entrance spawns beyond the NEAREST viewport edge by 1.5 D with vel = −2·(pos − target); the body radius is the card's 1.05·scale", () => {
   const fit = fieldCamera(1440, 900, 112);
   const scales = fieldScales(16, SEED_FIELD);
-  const w = createWorld(scales, fit, SEED_FIELD, STONE.R);
+  const w = createWorld(scales, fit, SEED_FIELD);
   const t = latticeTargets(fit, 16, SEED_FIELD);
   placeWorld(w, t, fit);
   w.bodies.forEach((b, i) => {
-    assert.ok(Math.abs(b.r - scales[i]) < 1e-12, "r = 1.0 · scale");
+    assert.ok(Math.abs(b.r - DYN.BODY_R * scales[i]) < 1e-12, "r = 1.05 · scale");
     assert.deepEqual(b.target, t[i]);
-    const D = 2 * b.r;
+    const D = FIELD.UNIT_DIAM * scales[i];
     const beyondX = Math.abs(b.pos.x) - fit.viewW / 2, beyondY = Math.abs(b.pos.y) - fit.viewH / 2;
     assert.ok(Math.abs(Math.max(beyondX, beyondY) - FIELD.SPAWN_D * D) < 1e-9, `T${i} spawned ${Math.max(beyondX, beyondY)} u beyond the edge`);
     assert.ok((beyondX > 0) !== (beyondY > 0), "one axis moved, the other kept");
@@ -130,29 +149,27 @@ for (const [key, rects] of Object.entries(HERO_RECTS)) {
     assert.equal(targets.length, count);
     let exactlyClear = 0;
     targets.forEach((t, i) => {
-      const r = STONE.R * scales[i];
+      const r = DYN.BODY_R * scales[i];
       const proj = fit.z / (fit.z - t.z);
       assert.ok(Math.abs(t.x) <= fit.viewW / 2 - r + 1e-9 && Math.abs(t.y) <= fit.viewH / 2 - r + 1e-9, `slot ${i} disc leaves the view at (${t.x}, ${t.y})`);
       let worst = Infinity;
       for (const k of avoid) worst = Math.min(worst, clearanceOf(t.x * proj, t.y * proj, r, k));
       // the reviewer's rule: a kept slot is never more than a quarter-diameter into a band; almost all sit exactly at its edge
-      assert.ok(DYN.KEEP_BAND - worst <= 0.25 * 2 * r + 1e-9, `slot ${i} (z ${t.z}) sits ${worst} u from a box in projection — ${DYN.KEEP_BAND - worst} u into the band`);
+      assert.ok(DYN.KEEP_BAND - worst <= 0.25 * FIELD.UNIT_DIAM * scales[i] + 1e-9, `slot ${i} (z ${t.z}) sits ${worst} u from a box in projection — ${DYN.KEEP_BAND - worst} u into the band`);
       assert.ok(worst >= 0, `slot ${i}'s disc is over a box (${worst} u)`);
       if (worst >= DYN.KEEP_BAND - 1e-9) exactlyClear++;
     });
     assert.ok(exactlyClear >= count - 2, `${count - exactlyClear} of ${count} slots rest inside a band`);
-    // the pushes moved something: the raw lattice had slots behind the wordmark and the card
     const raw = latticeTargets(fit, count, SEED_FIELD);
     const moved = targets.filter((t, i) => Math.hypot(t.x - raw[i].x, t.y - raw[i].y) > 1e-9).length;
     assert.ok(moved >= 2, `${moved} slots moved`);
   });
 }
 
-test("solved targets: the projection matters — a slot at z −1.75 clear in world x can be inside the band as the camera sees it, and is pushed", () => {
+test("solved targets: the projection matters — a slot at z +1.75 clear in world x can be inside the band as the camera sees it", () => {
   const fit = fieldCamera(1440, 900, 112);
-  // a box left of centre; a target whose world disc is exactly BAND clear of it at z = 0
   const k = { cx: -8, cy: 0, hw: 4, hh: 1 };
-  const r = 1;
+  const r = DYN.BODY_R;
   const clearX = -8 + 4 + r + DYN.KEEP_PAD + DYN.KEEP_BAND;
   const at = (z: number) => { const proj = fit.z / (fit.z - z); return clearanceOf(clearX * proj, 0, r, k); };
   assert.ok(Math.abs(at(0) - DYN.KEEP_BAND) < 1e-9);
@@ -166,7 +183,7 @@ test("solved targets: a wall the height of the view is left sideways (nothing cu
   const tall = { cx: -fit.viewW / 2 + 3, cy: 0, hw: 6, hh: fit.viewH };
   const s1 = solveTargets(fit, 16, SEED_FIELD, scales, [tall]);
   assert.deepEqual(s1.culled, [], "a 12 u wall at the left edge is escapable to the right");
-  s1.targets.forEach((t, i) => assert.ok(t.x * (fit.z / (fit.z - t.z)) >= tall.cx + tall.hw + STONE.R * scales[i] + DYN.KEEP_PAD + DYN.KEEP_BAND - 1e-6, `slot ${i} still in the wall's band`));
+  s1.targets.forEach((t, i) => assert.ok(t.x * (fit.z / (fit.z - t.z)) >= tall.cx + tall.hw + DYN.BODY_R * scales[i] + DYN.KEEP_PAD + DYN.KEEP_BAND - 1e-6, `slot ${i} still in the wall's band`));
   const everything = { cx: 0, cy: 0, hw: fit.viewW, hh: fit.viewH };
   const s2 = solveTargets(fit, 16, SEED_FIELD, scales, [everything]);
   assert.equal(s2.culled.length, 16);
