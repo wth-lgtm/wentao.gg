@@ -9,12 +9,15 @@ import { buildJackGeometry } from "../lib/jackGeometry";
 import { DYN, clampDelta, clickWorld, createWorld, isResting, setView, stepWorld, type Pointer, type World } from "../lib/jackDynamics";
 import type { PointerRig } from "../lib/pointerRig";
 import { createSampler, sampleFrame } from "../lib/scenePerf";
+import WakeRibbon from "./WakeRibbon";
 
 // Twelve six-way connector jacks, one per week of the board's window, floating in Lusion's
 // dynamics (jackDynamics.ts) under Lusion's framing (connectorScene.ts). What lives here is
 // the three.js side only: the shared geometry, the seven materials and their neighbour-
 // occlusion shader, the one-plane environment, the entrance, the idle envelope and the
-// demand loop that stops when nothing moves.
+// demand loop that stops when nothing moves. The pointer's wake ribbon (WakeRibbon.tsx) sits
+// beside it in the Canvas: it owns the render each frame so it can composite over the finished
+// panel, and a decaying field is the one other reason the demand loop stays awake.
 
 // There is ONE key light on this site and it sits up and to the RIGHT — the direction the
 // board's extruded cells (CommitHeatmap FACE_LIT/FACE_SHADE) and the hero's caustic are
@@ -528,7 +531,7 @@ export default function ConnectorField({
       frameloop={active ? "demand" : "never"}
       // Opaque, the panel colour: the reference IS a dark inset on a light page, so the same
       // panel in both themes makes the light theme first-class by construction and gives the
-      // wake ribbon (PR B) a finished frame to composite over. Neutral tone mapping: ACES
+      // wake ribbon (WakeRibbon.tsx) a finished frame to composite over. Neutral tone mapping: ACES
       // (R3F's default) and AgX both pull the brand blue toward a primary and halve its
       // saturation (#3b82f6 → S 0.52 under AgX); Khronos Neutral is the identity below 0.76
       // and keeps H ±3°, S ±0.06. Exposure 1.0 in both themes — the panel is the same.
@@ -542,6 +545,7 @@ export default function ConnectorField({
     >
       <directionalLight position={KEY.position} intensity={KEY.intensity} />
       <Field jacks={jacks} accent={accent} visible={active} inView={inView} rig={rig} debug={debug} tier={tier} onDegrade={() => setTier((t) => Math.min(2, t + 1))} />
+      <WakeRibbon rig={rig} visible={active} debug={debug} />
     </Canvas>
   );
 }

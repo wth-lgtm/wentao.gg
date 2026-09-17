@@ -17,7 +17,7 @@ test("a pointer rig records the move, flags presence and wakes whoever is bound"
   assert.equal(woke, 2);
 });
 
-test("the rig keeps the pointer's client pixels and its speed in px per move — the wake ribbon's brush radius", () => {
+test("the rig keeps the pointer's client pixels and its speed in px per move", () => {
   const rig = createPointerRig();
   rig.move(0, 0, 100, 100);
   assert.deepEqual([rig.cx, rig.cy, rig.speed], [100, 100, 0]); // the first move has no previous point
