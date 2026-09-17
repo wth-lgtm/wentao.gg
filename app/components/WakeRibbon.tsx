@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { clampDelta } from "../lib/jackDynamics";
 import type { PointerRig } from "../lib/pointerRig";
-import { WAKE, awake, brushRadiusTex, fieldScale, fieldSize, paintOrDecay, perFrame, type FieldSize } from "../lib/wakeField";
+import { WAKE, awake, brushRadiusTex, brushSpeed, brushStrength, capsuleTouches, fieldScale, fieldSize, perFrame, strokeBound, type FieldSize } from "../lib/wakeField";
 
 // The pointer's wake ribbon — Lusion's "fluid" (lusion.co's hero: ScreenPaint + the
 // ScreenPaintDistortion post pass, quoted from its bundle). A fast flick leaves a screen-space
@@ -14,10 +14,11 @@ import { WAKE, awake, brushRadiusTex, fieldScale, fieldSize, paintOrDecay, perFr
 //
 // FIELD — a quarter-resolution RGBA half-float ping-pong (xy velocity about 0.5, z the long
 // weight, w the short "fresh stroke" weight) plus a 1/8-res blurred copy. Each frame paints a
-// soft capsule from the previous to the current pointer position, radius from the pointer's
-// speed, injects the stroke's velocity, advects the field along the blurred copy's velocity
-// (a one-tap semi-Lagrangian step) and dissipates. Rates are per 60 Hz frame raised to 60·dt
-// (wakeField.ts), so the ribbon lives ~1.5 s of sim time at any frame rate.
+// soft capsule from the previous to the current pointer position, radius and strength from the
+// frame's own travel per 60 Hz frame (a brush from 20 px/frame up; wakeField.ts), injects the
+// stroke's velocity, advects the field along the blurred copy's velocity (a one-tap semi-
+// Lagrangian step) and dissipates. Rates are per 60 Hz frame raised to 60·dt, so the ribbon
+// lives ~1.5 s of sim time at any frame rate.
 //
 // COMPOSITE — over the FINISHED frame. This component owns the render (useFrame priority 1
 // stops R3F's own): the scene is drawn to the canvas exactly as before, the drawing buffer is
@@ -36,8 +37,12 @@ import { WAKE, awake, brushRadiusTex, fieldScale, fieldSize, paintOrDecay, perFr
 //
 // House rule: a resting scene costs nothing. The field is the one new reason for the demand
 // loop to stay awake, and it knows its own life without a readback — a CPU bound on the long
-// weight steps with the same formula as the shader (monotone, so it stays a bound), reaches
-// exactly zero ~1.5 s after the last paint, and the field is reset for the next stroke.
+// weight is 1 on every frame the shader paints (the stroke's stop frame included: Lusion's
+// `from` carries the previous radius, so that frame repaints a full disc) and otherwise steps
+// with the shader's own formula (monotone, so it stays a bound); it reaches exactly zero ~1.5 s
+// after the last paint and the field is reset for the next stroke. A capsule that cannot reach
+// the canvas — the pointer is the card's, and the board is two thirds of it — paints nothing
+// and arms nothing.
 
 const VERT = /* glsl */ `
 varying vec2 vUv;
@@ -181,7 +186,7 @@ interface Debug {
   alive: boolean;
   /** composited frames so far */
   frames: number;
-  /** the last frame's brush: the rig's speed in px per move and the radius in field texels */
+  /** the last frame's brush: its speed in px per 60 Hz frame (from the frame's travel) and the radius in field texels */
   speed: number;
   radius: number;
   /** the last frame's clamped delta, the field's clock */
@@ -192,19 +197,32 @@ interface Debug {
   capture(): Promise<{ plain: string; post: string; simDt: number }>;
 }
 
-export default function WakeRibbon({ rig, debug }: {
+interface Props {
   /** the card's shared pointer — the brush follows it over the whole card, not just the canvas */
   rig: PointerRig;
   /** ?jacksDebug=1 — installs window.__wake beside window.__jacks */
   debug: boolean;
-}) {
+}
+
+/**
+ * The field's targets are half-float, which WebGL2 renders to only with EXT_color_buffer_float
+ * (or the older _half_float). Without it the framebuffers would be incomplete and every field
+ * pass an error: the scene is drawn without a ribbon instead, and R3F keeps its own render.
+ */
+export default function WakeRibbon(props: Props) {
+  const gl = useThree((s) => s.gl);
+  const ok = useMemo(() => gl.extensions.has("EXT_color_buffer_float") || gl.extensions.has("EXT_color_buffer_half_float"), [gl]);
+  return ok ? <Ribbon {...props} /> : null;
+}
+
+function Ribbon({ rig, debug }: Props) {
   const { gl, scene, camera, size, invalidate } = useThree();
 
   const quad = useRef<{ scene: THREE.Scene; camera: THREE.OrthographicCamera; mesh: THREE.Mesh; paint: THREE.ShaderMaterial; copy: THREE.ShaderMaterial; blur: THREE.ShaderMaterial; reset: THREE.ShaderMaterial; composite: THREE.ShaderMaterial } | null>(null);
   const field = useRef<Field | null>(null);
   const frameTex = useRef<THREE.FramebufferTexture | null>(null);
-  // the brush: where the pointer was on the canvas last frame (CSS px), and the stroke's velocity
-  const prev = useRef({ x: 0, y: 0, valid: false, radius: 0 });
+  // the brush: where the pointer was last frame (client px, and canvas CSS px), its radius then, and the stroke's velocity
+  const prev = useRef({ cx: 0, cy: 0, x: 0, y: 0, valid: false, radius: 0 });
   const uVel = useRef(new THREE.Vector2());
   const weight = useRef(0);
   const dbg = useRef({ frames: 0, speed: 0, radius: 0, dt: 0, force: false, pending: null as null | ((r: { plain: string; post: string; simDt: number }) => void) });
@@ -244,6 +262,7 @@ export default function WakeRibbon({ rig, debug }: {
   const resetField = (fd: Field) => {
     const q = quadFor();
     for (const t of [fd.a, fd.b, fd.low, fd.lowTmp]) pass(q.reset, t);
+    gl.setRenderTarget(null);
     uVel.current.set(0, 0);
     weight.current = 0;
   };
@@ -309,18 +328,27 @@ export default function WakeRibbon({ rig, debug }: {
     const q = quadFor();
     const canvas = gl.domElement;
 
-    // ---- the brush: this frame's travel over the CARD, in canvas CSS px → field texels; the
-    // radius from the rig's speed (px per move), nothing when the pointer did not move ----
+    // ---- the brush: this frame's travel over the CARD, in canvas CSS px → field texels. The
+    // canvas rect is read only on a frame the pointer moved; speed is the frame's own travel per
+    // 60 Hz frame (brushSpeed — under swiftshader dt clamps at 1/30, so the harness paces its
+    // pointer in sim time); nothing when the pointer did not move ----
     const p = prev.current;
-    let radius = 0, speed = 0;
+    let radius = 0, speed = 0, strength = 0;
     let fromX = 0, fromY = 0, toX = 0, toY = 0;
+    let painting = false;
     if (rig.over && fd.cssW > 0 && fd.cssH > 0) {
-      const r = canvas.getBoundingClientRect();
-      const x = rig.cx - r.left, y = rig.cy - r.top;
+      const moved = !p.valid || rig.cx !== p.cx || rig.cy !== p.cy;
+      let x = p.x, y = p.y;
+      if (moved) {
+        const r = canvas.getBoundingClientRect();
+        x = rig.cx - r.left;
+        y = rig.cy - r.top;
+      }
       if (p.valid) {
-        if (x !== p.x || y !== p.y) {
-          speed = rig.speed;
+        if (moved) {
+          speed = brushSpeed(Math.hypot(x - p.x, y - p.y), dt);
           radius = brushRadiusTex(speed, fd.size.h);
+          strength = brushStrength(speed);
         }
         fromX = p.x; fromY = p.y;
       } else {
@@ -328,7 +356,11 @@ export default function WakeRibbon({ rig, debug }: {
         fromX = x; fromY = y;
       }
       toX = x; toY = y;
-      p.x = x; p.y = y; p.valid = true;
+      // this frame paints if its capsule — or the disc the stop frame repaints at the previous
+      // radius — can reach the canvas; a board flick a brush away from the column arms nothing
+      const rTex = Math.max(radius, p.radius);
+      painting = rTex > 0 && capsuleTouches(fromX, fromY, toX, toY, (rTex / fd.size.h) * fd.cssH, fd.cssW, fd.cssH);
+      p.x = x; p.y = y; p.cx = rig.cx; p.cy = rig.cy; p.valid = true;
     } else {
       p.valid = false;
       p.radius = 0;
@@ -339,7 +371,7 @@ export default function WakeRibbon({ rig, debug }: {
     d.dt = dt;
     const scale = fieldScale(fd.size.h);
 
-    const alive = awake(weight.current, radius);
+    const alive = awake(weight.current, painting);
     if (!alive && !d.force) {
       // a still, empty field: PR A's frame, and nothing else — no copy, no quad, no invalidate
       gl.setRenderTarget(null);
@@ -357,8 +389,9 @@ export default function WakeRibbon({ rig, debug }: {
       const fs = fd.size;
       const tx = (v: number) => (v / fd.cssW) * fs.w;
       const ty = (v: number) => (1 - v / fd.cssH) * fs.h;
-      const [prevT, currT] = [fd.a, fd.b];
-      fd.a = currT; fd.b = prevT;
+      const prevT = fd.a, currT = fd.b;
+      fd.a = currT;
+      fd.b = prevT;
       const u = q.paint.uniforms;
       u.tPrev.value = prevT.texture;
       u.tLow.value = fd.low.texture;
@@ -372,20 +405,21 @@ export default function WakeRibbon({ rig, debug }: {
       const v = uVel.current;
       v.multiplyScalar(perFrame(WAKE.ACCEL_DECAY, dt));
       if (radius > 0) {
-        v.x += (tx(toX) - tx(fromX)) * (1 / 60) * WAKE.INJECT;
-        v.y += (ty(toY) - ty(fromY)) * (1 / 60) * WAKE.INJECT;
+        v.x += (tx(toX) - tx(fromX)) * (1 / 60) * WAKE.INJECT * strength;
+        v.y += (ty(toY) - ty(fromY)) * (1 / 60) * WAKE.INJECT * strength;
       }
       (u.uVel.value as THREE.Vector2).copy(v);
       pass(q.paint, currT);
       q.copy.uniforms.tSrc.value = currT.texture;
       pass(q.copy, fd.low);
+      // the 0.25 is Blur.blur's own `c = .25` (bundle, class Blur: u_delta = radius / width × c)
       q.blur.uniforms.tSrc.value = fd.low.texture;
       (q.blur.uniforms.uDelta.value as THREE.Vector2).set(((WAKE.BLUR_RADIUS * scale) / fs.lowW) * 0.25, 0);
       pass(q.blur, fd.lowTmp);
       q.blur.uniforms.tSrc.value = fd.lowTmp.texture;
       (q.blur.uniforms.uDelta.value as THREE.Vector2).set(0, ((WAKE.BLUR_RADIUS * scale) / fs.lowH) * 0.25);
       pass(q.blur, fd.low);
-      weight.current = paintOrDecay(weight.current, radius, dt);
+      weight.current = strokeBound(weight.current, painting, dt);
     }
 
     // ---- the scene, exactly as R3F would draw it ----

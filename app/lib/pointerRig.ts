@@ -15,7 +15,7 @@ export interface PointerRig {
   /** client pixels of the last move */
   cx: number;
   cy: number;
-  /** pixels travelled since the previous move — ~px per frame at a 60 Hz pointer, the wake ribbon's brush radius */
+  /** pixels travelled since the previous move — ~px per frame at a 60 Hz pointer (the wake ribbon reads the frame's own travel instead, WakeRibbon.tsx) */
   speed: number;
   /** the pointer is on the card */
   over: boolean;
