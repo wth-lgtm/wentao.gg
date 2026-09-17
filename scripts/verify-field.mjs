@@ -1,12 +1,17 @@
 // The jack field's verification harness (the report's headline numbers come from here). Runs
 // against a production build served on `PORT` (default 3301) with headless Chromium on
 // software GL, so every timing assertion is on `__field.simTime` (the `?jacksDebug=1` hook) and
-// the world is driven with step()/kick() where a check needs a definite state. Also checks the
-// built page's initial JS for three (it must stay behind dynamic()) and, in the light theme,
-// the rendered luminance of the sixteen discs (the ENV_LIGHT re-key).
+// the world is driven with step()/kick() where a check needs a definite state. The field never
+// FREEZES while the drift has an amplitude (fieldDrift.ts): at rest it idles at DRIFT.IDLE_HZ,
+// so every "settled" wait here is on `__field.idle`, the scroll checks decide by STATE (E, the
+// homes, the layout count) rather than by frame counts, and the idle cadence itself is measured.
+// Also checks the built page's initial JS for three (it must stay behind dynamic()), the
+// one-layer glass (two passes per jack on ONE program, groups ranked back to front) and, in the
+// light theme, the rendered luminance of the sixteen discs (the ENV_LIGHT re-key).
 //
 //   node scripts/verify-field.mjs [port] [config]         config e.g. 1440x900-dark
 //   node scripts/verify-field.mjs [port] sweep            the light-theme env-intensity sweep
+//   node scripts/verify-field.mjs [port] zoom             only the DPR-2 jack crops (1440 × 900, both themes)
 //
 // Playwright is not a dependency of this repo; point PLAYWRIGHT at an installed copy.
 import fs from "node:fs";
@@ -81,9 +86,9 @@ async function discLuminance(page, width, height) {
   return { median: q(all, 0.5), p10: q(all, 0.1), p90: q(all, 0.9), perFamily: Object.fromEntries(Object.entries(byFamily).map(([f, a]) => [f, { median: q(a, 0.5), n: a.length }])) };
 }
 
-async function open(width, height, theme) {
+async function open(width, height, theme, dpr = 1) {
   const browser = await chromium.launch({ args: ARGS });
-  const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 1 });
+  const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: dpr });
   const errors = [], known = [];
   page.on("console", (m) => { if (m.type() === "error") (KNOWN.test(m.text()) ? known : errors).push(m.text()); });
   page.on("pageerror", (e) => errors.push(String(e)));
@@ -93,10 +98,18 @@ async function open(width, height, theme) {
   await page.waitForFunction(() => !!window.__field && window.__field.entered && window.__field.fit, null, { timeout: 40000, polling: 100 });
   return { browser, page, errors, known };
 }
+// step past the entrance beat, then wait for the IDLE cadence (settled, E 0, no live pointer, nothing faster than DRIFT.IDLE_V)
 async function settle(page) {
   await page.evaluate(() => { const j = window.__field; while (j.entranceT < 10.5) j.step(1 / 60); });
-  await page.waitForFunction(() => window.__field.frozen, null, { timeout: 180000, polling: 250 });
+  await page.waitForFunction(() => window.__field.idle, null, { timeout: 180000, polling: 250 });
 }
+// fieldDrift.ts DRIFT: 2·(AMP + AMP_Z) + slack — the most two drifting snapshots of one body can differ
+const DRIFT_REACH = 2 * (0.18 + 0.1) + 0.05;
+// gl.info.programs.length on this build with ONE glass program — measured 3 on 2026-09-17 (swiftshader, both
+// themes): "jack-glass" (the sixteen glass materials AND the pre-pass share it — glassPrograms 1) plus the two the
+// environment bake compiles (PMREMGenerator.fromScene: the rig plane's material and the blur pass). The pre-pass
+// added none; a fourth program here would mean the two passes diverged.
+const PROGRAMS = 3;
 
 async function sweep() {
   const { browser, page } = await open(1440, 900, "light");
@@ -149,7 +162,10 @@ async function run(width, height, theme, opts = {}) {
   out.asserts.sweepReachesFluid = sweep.fluid >= 10 && sweep.field === 0;
   await page.mouse.move(width - 3, height - 3);
   out.h1Font = await page.evaluate(() => parseFloat(getComputedStyle(document.querySelector("[data-hero-h1] span")).fontSize));
-  out.asserts.sizeRule = Math.abs(s0.fit.pxPerUnit * 2.2 - 1.15 * out.h1Font) < 0.5 || s0.fit.z === 40 || s0.fit.z === 24;
+  // the size rule from the scene's own constants (FIELD.D_PER_FONT, FIELD.UNIT_DIAM), the clamp escape kept and fit.z logged so a bound clamp is visible
+  const rule = await page.evaluate(() => ({ dPerFont: window.__field.dPerFont, unitDiam: window.__field.unitDiam }));
+  out.sizeRule = { dPerFont: rule.dPerFont, unitDiam: rule.unitDiam, unitJackPx: +(s0.fit.pxPerUnit * rule.unitDiam).toFixed(1), wantPx: +(rule.dPerFont * out.h1Font).toFixed(1), fitZ: +s0.fit.z.toFixed(2), clamped: s0.fit.z === 40 || s0.fit.z === 24 };
+  out.asserts.sizeRule = Math.abs(s0.fit.pxPerUnit * rule.unitDiam - rule.dPerFont * out.h1Font) < 0.5 || out.sizeRule.clamped;
   out.rects = await page.evaluate(() => Object.fromEntries(["h1", "card"].map((k) => [k, document.querySelector(`[data-hero-${k}]`).getBoundingClientRect().toJSON()])));
   out.asserts.keepOutsOnLoad = s0.keepOuts.length === 2;
   await page.evaluate(() => { const j = window.__field; while (j.entranceT < 0.6) j.step(1 / 60); });
@@ -172,14 +188,31 @@ async function run(width, height, theme, opts = {}) {
   await sleep(800);
   if (opts.frames) await page.screenshot({ path: `${OUT}/field-${label}-postflick.png` });
   await settle(page);
-  const rest = await page.evaluate(() => { const j = window.__field; return { simTime: j.simTime, E: j.E, frames: j.frames, clearance: j.clearance, spread: j.spread, bodies: j.bodies(), camZ: j.camZ, tier: j.tier, keepOuts: j.keepOuts }; });
-  out.rest = { simTime: +rest.simTime.toFixed(2), E: rest.E, clearance: +rest.clearance.toFixed(3), spread: +rest.spread.toFixed(3), tier: rest.tier, keepOutStrengths: rest.keepOuts.map((k) => k.strength) };
+  const rest = await page.evaluate(() => { const j = window.__field; return { simTime: j.simTime, E: j.E, idle: j.idle, idleHz: j.idleHz, drifting: j.drifting, frames: j.frames, clearance: j.clearance, spread: j.spread, bodies: j.bodies(), homes: j.homes, camZ: j.camZ, tier: j.tier, keepOuts: j.keepOuts }; });
+  out.rest = { simTime: +rest.simTime.toFixed(2), E: rest.E, idle: rest.idle, drifting: rest.drifting, clearance: +rest.clearance.toFixed(3), spread: +rest.spread.toFixed(3), tier: rest.tier, keepOutStrengths: rest.keepOuts.map((k) => k.strength) };
   out.asserts.restClearsHeadline = rest.clearance >= 0;
   out.asserts.rampsWhole = rest.keepOuts.every((k, i) => Math.abs(k.strength - (i === 0 ? 1 : 0.5)) < 1e-9);
+  // ONE LAYER PER PIXEL (the plain jack): two passes per jack (the depth pre-pass and the glass) on ONE program, the
+  // groups ranked back to front — renderOrder a permutation of 0..n−1 that follows pos.z ascending (ties by body
+  // index, the scene's own rule), read in the same evaluate as the positions
+  const layers = await page.evaluate(() => { const j = window.__field; return { meshes: j.meshes, passes: j.passes, renderOrders: j.renderOrders, z: j.bodies().map((b) => b.z), programs: j.programs, glassPrograms: j.glassPrograms }; });
+  const byDepth = layers.z.map((_, i) => i).sort((a, b) => layers.z[a] - layers.z[b] || a - b);
+  out.layers = { jacks: layers.meshes, passes: layers.passes, programs: layers.programs, glassPrograms: layers.glassPrograms, renderOrders: layers.renderOrders };
+  out.asserts.passesTwoPerJack = layers.passes === 2 * layers.z.length && layers.meshes === layers.z.length;
+  out.asserts.renderOrderBackToFront = [...layers.renderOrders].sort((a, b) => a - b).every((v, i) => v === i) && byDepth.every((body, rank) => layers.renderOrders[body] === rank);
+  out.asserts.programsUnchanged = layers.glassPrograms === 1 && layers.programs === PROGRAMS;
+  // IDLE CADENCE: the drift keeps the loop ticking at DRIFT.IDLE_HZ (a timer, not rAF-rate) — with idle and E 0,
+  // frames over 2 s in [10, 2·idleHz + 6]; swiftshader is slow, so the lower bound is loose on purpose. And the
+  // drift itself: the homes stand still while the bodies sway — over the same 2 s some body moved, none by more
+  // than the drift's reach.
   const f1 = rest.frames; await sleep(2000);
-  const f2 = await page.evaluate(() => window.__field.frames);
-  out.framesOver2s = f2 - f1;
-  out.asserts.zeroFramesAtRest = f2 === f1;
+  const f2 = await page.evaluate(() => { const j = window.__field; return { frames: j.frames, idle: j.idle, E: j.E, bodies: j.bodies(), homes: j.homes }; });
+  out.framesOver2s = f2.frames - f1;
+  const drifted = f2.bodies.map((b, i) => Math.hypot(b.x - rest.bodies[i].x, b.y - rest.bodies[i].y, b.z - rest.bodies[i].z));
+  out.idleCadence = { idle: rest.idle && f2.idle, E: f2.E, idleHz: rest.idleHz, framesOver2s: out.framesOver2s, measuredHz: +(out.framesOver2s / 2).toFixed(1) };
+  out.drift = { homesStill: JSON.stringify(f2.homes) === JSON.stringify(rest.homes), bodiesMoved: drifted.filter((d) => d > 0.01).length, maxBodyDelta2s: +Math.max(...drifted).toFixed(3), meanBodyDelta2s: +(drifted.reduce((a, b) => a + b, 0) / drifted.length).toFixed(3) };
+  out.asserts.idleCadence = rest.idle && f2.idle && f2.E === 0 && out.framesOver2s >= 10 && out.framesOver2s <= 2 * rest.idleHz + 6;
+  out.asserts.driftSways = rest.drifting && out.drift.homesStill && out.drift.bodiesMoved >= 1 && out.drift.maxBodyDelta2s < DRIFT_REACH;
   // the field's own ray, from rest: a 20-step sweep across the middle kicks only the jacks it crosses
   // (speeds read right after the sweep; the swirl's release is < 2 u/s, a ray kick several)
   await page.mouse.move(width * 0.1, height * 0.5);
@@ -190,7 +223,7 @@ async function run(width, height, theme, opts = {}) {
   out.asserts.sweepMovesAtMost3 = kicked <= 3;
   await page.mouse.move(width - 3, height - 3);
   await page.evaluate(() => { const j = window.__field; for (let i = 0; i < 60 * 9; i++) j.step(1 / 60); });
-  await page.waitForFunction(() => window.__field.frozen, null, { timeout: 120000, polling: 250 }).catch(() => out.notes.push("did not re-freeze after the sweep"));
+  await page.waitForFunction(() => window.__field.idle, null, { timeout: 120000, polling: 250 }).catch(() => out.notes.push("did not re-idle after the sweep"));
   const h1 = out.rects.h1;
   const discs = rest.bodies.map((b, i) => {
     const ppu = height / 2 / ((rest.camZ - b.z) * TAN);
@@ -234,7 +267,7 @@ async function run(width, height, theme, opts = {}) {
   // fluid gets the mousemove; the field's ray only touches bodies within r + 0.025 u), then
   // sample again with the jack confirmed still under the patch. Opaque plastic: no change.
   const mid = discs.reduce((m, d) => (Math.hypot(d.sx - width / 2, d.sy - height / 2) < Math.hypot(m.sx - width / 2, m.sy - height / 2) ? d : m), discs[0]);
-  // the core sphere is 0.46 r: five patches inside it
+  // the junction: five patches within 0.3 r of the centre (one layer of glass now — the pre-pass culls the core)
   const corePts = [[0, 0], [0.3, 0], [-0.3, 0], [0, 0.3], [0, -0.3]].map(([fx, fy]) => [mid.sx + fx * mid.rad, mid.sy + fy * mid.rad]);
   const sampleCore = async () => { const out = []; for (const [x, y] of corePts) out.push(await samplePatch(page, x, y)); return out; };
   // (1) deterministic: a red slab slid under the field (over the fluid) — glass takes its colour, plastic would not
@@ -273,54 +306,62 @@ async function run(width, height, theme, opts = {}) {
   out.glass.pass = dyeDelta > 8 && moved < mid.rad * 0.35;
   await page.mouse.move(width - 3, height - 3);
   await page.evaluate(() => { const j = window.__field; for (let i = 0; i < 60 * 9; i++) j.step(1 / 60); });
-  await page.waitForFunction(() => window.__field.frozen, null, { timeout: 120000, polling: 250 }).catch(() => out.notes.push("did not re-freeze after the glass check"));
+  await page.waitForFunction(() => window.__field.idle, null, { timeout: 120000, polling: 250 }).catch(() => out.notes.push("did not re-idle after the glass check"));
   await sleep(2500);
-  // PARTIAL SCROLL: the headline lands on resting jacks → the field wakes on scroll-end and the band eases them out
-  const fBefore = await page.evaluate(() => window.__field.frames);
+  // PARTIAL SCROLL: the headline lands on resting jacks → on scroll-end the band eases them out at full rate.
+  // Decided by STATE, not frame counts (the idle cadence ticks regardless): under a band → poll until the
+  // clearance is back to ≥ −0.05 with the band whole; nothing under a band → E stays 0 across the scroll-end
+  // (the no-wake path asserted on the envelope) and the band strengths are whole
+  const fBefore = await page.evaluate(() => ({ frames: window.__field.frames, E: window.__field.E }));
   await page.evaluate(() => window.scrollTo(0, 250));
   // the scroll-end measure (120 ms debounce) has run once the hook reports the new scrollY
   await page.waitForFunction(() => window.__field.scrollY === 250, null, { timeout: 10000, polling: 50 });
-  const atOnce = await page.evaluate(() => ({ clearance: window.__field.clearance, keepOuts: window.__field.keepOuts.length, frames: window.__field.frames }));
-  await page.waitForFunction(() => window.__field.frozen && window.__field.keepOutsSettled, null, { timeout: 60000, polling: 250 }).catch(() => out.notes.push("did not re-freeze after the partial scroll"));
+  const atOnce = await page.evaluate(() => ({ clearance: window.__field.clearance, keepOuts: window.__field.keepOuts.length, frames: window.__field.frames, E: window.__field.E }));
+  let easedOk = true;
+  if (atOnce.clearance < 0) easedOk = await page.waitForFunction(() => window.__field.clearance >= -0.05 && window.__field.keepOutsSettled, null, { timeout: 60000, polling: 250 }).then(() => true).catch(() => { out.notes.push("the band did not clear the scrolled headline within 60 s"); return false; });
+  await page.waitForFunction(() => window.__field.idle && window.__field.keepOutsSettled, null, { timeout: 60000, polling: 250 }).catch(() => out.notes.push("did not re-idle after the partial scroll"));
   await sleep(300);
-  const eased = await page.evaluate(() => ({ clearance: window.__field.clearance, frames: window.__field.frames, frozen: window.__field.frozen, strengths: window.__field.keepOuts.map((k) => k.strength) }));
-  out.partialScroll = { scrollY: 250, underAtOnce: atOnce.clearance < 0, framesToEase: eased.frames - fBefore, finalClearance: +eased.clearance.toFixed(3), strengths: eased.strengths };
-  out.asserts.partialScrollEases = atOnce.clearance < 0 ? eased.frames > fBefore && eased.clearance >= -0.05 : eased.frames === fBefore;
+  const eased = await page.evaluate(() => ({ clearance: window.__field.clearance, frames: window.__field.frames, idle: window.__field.idle, E: window.__field.E, strengths: window.__field.keepOuts.map((k) => k.strength) }));
+  const bandWhole = eased.strengths.every((s, i) => Math.abs(s - (i === 0 ? 1 : 0.5)) < 1e-9);
+  out.partialScroll = { scrollY: 250, underAtOnce: atOnce.clearance < 0, clearanceAtOnce: +atOnce.clearance.toFixed(3), framesToEase: eased.frames - fBefore.frames, finalClearance: +eased.clearance.toFixed(3), strengths: eased.strengths, E: [fBefore.E, atOnce.E, eased.E], idle: eased.idle };
+  out.asserts.partialScrollEases = atOnce.clearance < 0 ? easedOk && eased.clearance >= -0.05 && bandWhole : fBefore.E === 0 && atOnce.E === 0 && eased.E === 0 && bandWhole;
   if (opts.frames) await page.screenshot({ path: `${OUT}/field-${label}-scrolled250.png` });
   // back to the top: the jacks return to their homes on the next pointer move
   await page.evaluate(() => window.scrollTo(0, 0));
   await sleep(400);
   await page.mouse.move(width - 40, height - 40); await sleep(200); await page.mouse.move(width - 60, height - 50);
   await page.evaluate(() => { const j = window.__field; for (let i = 0; i < 60 * 9; i++) j.step(1 / 60); });
-  await page.waitForFunction(() => window.__field.frozen, null, { timeout: 120000, polling: 250 }).catch(() => out.notes.push("did not re-freeze after returning to the top"));
+  await page.waitForFunction(() => window.__field.idle, null, { timeout: 120000, polling: 250 }).catch(() => out.notes.push("did not re-idle after returning to the top"));
   const home = await page.evaluate(() => ({ clearance: window.__field.clearance, spread: window.__field.spread }));
   out.backHome = { clearance: +home.clearance.toFixed(3), spread: +home.spread.toFixed(3) };
   out.asserts.backHomeClear = home.clearance >= 0 && home.spread < 0.5;
-  // FULL SCROLL: 2000 px down — nothing under the headline, so no frame and no motion
-  const before = await page.evaluate(() => window.__field.bodies().map((b) => [b.x, b.y, b.z]));
+  // FULL SCROLL: 2000 px down — nothing under the headline. The homes stand, the layout does not re-solve, the
+  // envelope stays 0 and the frames tick on at no more than the idle cadence (the drift moves the bodies ≈ 0.1 u,
+  // so the body delta is bounded by the drift's reach, not by 1e-3)
+  const before = await page.evaluate(() => ({ bodies: window.__field.bodies().map((b) => [b.x, b.y, b.z]), homes: window.__field.homes, E: window.__field.E }));
   const pre = await page.evaluate(() => ({ frames: window.__field.frames, layouts: window.__field.layouts }));
   await page.evaluate(() => window.scrollTo(0, 2000));
   await sleep(1500);
-  const afterScroll = await page.evaluate(() => ({ frames: window.__field.frames, layouts: window.__field.layouts, scrollY: window.scrollY, bodies: window.__field.bodies().map((b) => [b.x, b.y, b.z]), keepOuts: window.__field.keepOuts.length }));
-  // a layout re-solve in the window (the visitor card's height changing as its data lands) is a
-  // legitimate one-frame nudge and is reported apart from the scroll
-  out.scroll = { scrollY: afterScroll.scrollY, framesFromScroll: afterScroll.frames - pre.frames, layoutsDuring: afterScroll.layouts - pre.layouts, maxBodyDelta: Math.max(...afterScroll.bodies.map((p, i) => Math.hypot(p[0] - before[i][0], p[1] - before[i][1], p[2] - before[i][2]))), keepOuts: afterScroll.keepOuts };
-  out.asserts.scrollKeepsPositions = out.scroll.maxBodyDelta < 1e-3;
-  out.asserts.scrollRendersNothing = out.scroll.framesFromScroll === 0 || (out.scroll.layoutsDuring > 0 && out.scroll.framesFromScroll <= 2);
+  const afterScroll = await page.evaluate(() => ({ frames: window.__field.frames, layouts: window.__field.layouts, scrollY: window.scrollY, bodies: window.__field.bodies().map((b) => [b.x, b.y, b.z]), homes: window.__field.homes, E: window.__field.E, idle: window.__field.idle, idleHz: window.__field.idleHz, keepOuts: window.__field.keepOuts.length }));
+  out.scroll = { scrollY: afterScroll.scrollY, framesFromScroll: afterScroll.frames - pre.frames, layoutsDuring: afterScroll.layouts - pre.layouts, maxBodyDelta: +Math.max(...afterScroll.bodies.map((p, i) => Math.hypot(p[0] - before.bodies[i][0], p[1] - before.bodies[i][1], p[2] - before.bodies[i][2]))).toFixed(3), homesStill: JSON.stringify(afterScroll.homes) === JSON.stringify(before.homes), E: [before.E, afterScroll.E], idle: afterScroll.idle, keepOuts: afterScroll.keepOuts };
+  out.asserts.scrollKeepsPositions = out.scroll.homesStill && out.scroll.layoutsDuring === 0 && before.E === 0 && afterScroll.E === 0 && out.scroll.maxBodyDelta < DRIFT_REACH;
+  out.asserts.scrollDoesNotWake = before.E === 0 && afterScroll.E === 0 && out.scroll.framesFromScroll <= 1.5 * (2 * afterScroll.idleHz + 6);
   out.asserts.noKeepOutOffHero = afterScroll.keepOuts === 0;
   await page.evaluate(() => { const el = document.querySelector("#experience"); if (el) window.scrollTo(0, el.getBoundingClientRect().top + window.scrollY - 80); });
   await sleep(600);
   if (opts.frames) await page.screenshot({ path: `${OUT}/field-${label}-midpage.png` });
-  // RESIZE wakes a frozen pack
+  // RESIZE re-solves the layout (frames are no longer the evidence — the idle cadence ticks anyway): `layouts`
+  // goes up and the fit follows the new width. One layout per resize from the size effect; the ResizeObserver on
+  // the h1/card adds a second when the narrower viewport reflows them, so the count is reported and 1–2 accepted.
   await page.mouse.move(width - 3, height - 3);
   await page.evaluate(() => { const j = window.__field; for (let i = 0; i < 60 * 9; i++) j.step(1 / 60); });
-  await page.waitForFunction(() => window.__field.frozen, null, { timeout: 180000, polling: 250 }).catch(() => out.notes.push("did not re-freeze before the resize test"));
-  const fFrozen = await page.evaluate(() => window.__field.frames);
+  await page.waitForFunction(() => window.__field.idle, null, { timeout: 180000, polling: 250 }).catch(() => out.notes.push("did not re-idle before the resize test"));
+  const preResize = await page.evaluate(() => ({ frames: window.__field.frames, layouts: window.__field.layouts }));
   await page.setViewportSize({ width: width - 100, height });
   await sleep(2500);
-  const afterResize = await page.evaluate(() => ({ frames: window.__field.frames, fit: window.__field.fit }));
-  out.resize = { framesFromResize: afterResize.frames - fFrozen, fitWidth: afterResize.fit.width };
-  out.asserts.resizeWakes = out.resize.framesFromResize > 0 && afterResize.fit.width === width - 100;
+  const afterResize = await page.evaluate(() => ({ frames: window.__field.frames, layouts: window.__field.layouts, fit: window.__field.fit }));
+  out.resize = { framesFromResize: afterResize.frames - preResize.frames, layoutsFromResize: afterResize.layouts - preResize.layouts, fitWidth: afterResize.fit.width };
+  out.asserts.resizeRelayouts = out.resize.layoutsFromResize >= 1 && out.resize.layoutsFromResize <= 2 && afterResize.fit.width === width - 100;
   await page.setViewportSize({ width, height });
   await sleep(1500);
   if (opts.card) {
@@ -342,16 +383,39 @@ async function run(width, height, theme, opts = {}) {
   out.asserts.noContextLoss = out.ctxLost === 0;
   out.elapsedS = +((Date.now() - t0) / 1000).toFixed(1);
   out.pass = Object.values(out.asserts).every(Boolean);
-  console.log(JSON.stringify({ label, pass: out.pass, asserts: out.asserts, glass: out.glass, glassUnderlay: out.glassUnderlay, overlapPair: out.overlapPair, pointerEvents: out.pointerEvents, sweep: out.sweep, meshes: out.meshes, near: out.near, culled: out.culled, fit: out.fit, envIntensity: out.envIntensity, flick: out.flick, rest: out.rest, framesOver2s: out.framesOver2s, partialScroll: out.partialScroll, backHome: out.backHome, scroll: out.scroll, resize: out.resize, lightLuminance: out.lightLuminance, card: out.card, errors: out.errors, elapsedS: out.elapsedS }));
+  console.log(JSON.stringify({ label, pass: out.pass, asserts: out.asserts, sizeRule: out.sizeRule, layers: out.layers, idleCadence: out.idleCadence, drift: out.drift, glass: out.glass, glassUnderlay: out.glassUnderlay, overlapPair: out.overlapPair, pointerEvents: out.pointerEvents, sweep: out.sweep, meshes: out.meshes, near: out.near, culled: out.culled, fit: out.fit, envIntensity: out.envIntensity, flick: out.flick, rest: out.rest, framesOver2s: out.framesOver2s, partialScroll: out.partialScroll, backHome: out.backHome, scroll: out.scroll, resize: out.resize, lightLuminance: out.lightLuminance, card: out.card, notes: out.notes, errors: out.errors, elapsedS: out.elapsedS }));
+  await browser.close();
+}
+
+// The controller's crop: at DPR 2, the largest jack at rest, 3 × its diameter on a side — "no ball" is judged
+// from these, and z-fighting between the pre-pass and the glass is checked on the Mac's GPU, not here
+async function zoom(theme) {
+  const width = 1440, height = 900, label = `${width}x${height}-${theme}`;
+  const { browser, page } = await open(width, height, theme, 2);
+  await page.mouse.move(width - 3, height - 3);
+  await settle(page);
+  const st = await page.evaluate(() => ({ bodies: window.__field.bodies(), camZ: window.__field.camZ, unitDiam: window.__field.unitDiam, casting: window.__field.casting }));
+  let big = 0;
+  st.bodies.forEach((b, i) => { if (b.scale > st.bodies[big].scale) big = i; });
+  const b = st.bodies[big];
+  const ppu = height / 2 / ((st.camZ - b.z) * TAN);
+  const sx = width / 2 + b.x * ppu, sy = height / 2 - b.y * ppu, D = st.unitDiam * b.scale * ppu;
+  const side = Math.min(3 * D, width, height);
+  const clip = { x: Math.min(Math.max(0, sx - side / 2), width - side), y: Math.min(Math.max(0, sy - side / 2), height - side), width: side, height: side };
+  await page.screenshot({ path: `${OUT}/field-${label}-jack-zoom.png`, clip });
+  summary[`zoom-${label}`] = { body: big, family: st.casting[big].family, finish: st.casting[big].finish, scale: +b.scale.toFixed(3), at: [+sx.toFixed(0), +sy.toFixed(0)], diameterPx: +D.toFixed(1), clip: { x: +clip.x.toFixed(0), y: +clip.y.toFixed(0), side: +side.toFixed(0) }, dpr: 2, frame: `${OUT}/field-${label}-jack-zoom.png` };
+  console.log(JSON.stringify({ zoom: label, ...summary[`zoom-${label}`] }));
   await browser.close();
 }
 
 if (only === "sweep") { await sweep(); process.exit(0); }
+if (only === "zoom") { await zoom("dark"); await zoom("light"); process.exit(0); }
 summary.initialJs = initialJs();
 console.log("initialJs", JSON.stringify(summary.initialJs));
 await run(1440, 900, "dark", { frames: true, card: true });
 await run(1440, 900, "light", { frames: true });
 await run(1024, 768, "dark", { frames: true });
 await run(1024, 768, "light");
+if (!only) { await zoom("dark"); await zoom("light"); }
 fs.writeFileSync(`${OUT}/verify.json`, JSON.stringify(summary, null, 1));
 console.log("PASS:", [`initialJs=${summary.initialJs.pass}`, ...Object.values(summary).filter((s) => s.label).map((s) => `${s.label}=${s.pass}`)].join(" "));

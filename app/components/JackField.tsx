@@ -28,10 +28,11 @@ import { createPointerRig } from "../lib/pointerRig";
 // onCreated) — measured before the fix, a sweep over the hero gave the fluid canvas 0
 // mousemove events. A window pointermove feeds the card's PointerRig shape in viewport
 // fractions; the scene reads it per frame. A scroll does
-// not wake the field by itself — a fixed layer has nothing to draw when the page moves — with
-// one exception the scene owns: when the scroll has ended and the headline has landed over
-// resting jacks, the field wakes for the frames it takes the band to ease them out
-// (JackFieldScene.tsx). A scroll that leaves nothing under the name renders no frame.
+// not wake the field's envelope — a fixed layer has nothing new to draw when the page moves —
+// with one exception the scene owns: when the scroll has ended and the headline has landed
+// over resting jacks, the field runs at full rate for the frames it takes the band to ease
+// them out (JackFieldScene.tsx). Otherwise a scroll changes nothing: the frames tick on at the
+// drift's idle cadence (fieldDrift.ts) regardless, and the envelope stays closed.
 //
 // ACCENT — the themed --accent token, re-read a microtask after the theme flips (the card's
 // reason: a child's passive effect runs before the ThemeProvider has flipped the <html> class,

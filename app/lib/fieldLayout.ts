@@ -22,9 +22,16 @@ export const FIELD = {
   /**
    * a unit jack's diameter = this × the h1's computed font size — between the hero's 1.25
    * (seven jacks) and the stones' 1.1 (sixteen), because sixteen jacks with arms read larger
-   * than sixteen stones: 129 px beside the 112 px wordmark at 1440 × 900
+   * than sixteen stones. 1.15 shipped (129 px beside the 112 px wordmark at 1440 × 900); the
+   * owner asked for "slightly bigger" → 1.23 (137.8 px, +7% linear, +14% area). The ceiling is
+   * the SHORT viewport, not taste: the view narrows in world units as the camera comes in and
+   * the fixed h1/card boxes swallow cells. Measured on tests/field-layout.test.ts with only
+   * this constant changed: 1.30 culls slots 0, 7, 8 at 1440 × 700 and clamps z at Z_MIN
+   * (unclamped 23.86); 1.25 still culls slot 7; 1.24 fails the "12 u wall is escapable"
+   * assertion; 1.23 is the largest that keeps every fixture whole. A 900 px display minus
+   * browser chrome is ≈ 780–800 px tall, so dropping jacks there is not "slightly bigger".
    */
-  D_PER_FONT: 1.15,
+  D_PER_FONT: 1.23,
   /** the jack's diameter at scale 1, as the card measures it */
   UNIT_DIAM: 2.2,
   /** without an h1 to measure (a project page), the view is this many units tall */
@@ -173,8 +180,8 @@ export interface FieldFit {
  * The camera for a viewport of `width × height`: px/u from the size rule when an h1 is there
  * to measure (`h1FontPx`), else height / FALLBACK_VIEW_H; z from the height at that px/u,
  * clamped to [Z_MIN, Z_MAX], and px/u re-solved from the clamped view when the clamp binds.
- * 1440 × 900 with the 112 px h1: 58.5 px/u, z 34.7; 1024 × 768 (92.16 px): 48.2 px/u,
- * z 36.0; 1440 × 700: z 27.0; no h1 at 900 tall: 100 px/u wants z 20.3, gets 24 → 84.6 px/u.
+ * 1440 × 900 with the 112 px h1: 62.6 px/u, z 32.4; 1024 × 768 (92.16 px): 51.5 px/u,
+ * z 33.6; 1440 × 700: z 25.2; no h1 at 900 tall: 100 px/u wants z 20.3, gets 24 → 84.6 px/u.
  */
 export function fieldCamera(width: number, height: number, h1FontPx: number | null): FieldFit {
   const tan = Math.tan((FIELD.FOV / 2) * (Math.PI / 180));

@@ -16,19 +16,22 @@ test("sixteen at ≥ 1280 × 800, ten below; a 4 × 4 lattice for sixteen, 5 × 
   assert.deepEqual(latticeShape(10), { cols: 5, rows: 2 });
 });
 
-test("the size rule: a unit jack's diameter is 1.15 × the h1's font size — 129 px beside a 112 px wordmark — and the camera is solved from it", () => {
+test("the size rule: a unit jack's diameter is 1.23 × the h1's font size — 137.8 px beside a 112 px wordmark (was 1.15, 129 px) — and the camera is solved from it", () => {
+  assert.equal(FIELD.D_PER_FONT, 1.23);
   const a = fieldCamera(1440, 900, 112);
-  assert.ok(Math.abs(a.pxPerUnit * FIELD.UNIT_DIAM - 1.15 * 112) < 1e-9);
-  assert.ok(Math.abs(a.pxPerUnit - 58.55) < 0.01 && Math.abs(a.z - 34.67) < 0.01, `${a.pxPerUnit} px/u, z ${a.z}`);
+  assert.ok(Math.abs(a.pxPerUnit * FIELD.UNIT_DIAM - 1.23 * 112) < 1e-9);
+  assert.ok(Math.abs(a.pxPerUnit * FIELD.UNIT_DIAM - 137.8) < 0.1, `unit jack ${a.pxPerUnit * FIELD.UNIT_DIAM} px`);
+  assert.ok(Math.abs(a.pxPerUnit - 62.62) < 0.01 && Math.abs(a.z - 32.42) < 0.01, `${a.pxPerUnit} px/u, z ${a.z}`);
   assert.ok(Math.abs(a.viewH - 2 * a.z * TAN) < 1e-9 && Math.abs(a.viewW - a.viewH * 1.6) < 1e-9);
   const b = fieldCamera(1024, 768, 92.16);
-  assert.ok(Math.abs(b.pxPerUnit - 48.17) < 0.01 && Math.abs(b.z - 35.96) < 0.01, `${b.pxPerUnit} px/u, z ${b.z}`);
+  assert.ok(Math.abs(b.pxPerUnit - 51.53) < 0.01 && Math.abs(b.z - 33.62) < 0.01, `${b.pxPerUnit} px/u, z ${b.z}`);
+  // the short viewport is the ceiling's reason: 1.23 still clears Z_MIN here (1.30 would clamp at 24, unclamped 23.86)
   const c = fieldCamera(1440, 700, 112);
-  assert.ok(Math.abs(c.z - 26.97) < 0.01 && c.z > FIELD.Z_MIN, `z ${c.z}`);
-  // the cast's span in px beside the 112 px wordmark (cap height ≈ 78 px): the largest jack 148 px,
-  // the smallest 93 px — a jack's arms make its disc read smaller than the number says
+  assert.ok(Math.abs(c.z - 25.21) < 0.01 && c.z > FIELD.Z_MIN, `z ${c.z}`);
+  // the cast's span in px beside the 112 px wordmark (cap height ≈ 78 px): the largest jack 158 px,
+  // the smallest 99 px — a jack's arms make its disc read smaller than the number says
   const largest = FIELD.SCALE_MAX * a.pxPerUnit * FIELD.UNIT_DIAM, smallest = FIELD.SCALE_MIN * a.pxPerUnit * FIELD.UNIT_DIAM;
-  assert.ok(Math.abs(largest - 148) < 1 && Math.abs(smallest - 93) < 1, `${smallest}–${largest} px`);
+  assert.ok(Math.abs(largest - 158.4) < 1 && Math.abs(smallest - 99.2) < 1, `${smallest}–${largest} px`);
 });
 
 test("no h1 to measure: the view is 9 u tall, so 1440 × 900 wants z 20.3, gets the 24 floor and 84.6 px/u; degenerate inputs stay finite", () => {
