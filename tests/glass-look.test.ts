@@ -30,7 +30,7 @@ test("one layer per pixel: the chosen table sits between the DoubleSide round's 
   assert.ok(Math.abs(GLASS.OPACITY.accent + GLASS.RIM_OPACITY - 0.94) < 1e-9 && Math.abs(GLASS.OPACITY.white + GLASS.RIM_OPACITY - 0.82) < 1e-9, "the accent's rim 0.94, the white's 0.82");
 });
 
-test("finishes: the card's glossy is clear glass, its matte frosted — rougher and a tenth denser", () => {
+test("finishes: the card's glossy is clear glass, its matte frosted — rougher and a little (0.08) denser", () => {
   assert.equal(glassFinish("glossy"), "clear");
   assert.equal(glassFinish("matte"), "frosted");
   const clear = glassRecipe("black", "glossy", "#3b82f6", null), frosted = glassRecipe("black", "matte", "#3b82f6", null);

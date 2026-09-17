@@ -52,7 +52,7 @@ test("deterministic in (k, t, seed); the object handed in is the one returned; b
     driftOffset(0, t, SEED_FIELD, b);
     assert.deepEqual(a, b);
   }
-  assert.equal(driftOffset(3, 12, SEED_FIELD, a), a, "no allocation: the caller's object comes back");
+  assert.equal(driftOffset(3, 12, SEED_FIELD, a), a, "the caller's object is the one written and returned");
   let bodiesDiffer = 0, seedsDiffer = 0;
   for (let t = 0; t < 60; t += 0.5) {
     driftOffset(0, t, SEED_FIELD, a); driftOffset(1, t, SEED_FIELD, b);

@@ -162,6 +162,11 @@ function tintGlass(m: GlassMaterial, slot: Slot, theme: "dark" | "light", accent
  * then material.transparent; colorWrite is not consulted). The physical fragment shader runs
  * with colour writes off — ≈ 16 × 17 k fragments, negligible. Module-level singleton, never
  * disposed (`dispose={null}` on its meshes).
+ *
+ * three APPENDS the custom key to its parameter-derived key (WebGLPrograms.getProgramCacheKey),
+ * so the share also depends on `transparent: true` (the `opaque` parameter) and FrontSide
+ * matching the glass — `programsUnchanged` in the harness is the guard; do not "optimise" the
+ * pre-pass to opaque or DoubleSide.
  */
 let prepass: THREE.MeshPhysicalMaterial | null = null;
 function depthPrepassMaterial(): THREE.MeshPhysicalMaterial {
@@ -192,6 +197,11 @@ interface Debug {
   idle: boolean;
   idleHz: number;
   drifting: boolean;
+  /** DRIFT.AMP / DRIFT.AMP_Z, so the harness bounds the sway from the scene's own numbers */
+  driftAmp: number;
+  driftAmpZ: number;
+  /** frames that scheduled the next frame at full rate (invalidate) rather than by the idle timer or by freezing: unchanged across a window means nothing woke the loop, whatever the machine's frame rate */
+  busyFrames: number;
   /** the undrifted targets, per body — what the drift wanders about */
   homes: Vec3[];
   dPerFont: number;
@@ -299,8 +309,8 @@ function Field({ count, accent, theme, visible, rig, debug, tier, onDegrade }: {
   // view's edge cannot free from a band is culled): body j is slot slotOf[j]. Later layouts
   // (a resize, the h1 or the card changing size) re-solve without culling and retarget —
   // bodies are pulled to the new lattice, never moved — and WAKE the loop: no pointermove
-  // reaches the page during a drag-resize, and a frozen pack would otherwise sit over
-  // reflowed letters until the next move.
+  // reaches the page during a drag-resize, and a frozen (AMP = 0) or idling pack would
+  // otherwise sit over reflowed letters until the next move.
   const fitRef = useRef<FieldFit>(fieldCamera(size.width, size.height, null));
   const worldRef = useRef<World | null>(null);
   const slotOf = useRef<number[]>([]);
@@ -309,6 +319,8 @@ function Field({ count, accent, theme, visible, rig, debug, tier, onDegrade }: {
   const frozen = useRef(false);
   const idle = useRef(false);
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** frames that scheduled the NEXT frame at full rate (invalidate) rather than by the idle timer or by freezing — the harness's wake detector, independent of the machine's frame rate */
+  const busyFrames = useRef(0);
   /** the undrifted targets per body: copies of what placeWorld / retarget were handed (both assign fresh objects, so these never drift); fieldDrift adds the wander on top each frame */
   const homes = useRef<Vec3[]>([]);
   const driftTmp = useMemo<Vec3>(() => ({ x: 0, y: 0, z: 0 }), []);
@@ -538,6 +550,9 @@ function Field({ count, accent, theme, visible, rig, debug, tier, onDegrade }: {
       get idle() { return idle.current; },
       get idleHz() { return DRIFT.IDLE_HZ; },
       get drifting() { return DRIFTING; },
+      get driftAmp() { return DRIFT.AMP; },
+      get driftAmpZ() { return DRIFT.AMP_Z; },
+      get busyFrames() { return busyFrames.current; },
       get homes() { return homes.current.map((h) => ({ x: h.x, y: h.y, z: h.z })); },
       get dPerFont() { return FIELD.D_PER_FONT; },
       get unitDiam() { return FIELD.UNIT_DIAM; },
@@ -567,7 +582,8 @@ function Field({ count, accent, theme, visible, rig, debug, tier, onDegrade }: {
       setEnvIntensity: (v: number) => { envOverride.current = v; scene.environmentIntensity = v; invalidate(); },
       get glass() { return { ...glassTable.current }; },
       setGlass: (t: Partial<GlassTable>) => {
-        const table = Object.assign(glassTable.current, t);
+        const table = glassTable.current;
+        for (const k of Object.keys(t) as (keyof GlassTable)[]) if (t[k] !== undefined) table[k] = t[k] as number;
         mats.forEach((m, i) => {
           const slot = slots[i];
           const opacity = Math.min(1, table[slot.family] + (glassFinish(slot.finish) === "frosted" ? table.frosted : 0));
@@ -653,13 +669,13 @@ function Field({ count, accent, theme, visible, rig, debug, tier, onDegrade }: {
       // so a timer that fires in a hidden tab draws nothing; `visible` clears it anyway.
       if (!DRIFTING) {
         if (keep.current.settled && isResting(world, r, e.E)) frozen.current = true;
-        else invalidate();
+        else { busyFrames.current++; invalidate(); }
       } else {
         idle.current = keep.current.settled && e.E === 0 && !over && r.maxDpos / r.dt < DRIFT.IDLE_V;
         if (idle.current) {
           clearIdleTimer.current();
           idleTimer.current = setTimeout(() => { idleTimer.current = null; invalidate(); }, 1000 / DRIFT.IDLE_HZ - 16);
-        } else invalidate();
+        } else { busyFrames.current++; invalidate(); }
       }
     }
 
@@ -671,8 +687,11 @@ function Field({ count, accent, theme, visible, rig, debug, tier, onDegrade }: {
     // its subtree), then renderOrder, then z, so the list interleaves per jack, farthest first:
     // depth pass (renderOrder 0), colour pass (1), next jack… A nearer jack's pre-pass overwrites
     // the depth where it is nearer and its colour pass blends over the farther jack: glass still
-    // shows through glass between jacks. Slots k and k + 8 share a lattice z and cross under the
-    // drift — a tie or crossing between jacks in different cells is harmless.
+    // shows through glass between jacks. Slots k and k + 8 share a lattice z (the cell order is a
+    // seeded shuffle, so they may sit in adjacent cells and touch) and the z drift (±0.10) makes
+    // them cross — harmless: two bodies at equal depth cannot interpenetrate (the collision keeps
+    // them apart), so their silhouettes only touch in screen space and a rank flip between them
+    // changes no pixel. Distinct z levels are 0.5 u apart, so no other resting pair crosses.
     const bodies = world.bodies;
     const slots_ = slotOf.current;
     for (let slot = 0; slot < groups.current.length; slot++) {

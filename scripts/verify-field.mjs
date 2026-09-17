@@ -98,13 +98,28 @@ async function open(width, height, theme, dpr = 1) {
   await page.waitForFunction(() => !!window.__field && window.__field.entered && window.__field.fit, null, { timeout: 40000, polling: 100 });
   return { browser, page, errors, known };
 }
-// step past the entrance beat, then wait for the IDLE cadence (settled, E 0, no live pointer, nothing faster than DRIFT.IDLE_V)
+// AT REST is the idle cadence while the drift is on (settled, E 0, no live pointer, nothing faster than
+// DRIFT.IDLE_V) and the FREEZE when AMP = AMP_Z = 0 — one predicate for every "settled" wait, so the harness can
+// verify the documented restore path too. Page-side functions: self-contained, serialised by Playwright.
+const atRest = () => (window.__field.drifting ? window.__field.idle : window.__field.frozen);
+const atRestSettled = () => (window.__field.drifting ? window.__field.idle : window.__field.frozen) && window.__field.keepOutsSettled;
+const waitRest = (page, timeout, settled = false) => page.waitForFunction(settled ? atRestSettled : atRest, null, { timeout, polling: 250 });
+// step past the entrance beat, then wait for rest
 async function settle(page) {
   await page.evaluate(() => { const j = window.__field; while (j.entranceT < 10.5) j.step(1 / 60); });
-  await page.waitForFunction(() => window.__field.idle, null, { timeout: 180000, polling: 250 });
+  await waitRest(page, 180000);
 }
-// fieldDrift.ts DRIFT: 2·(AMP + AMP_Z) + slack — the most two drifting snapshots of one body can differ
-const DRIFT_REACH = 2 * (0.18 + 0.1) + 0.05;
+// WAKE DETECTION (the controller's ruling, 2026-09-17). A per-run FULL-RATE REFERENCE — frames over 2 s with E 1,
+// taken right after the flick — is measured every run. The idle and scroll windows assert the MECHANISM always
+// (idle true, E 0, at least one frame, no more than 2·idleHz + 6 per 2 s) and assert the RATIO to the reference
+// (≤ 0.8 of it) ONLY when the machine outruns the idle timer: fullRate2s > 2·idleHz. On the owner's Mac the pair
+// is ≈ 40 f/s idle vs a 60 Hz rAF at full rate (ratio ≈ 0.67) — the discriminating measurement, recorded in the
+// report. Under software GL the full rate (4.5–6.5 f/s measured here) is BELOW the timer's 30 Hz, so idle and full
+// rate collapse together and no ratio can discriminate (measured 0.54, 1.08, 1.2, 1.33 on consecutive runs of one
+// build): the ratio branch is skipped and `ratioChecked: false` is recorded in the summary. In addition, the scene
+// counts `__field.busyFrames` — every frame that scheduled the next one at full rate (invalidate) rather than by
+// the idle timer or by freezing — so "nothing woke the loop" is also asserted directly as `busyFrames` unchanged
+// across the window, whatever the machine's frame rate.
 // gl.info.programs.length on this build with ONE glass program — measured 3 on 2026-09-17 (swiftshader, both
 // themes): "jack-glass" (the sixteen glass materials AND the pre-pass share it — glassPrograms 1) plus the two the
 // environment bake compiles (PMREMGenerator.fromScene: the rig plane's material and the blur pass). The pre-pass
@@ -131,8 +146,10 @@ async function run(width, height, theme, opts = {}) {
   const out = (summary[label] = { label, asserts: {}, notes: [] });
   const t0 = Date.now();
   const { browser, page, errors, known } = await open(width, height, theme);
-  const s0 = await page.evaluate(() => ({ fit: window.__field.fit, meshes: window.__field.meshes, near: window.__field.near, culled: window.__field.culled, n: window.__field.bodies().length, camZ: window.__field.camZ, keepOuts: window.__field.keepOuts, envIntensity: window.__field.envIntensity }));
-  Object.assign(out, { fit: s0.fit, meshes: s0.meshes, near: s0.near, culled: s0.culled, camZ: s0.camZ, envIntensity: s0.envIntensity });
+  const s0 = await page.evaluate(() => ({ fit: window.__field.fit, meshes: window.__field.meshes, near: window.__field.near, culled: window.__field.culled, n: window.__field.bodies().length, camZ: window.__field.camZ, keepOuts: window.__field.keepOuts, envIntensity: window.__field.envIntensity, drifting: window.__field.drifting, driftAmp: window.__field.driftAmp, driftAmpZ: window.__field.driftAmpZ }));
+  // the drift's reach from the scene's own amplitudes: 2·(AMP + AMP_Z) + slack — the most two snapshots of one body can differ
+  const reach = 2 * (s0.driftAmp + s0.driftAmpZ) + 0.05;
+  Object.assign(out, { fit: s0.fit, meshes: s0.meshes, near: s0.near, culled: s0.culled, camZ: s0.camZ, envIntensity: s0.envIntensity, drift: { drifting: s0.drifting, amp: s0.driftAmp, ampZ: s0.driftAmpZ, reach: +reach.toFixed(3) } });
   const want = width >= 1280 && height >= 800 ? 16 : 10;
   out.asserts.meshCount = s0.meshes === want && s0.n === want && s0.culled.length === 0;
   out.asserts.nearCap = s0.near === 0; // glass: no neighbour-occlusion loop
@@ -185,11 +202,21 @@ async function run(width, height, theme, opts = {}) {
   });
   out.flick = flick;
   out.asserts.flickStopsInBand = flick.minClearance > -0.2;
-  await sleep(800);
+  // FULL-RATE REFERENCE for this run: frames over 2 s with the envelope open (E 1 — the entrance beat holds it to
+  // entranceT 10 and the flick left it at ≈ 8), right after the flick. The idle and scroll windows below are bounded
+  // against it rather than a constant, so the bound is this machine's — swiftshader here, a GPU on the owner's Mac.
+  const ref0 = await page.evaluate(() => ({ frames: window.__field.frames, E: window.__field.E, entranceT: window.__field.entranceT }));
+  await sleep(2000);
+  const ref1 = await page.evaluate(() => ({ frames: window.__field.frames, E: window.__field.E, entranceT: window.__field.entranceT, idleHz: window.__field.idleHz }));
+  const fullRate2s = ref1.frames - ref0.frames;
+  // the machine outruns the idle timer (a GPU on a 60 Hz rAF: 120 frames / 2 s vs the timer's 60) → the ratio branch runs
+  const outruns = fullRate2s > 2 * ref1.idleHz;
+  out.fullRate = { frames2s: fullRate2s, hz: +(fullRate2s / 2).toFixed(1), E: [ref0.E, ref1.E], entranceT: [+ref0.entranceT.toFixed(2), +ref1.entranceT.toFixed(2)], idleHz: ref1.idleHz, outrunsTimer: outruns };
+  out.asserts.fullRateReference = ref0.E === 1 && ref1.E === 1 && fullRate2s >= 4;
   if (opts.frames) await page.screenshot({ path: `${OUT}/field-${label}-postflick.png` });
   await settle(page);
-  const rest = await page.evaluate(() => { const j = window.__field; return { simTime: j.simTime, E: j.E, idle: j.idle, idleHz: j.idleHz, drifting: j.drifting, frames: j.frames, clearance: j.clearance, spread: j.spread, bodies: j.bodies(), homes: j.homes, camZ: j.camZ, tier: j.tier, keepOuts: j.keepOuts }; });
-  out.rest = { simTime: +rest.simTime.toFixed(2), E: rest.E, idle: rest.idle, drifting: rest.drifting, clearance: +rest.clearance.toFixed(3), spread: +rest.spread.toFixed(3), tier: rest.tier, keepOutStrengths: rest.keepOuts.map((k) => k.strength) };
+  const rest = await page.evaluate(() => { const j = window.__field; return { simTime: j.simTime, E: j.E, idle: j.idle, frozen: j.frozen, busy: j.busyFrames, idleHz: j.idleHz, drifting: j.drifting, frames: j.frames, clearance: j.clearance, spread: j.spread, bodies: j.bodies(), homes: j.homes, camZ: j.camZ, tier: j.tier, keepOuts: j.keepOuts }; });
+  out.rest = { simTime: +rest.simTime.toFixed(2), E: rest.E, idle: rest.idle, frozen: rest.frozen, drifting: rest.drifting, clearance: +rest.clearance.toFixed(3), spread: +rest.spread.toFixed(3), tier: rest.tier, keepOutStrengths: rest.keepOuts.map((k) => k.strength) };
   out.asserts.restClearsHeadline = rest.clearance >= 0;
   out.asserts.rampsWhole = rest.keepOuts.every((k, i) => Math.abs(k.strength - (i === 0 ? 1 : 0.5)) < 1e-9);
   // ONE LAYER PER PIXEL (the plain jack): two passes per jack (the depth pre-pass and the glass) on ONE program, the
@@ -201,18 +228,24 @@ async function run(width, height, theme, opts = {}) {
   out.asserts.passesTwoPerJack = layers.passes === 2 * layers.z.length && layers.meshes === layers.z.length;
   out.asserts.renderOrderBackToFront = [...layers.renderOrders].sort((a, b) => a - b).every((v, i) => v === i) && byDepth.every((body, rank) => layers.renderOrders[body] === rank);
   out.asserts.programsUnchanged = layers.glassPrograms === 1 && layers.programs === PROGRAMS;
-  // IDLE CADENCE: the drift keeps the loop ticking at DRIFT.IDLE_HZ (a timer, not rAF-rate) — with idle and E 0,
-  // frames over 2 s in [10, 2·idleHz + 6]; swiftshader is slow, so the lower bound is loose on purpose. And the
-  // drift itself: the homes stand still while the bodies sway — over the same 2 s some body moved, none by more
-  // than the drift's reach.
+  // IDLE CADENCE (see WAKE DETECTION): with idle and E 0, an idle 2 s window holds at least one frame (the timer
+  // ticked at all), no more than 2·idleHz + 6 (the timer's ceiling), and NO busy frame; when the machine outruns the
+  // timer it also holds ≤ 0.8 of the full-rate reference's frames (ratioChecked). And the drift itself: the homes
+  // stand still while the bodies sway — over the same 2 s some body moved, none by more than the reach. Without the
+  // drift (AMP = AMP_Z = 0) the old rules apply and are verified here too: frozen, zero frames, nothing moves.
   const f1 = rest.frames; await sleep(2000);
-  const f2 = await page.evaluate(() => { const j = window.__field; return { frames: j.frames, idle: j.idle, E: j.E, bodies: j.bodies(), homes: j.homes }; });
+  const f2 = await page.evaluate(() => { const j = window.__field; return { frames: j.frames, idle: j.idle, frozen: j.frozen, busy: j.busyFrames, E: j.E, bodies: j.bodies(), homes: j.homes }; });
   out.framesOver2s = f2.frames - f1;
   const drifted = f2.bodies.map((b, i) => Math.hypot(b.x - rest.bodies[i].x, b.y - rest.bodies[i].y, b.z - rest.bodies[i].z));
-  out.idleCadence = { idle: rest.idle && f2.idle, E: f2.E, idleHz: rest.idleHz, framesOver2s: out.framesOver2s, measuredHz: +(out.framesOver2s / 2).toFixed(1) };
-  out.drift = { homesStill: JSON.stringify(f2.homes) === JSON.stringify(rest.homes), bodiesMoved: drifted.filter((d) => d > 0.01).length, maxBodyDelta2s: +Math.max(...drifted).toFixed(3), meanBodyDelta2s: +(drifted.reduce((a, b) => a + b, 0) / drifted.length).toFixed(3) };
-  out.asserts.idleCadence = rest.idle && f2.idle && f2.E === 0 && out.framesOver2s >= 10 && out.framesOver2s <= 2 * rest.idleHz + 6;
-  out.asserts.driftSways = rest.drifting && out.drift.homesStill && out.drift.bodiesMoved >= 1 && out.drift.maxBodyDelta2s < DRIFT_REACH;
+  out.idleCadence = { drifting: rest.drifting, idle: rest.idle && f2.idle, frozen: rest.frozen && f2.frozen, E: f2.E, idleHz: rest.idleHz, framesOver2s: out.framesOver2s, ceiling: 2 * rest.idleHz + 6, busyFrames: f2.busy - rest.busy, measuredHz: +(out.framesOver2s / 2).toFixed(1), fullRate2s, ratioToFull: +(out.framesOver2s / Math.max(1, fullRate2s)).toFixed(2), ratioChecked: outruns };
+  out.drift = { ...out.drift, homesStill: JSON.stringify(f2.homes) === JSON.stringify(rest.homes), bodiesMoved: drifted.filter((d) => d > 0.01).length, maxBodyDelta2s: +Math.max(...drifted).toFixed(3), meanBodyDelta2s: +(drifted.reduce((a, b) => a + b, 0) / drifted.length).toFixed(3) };
+  if (rest.drifting) {
+    out.asserts.idleCadence = rest.idle && f2.idle && f2.E === 0 && out.framesOver2s >= 1 && out.framesOver2s <= 2 * rest.idleHz + 6 && out.idleCadence.busyFrames === 0 && (!outruns || out.framesOver2s <= 0.8 * fullRate2s);
+    out.asserts.driftSways = out.drift.homesStill && out.drift.bodiesMoved >= 1 && out.drift.maxBodyDelta2s < reach;
+  } else {
+    out.asserts.idleCadence = rest.frozen && f2.frozen && f2.E === 0 && out.framesOver2s === 0;
+    out.asserts.driftSways = out.drift.homesStill && out.drift.maxBodyDelta2s < 1e-3;
+  }
   // the field's own ray, from rest: a 20-step sweep across the middle kicks only the jacks it crosses
   // (speeds read right after the sweep; the swirl's release is < 2 u/s, a ray kick several)
   await page.mouse.move(width * 0.1, height * 0.5);
@@ -223,7 +256,7 @@ async function run(width, height, theme, opts = {}) {
   out.asserts.sweepMovesAtMost3 = kicked <= 3;
   await page.mouse.move(width - 3, height - 3);
   await page.evaluate(() => { const j = window.__field; for (let i = 0; i < 60 * 9; i++) j.step(1 / 60); });
-  await page.waitForFunction(() => window.__field.idle, null, { timeout: 120000, polling: 250 }).catch(() => out.notes.push("did not re-idle after the sweep"));
+  await waitRest(page, 120000).catch(() => out.notes.push("did not come to rest after the sweep"));
   const h1 = out.rects.h1;
   const discs = rest.bodies.map((b, i) => {
     const ppu = height / 2 / ((rest.camZ - b.z) * TAN);
@@ -306,7 +339,7 @@ async function run(width, height, theme, opts = {}) {
   out.glass.pass = dyeDelta > 8 && moved < mid.rad * 0.35;
   await page.mouse.move(width - 3, height - 3);
   await page.evaluate(() => { const j = window.__field; for (let i = 0; i < 60 * 9; i++) j.step(1 / 60); });
-  await page.waitForFunction(() => window.__field.idle, null, { timeout: 120000, polling: 250 }).catch(() => out.notes.push("did not re-idle after the glass check"));
+  await waitRest(page, 120000).catch(() => out.notes.push("did not come to rest after the glass check"));
   await sleep(2500);
   // PARTIAL SCROLL: the headline lands on resting jacks → on scroll-end the band eases them out at full rate.
   // Decided by STATE, not frame counts (the idle cadence ticks regardless): under a band → poll until the
@@ -319,7 +352,7 @@ async function run(width, height, theme, opts = {}) {
   const atOnce = await page.evaluate(() => ({ clearance: window.__field.clearance, keepOuts: window.__field.keepOuts.length, frames: window.__field.frames, E: window.__field.E }));
   let easedOk = true;
   if (atOnce.clearance < 0) easedOk = await page.waitForFunction(() => window.__field.clearance >= -0.05 && window.__field.keepOutsSettled, null, { timeout: 60000, polling: 250 }).then(() => true).catch(() => { out.notes.push("the band did not clear the scrolled headline within 60 s"); return false; });
-  await page.waitForFunction(() => window.__field.idle && window.__field.keepOutsSettled, null, { timeout: 60000, polling: 250 }).catch(() => out.notes.push("did not re-idle after the partial scroll"));
+  await waitRest(page, 60000, true).catch(() => out.notes.push("did not come to rest after the partial scroll"));
   await sleep(300);
   const eased = await page.evaluate(() => ({ clearance: window.__field.clearance, frames: window.__field.frames, idle: window.__field.idle, E: window.__field.E, strengths: window.__field.keepOuts.map((k) => k.strength) }));
   const bandWhole = eased.strengths.every((s, i) => Math.abs(s - (i === 0 ? 1 : 0.5)) < 1e-9);
@@ -331,7 +364,7 @@ async function run(width, height, theme, opts = {}) {
   await sleep(400);
   await page.mouse.move(width - 40, height - 40); await sleep(200); await page.mouse.move(width - 60, height - 50);
   await page.evaluate(() => { const j = window.__field; for (let i = 0; i < 60 * 9; i++) j.step(1 / 60); });
-  await page.waitForFunction(() => window.__field.idle, null, { timeout: 120000, polling: 250 }).catch(() => out.notes.push("did not re-idle after returning to the top"));
+  await waitRest(page, 120000).catch(() => out.notes.push("did not come to rest after returning to the top"));
   const home = await page.evaluate(() => ({ clearance: window.__field.clearance, spread: window.__field.spread }));
   out.backHome = { clearance: +home.clearance.toFixed(3), spread: +home.spread.toFixed(3) };
   out.asserts.backHomeClear = home.clearance >= 0 && home.spread < 0.5;
@@ -339,13 +372,26 @@ async function run(width, height, theme, opts = {}) {
   // envelope stays 0 and the frames tick on at no more than the idle cadence (the drift moves the bodies ≈ 0.1 u,
   // so the body delta is bounded by the drift's reach, not by 1e-3)
   const before = await page.evaluate(() => ({ bodies: window.__field.bodies().map((b) => [b.x, b.y, b.z]), homes: window.__field.homes, E: window.__field.E }));
-  const pre = await page.evaluate(() => ({ frames: window.__field.frames, layouts: window.__field.layouts }));
   await page.evaluate(() => window.scrollTo(0, 2000));
+  // The page scrolls SMOOTHLY (globals.css), so the h1's box travels up the viewport for a few frames before it
+  // leaves; a box that moves > MOVED_U restarts its ramp, `settled` is false for that frame and the loop schedules
+  // one full-rate frame — the band following the rect, not a wake (measured: exactly 1 busy frame across the
+  // animation). The window therefore starts at scroll-end — the hook reports the final scrollY once the frame or
+  // the scroll-end handler has measured it — and asks whether anything ran at full rate AFTER that.
+  await page.waitForFunction(() => window.__field.scrollY === 2000, null, { timeout: 10000, polling: 50 });
+  const pre = await page.evaluate(() => ({ frames: window.__field.frames, layouts: window.__field.layouts, busy: window.__field.busyFrames }));
   await sleep(1500);
-  const afterScroll = await page.evaluate(() => ({ frames: window.__field.frames, layouts: window.__field.layouts, scrollY: window.scrollY, bodies: window.__field.bodies().map((b) => [b.x, b.y, b.z]), homes: window.__field.homes, E: window.__field.E, idle: window.__field.idle, idleHz: window.__field.idleHz, keepOuts: window.__field.keepOuts.length }));
-  out.scroll = { scrollY: afterScroll.scrollY, framesFromScroll: afterScroll.frames - pre.frames, layoutsDuring: afterScroll.layouts - pre.layouts, maxBodyDelta: +Math.max(...afterScroll.bodies.map((p, i) => Math.hypot(p[0] - before.bodies[i][0], p[1] - before.bodies[i][1], p[2] - before.bodies[i][2]))).toFixed(3), homesStill: JSON.stringify(afterScroll.homes) === JSON.stringify(before.homes), E: [before.E, afterScroll.E], idle: afterScroll.idle, keepOuts: afterScroll.keepOuts };
-  out.asserts.scrollKeepsPositions = out.scroll.homesStill && out.scroll.layoutsDuring === 0 && before.E === 0 && afterScroll.E === 0 && out.scroll.maxBodyDelta < DRIFT_REACH;
-  out.asserts.scrollDoesNotWake = before.E === 0 && afterScroll.E === 0 && out.scroll.framesFromScroll <= 1.5 * (2 * afterScroll.idleHz + 6);
+  const afterScroll = await page.evaluate(() => ({ frames: window.__field.frames, layouts: window.__field.layouts, busy: window.__field.busyFrames, scrollY: window.scrollY, bodies: window.__field.bodies().map((b) => [b.x, b.y, b.z]), homes: window.__field.homes, E: window.__field.E, idle: window.__field.idle, idleHz: window.__field.idleHz, keepOuts: window.__field.keepOuts.length }));
+  // the 1.5 s window's frame bound (see WAKE DETECTION): relative to the full-rate reference when the machine
+  // outruns the timer (0.8 × three quarters of it, + 2 for the scroll-end re-measure frame and rAF alignment),
+  // otherwise the timer's constant ceiling 1.5·(2·idleHz + 6)
+  const scrollBound = outruns ? 0.8 * 0.75 * fullRate2s + 2 : 1.5 * (2 * afterScroll.idleHz + 6);
+  out.scroll = { scrollY: afterScroll.scrollY, framesFromScroll: afterScroll.frames - pre.frames, frameBound: +scrollBound.toFixed(1), ratioChecked: outruns, busyFrames: afterScroll.busy - pre.busy, layoutsDuring: afterScroll.layouts - pre.layouts, maxBodyDelta: +Math.max(...afterScroll.bodies.map((p, i) => Math.hypot(p[0] - before.bodies[i][0], p[1] - before.bodies[i][1], p[2] - before.bodies[i][2]))).toFixed(3), homesStill: JSON.stringify(afterScroll.homes) === JSON.stringify(before.homes), E: [before.E, afterScroll.E], idle: afterScroll.idle, keepOuts: afterScroll.keepOuts, fullRate1_5s: +(0.75 * fullRate2s).toFixed(1), ratioToFull: +((afterScroll.frames - pre.frames) / Math.max(1, 0.75 * fullRate2s)).toFixed(2) };
+  out.asserts.scrollKeepsPositions = out.scroll.homesStill && out.scroll.layoutsDuring === 0 && before.E === 0 && afterScroll.E === 0 && out.scroll.maxBodyDelta < (rest.drifting ? reach : 1e-3);
+  // nothing woke the loop: E stays 0, the frames after scroll-end stay under the bound, and none of them was
+  // scheduled at full rate (busyFrames unchanged — a scroll-end that found a jack in a band would add them).
+  // Not drifting: no frame at all.
+  out.asserts.scrollDoesNotWake = before.E === 0 && afterScroll.E === 0 && (rest.drifting ? out.scroll.busyFrames === 0 && out.scroll.framesFromScroll <= scrollBound : out.scroll.framesFromScroll === 0);
   out.asserts.noKeepOutOffHero = afterScroll.keepOuts === 0;
   await page.evaluate(() => { const el = document.querySelector("#experience"); if (el) window.scrollTo(0, el.getBoundingClientRect().top + window.scrollY - 80); });
   await sleep(600);
@@ -355,7 +401,7 @@ async function run(width, height, theme, opts = {}) {
   // the h1/card adds a second when the narrower viewport reflows them, so the count is reported and 1–2 accepted.
   await page.mouse.move(width - 3, height - 3);
   await page.evaluate(() => { const j = window.__field; for (let i = 0; i < 60 * 9; i++) j.step(1 / 60); });
-  await page.waitForFunction(() => window.__field.idle, null, { timeout: 180000, polling: 250 }).catch(() => out.notes.push("did not re-idle before the resize test"));
+  await waitRest(page, 180000).catch(() => out.notes.push("did not come to rest before the resize test"));
   const preResize = await page.evaluate(() => ({ frames: window.__field.frames, layouts: window.__field.layouts }));
   await page.setViewportSize({ width: width - 100, height });
   await sleep(2500);
@@ -383,7 +429,7 @@ async function run(width, height, theme, opts = {}) {
   out.asserts.noContextLoss = out.ctxLost === 0;
   out.elapsedS = +((Date.now() - t0) / 1000).toFixed(1);
   out.pass = Object.values(out.asserts).every(Boolean);
-  console.log(JSON.stringify({ label, pass: out.pass, asserts: out.asserts, sizeRule: out.sizeRule, layers: out.layers, idleCadence: out.idleCadence, drift: out.drift, glass: out.glass, glassUnderlay: out.glassUnderlay, overlapPair: out.overlapPair, pointerEvents: out.pointerEvents, sweep: out.sweep, meshes: out.meshes, near: out.near, culled: out.culled, fit: out.fit, envIntensity: out.envIntensity, flick: out.flick, rest: out.rest, framesOver2s: out.framesOver2s, partialScroll: out.partialScroll, backHome: out.backHome, scroll: out.scroll, resize: out.resize, lightLuminance: out.lightLuminance, card: out.card, notes: out.notes, errors: out.errors, elapsedS: out.elapsedS }));
+  console.log(JSON.stringify({ label, pass: out.pass, asserts: out.asserts, sizeRule: out.sizeRule, layers: out.layers, fullRate: out.fullRate, idleCadence: out.idleCadence, drift: out.drift, glass: out.glass, glassUnderlay: out.glassUnderlay, overlapPair: out.overlapPair, pointerEvents: out.pointerEvents, sweep: out.sweep, meshes: out.meshes, near: out.near, culled: out.culled, fit: out.fit, envIntensity: out.envIntensity, flick: out.flick, rest: out.rest, framesOver2s: out.framesOver2s, partialScroll: out.partialScroll, backHome: out.backHome, scroll: out.scroll, resize: out.resize, lightLuminance: out.lightLuminance, card: out.card, notes: out.notes, errors: out.errors, elapsedS: out.elapsedS }));
   await browser.close();
 }
 

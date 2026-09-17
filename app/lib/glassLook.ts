@@ -36,7 +36,10 @@ export const GLASS = {
    * - the original single-layer values (0.55 / 0.50 / 0.38, RIM 0.45) read as glass but paler
    *   than the approved frame, one layer where there had been two.
    * This middle table keeps the page visible through every arm while holding most of the
-   * approved presence. The owner's knobs remain this table (density) and RIM_OPACITY (edge);
+   * approved presence. One layer everywhere: the tips (four layers before, ≈ 0.96) and the
+   * junction (six to ten, ≈ 0.99) now sit at the base too — the junction is the point, the
+   * tips read a little lighter; this table is the knob for both.
+   * The owner's knobs remain this table (density) and RIM_OPACITY (edge);
    * behind ?jacksDebug, `__field.setGlass({ black, accent, white, rim, frosted })` tries a
    * table live.
    */
