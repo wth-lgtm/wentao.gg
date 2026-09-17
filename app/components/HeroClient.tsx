@@ -23,20 +23,20 @@ export default function HeroAnimations({ children }: { children: ReactNode }) {
         {/* Name — the dominant statement (static server HTML, LCP element) */}
         {children}
 
-        {/* Role — a lifelike split-flap board cycling the roles. The data-hero-* attributes here
-            and below are the rects HeroConnectorsScene anchors its jacks to (heroLayout.ts). */}
-        <div data-hero-role className="min-h-[1.6rem] md:min-h-[2.9rem]">
+        {/* Role — a lifelike split-flap board cycling the roles */}
+        <div className="min-h-[1.6rem] md:min-h-[2.9rem]">
           {mounted && <SplitFlap />}
         </div>
       </div>
 
       {/* ================= RIGHT — visitor intel rail ================= */}
       {/* The CARD centers on the name; the CTA hangs just below it on desktop (absolute, so
-          it doesn't drag the card's centering up) and stacks normally on mobile. */}
+          it doesn't drag the card's centering up) and stacks normally on mobile. data-hero-card
+          is the rect the stone field keeps half-clear while it is on screen (StoneFieldScene.tsx). */}
       <div className="md:col-span-5 pointer-events-auto">
         <div data-hero-card className="relative mx-auto w-full max-w-sm md:mx-0 md:max-w-none">
           <VisitorIntel />
-          <div data-hero-cta className="mt-4 md:absolute md:inset-x-0 md:top-full md:mt-4">
+          <div className="mt-4 md:absolute md:inset-x-0 md:top-full md:mt-4">
             <MagneticButton
               href="#connect"
               className="group inline-flex items-center gap-3 rounded-full border border-border/70 bg-card/30 py-2 pl-5 pr-2 backdrop-blur-md transition-colors hover:border-foreground/30 hover:bg-card/50"

@@ -1,6 +1,5 @@
 import { ArrowDown } from "lucide-react";
 import HeroAnimations from "./HeroClient";
-import HeroConnectors from "./HeroConnectors";
 import NameCaustic from "./NameCaustic";
 import { HERO_NAME, HERO_NAME_METRICS } from "./heroName";
 
@@ -11,8 +10,6 @@ export default function Hero() {
       aria-label="Introduction"
       className="relative min-h-svh flex flex-col justify-start md:justify-center px-6 pt-32 pb-16 md:py-20 z-20 pointer-events-none"
     >
-      {/* The connector jacks, first child so they sit under the content's z-20 (HeroConnectors.tsx). */}
-      <HeroConnectors />
       <div className="max-w-6xl mx-auto w-full">
         <div
           className="relative z-20 animate-fade-in-up"
@@ -39,6 +36,7 @@ export default function Hero() {
                 inherited ones, and both inner copies declare all three explicitly via
                 HERO_NAME_METRICS — an explicit declaration always beats an inherited
                 value, layers or not. The container holds no direct text of its own. */}
+            {/* data-hero-h1: the stone field's keep-out reads this rect while it is on screen (StoneFieldScene.tsx). */}
             <h1 data-hero-h1 className="relative min-h-[3rem] md:min-h-[7rem]">
               <span className={`${HERO_NAME_METRICS} text-foreground text-shimmer`}>
                 {HERO_NAME}
