@@ -22,9 +22,16 @@ import { createPointerRig } from "../lib/pointerRig";
 // + 500 ms) so the server-rendered h1 stays the LCP element untouched.
 //
 // POINTER — the canvas must stay pointer-events-none: webgl-fluid binds mousemove on its own
-// canvas, and every glass card and control keeps its hover. A window pointermove feeds the
-// card's PointerRig shape in viewport fractions; the scene reads it per frame. No scroll
-// listener anywhere: a fixed layer has nothing to do on scroll, and a scroll must not wake it.
+// canvas, and every glass card and control keeps its hover. The host's class below is NOT
+// enough for that: react-three-fiber puts pointer-events: auto on its own container div and
+// canvas, so the scene forces none on both (JackFieldScene.tsx, the Canvas style and
+// onCreated) — measured before the fix, a sweep over the hero gave the fluid canvas 0
+// mousemove events. A window pointermove feeds the card's PointerRig shape in viewport
+// fractions; the scene reads it per frame. A scroll does
+// not wake the field by itself — a fixed layer has nothing to draw when the page moves — with
+// one exception the scene owns: when the scroll has ended and the headline has landed over
+// resting jacks, the field wakes for the frames it takes the band to ease them out
+// (JackFieldScene.tsx). A scroll that leaves nothing under the name renders no frame.
 //
 // ACCENT — the themed --accent token, re-read a microtask after the theme flips (the card's
 // reason: a child's passive effect runs before the ThemeProvider has flipped the <html> class,

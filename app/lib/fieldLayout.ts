@@ -72,22 +72,82 @@ export function fieldScales(count: number, seed: number): number[] {
 export interface Slot { family: Family; finish: Finish }
 const cast = (family: Family, finish: Finish, n: number): Slot[] => Array.from({ length: n }, () => ({ family, finish }));
 /**
- * The casting — the card's black / white / cobalt, matte majority, glossy accents. Sixteen:
- * accent 5 (4 matte, 1 glossy), white 6 (5 matte, 1 glossy), black 5 (3 matte, 2 glossy).
- * Ten: accent 3 (2/1), white 4 (3/1), black 3 (2/1). Shuffled once with the seed (Fisher–
- * Yates, the swap partner drawn per position, as the card's casting) so the families
- * interleave across the lattice. Never data.
+ * The casting's shares — the card's black / white / cobalt, matte majority, glossy accents.
+ * Sixteen: accent 5 (4 matte, 1 glossy), white 6 (5 matte, 1 glossy), black 5 (3 matte,
+ * 2 glossy). Ten: accent 3 (2/1), white 4 (3/1), black 3 (2/1). Never data.
  */
 export const CAST_16: readonly Slot[] = [...cast("accent", "matte", 4), ...cast("accent", "glossy", 1), ...cast("white", "matte", 5), ...cast("white", "glossy", 1), ...cast("black", "matte", 3), ...cast("black", "glossy", 2)];
 export const CAST_10: readonly Slot[] = [...cast("accent", "matte", 2), ...cast("accent", "glossy", 1), ...cast("white", "matte", 3), ...cast("white", "glossy", 1), ...cast("black", "matte", 2), ...cast("black", "glossy", 1)];
+
+const FAMILIES: readonly Family[] = ["accent", "white", "black"];
+
+/** the lattice's cells (row-major index) that touch cell c across an edge, and across an edge or a corner */
+function neighbours(c: number, cols: number, rows: number): { four: number[]; eight: number[] } {
+  const col = c % cols, row = Math.floor(c / cols);
+  const four: number[] = [], eight: number[] = [];
+  for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+    if (!dr && !dc) continue;
+    const r = row + dr, q = col + dc;
+    if (r < 0 || r >= rows || q < 0 || q >= cols) continue;
+    const i = r * cols + q;
+    eight.push(i);
+    if (!dr || !dc) four.push(i);
+  }
+  return { four, eight };
+}
+
+/**
+ * Which family each slot wears, decided ON THE LATTICE rather than in slot order: the v3
+ * casting shuffled families with one seed and cells with another, and the replayed 4 × 4 grid
+ * put three of the five accents in one 2 × 2 block (the frame showed it). This walks the cells
+ * in the lattice's own visiting order (latticeOrder — slot k is that cell) and assigns each the
+ * most-plentiful remaining family that no already-assigned edge neighbour wears, preferring
+ * one no corner neighbour wears either; the one HARD rule is that two accents never share an
+ * edge (a depth-first search backtracks rather than break it — five accents on a 4 × 4 can
+ * never avoid each other's corners too: a 2 × 2 block is a clique on corners, so 8-connected
+ * independence tops out at four). Finishes: within a family, the glossy pieces go to the
+ * members at evenly spread positions of the walk. Deterministic; a prefix rule is not needed
+ * because ten and sixteen use different lattices.
+ */
 export function fieldCasting(count: number, seed: number): Slot[] {
   const base = count >= 16 ? CAST_16 : CAST_10;
-  const out = base.map((s) => ({ ...s }));
-  for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(rand(i, seed + 31) * (i + 1));
-    [out[i], out[j]] = [out[j], out[i]];
+  const { cols, rows } = latticeShape(count);
+  const order = latticeOrder(count, seed);
+  const n = Math.min(count, order.length, base.length);
+  const pool: Record<Family, number> = { accent: 0, white: 0, black: 0 };
+  const glossy: Record<Family, number> = { accent: 0, white: 0, black: 0 };
+  for (const s of base.slice(0, n)) { pool[s.family]++; if (s.finish === "glossy") glossy[s.family]++; }
+  const assigned: (Family | null)[] = Array.from({ length: cols * rows }, () => null);
+  const result: Family[] = [];
+  const dfs = (k: number): boolean => {
+    if (k === n) return true;
+    const c = order[k];
+    const nb = neighbours(c, cols, rows);
+    const worn4 = new Set(nb.four.map((i) => assigned[i]).filter(Boolean) as Family[]);
+    const worn8 = new Set(nb.eight.map((i) => assigned[i]).filter(Boolean) as Family[]);
+    const cands = FAMILIES.filter((f) => pool[f] > 0).sort((a, b) => {
+      const ka = (worn4.has(a) ? 4 : 0) + (worn8.has(a) ? 1 : 0), kb = (worn4.has(b) ? 4 : 0) + (worn8.has(b) ? 1 : 0);
+      return ka - kb || pool[b] - pool[a] || FAMILIES.indexOf(a) - FAMILIES.indexOf(b);
+    });
+    for (const f of cands) {
+      if (f === "accent" && worn4.has("accent")) continue;
+      assigned[c] = f; pool[f]--; result[k] = f;
+      if (dfs(k + 1)) return true;
+      assigned[c] = null; pool[f]++;
+    }
+    return false;
+  };
+  if (!dfs(0)) {
+    // unreachable for the shipped counts and lattices; the plain greedy keeps the field drawable
+    result.length = 0;
+    for (let k = 0; k < n; k++) { const f = FAMILIES.filter((g) => pool[g] > 0).sort((a, b) => pool[b] - pool[a])[0]; pool[f]--; result[k] = f; }
   }
-  return out.slice(0, Math.max(0, Math.min(count, out.length)));
+  const glossyAt = new Set<number>();
+  for (const f of FAMILIES) {
+    const members = result.map((g, k) => (g === f ? k : -1)).filter((k) => k >= 0);
+    for (let j = 0; j < glossy[f]; j++) glossyAt.add(members[Math.floor(((j + 0.5) * members.length) / glossy[f])]);
+  }
+  return result.map((f, k) => ({ family: f, finish: glossyAt.has(k) ? "glossy" : "matte" }));
 }
 
 /**
@@ -144,9 +204,31 @@ export function onScreen(rect: Rect, width: number, height: number): boolean {
   return rect.right > 0 && rect.left < width && rect.bottom > 0 && rect.top < height;
 }
 
-/** the lattice's shape for a count: 4 × 4 for sixteen, 5 × 2 for ten (evenly spread on a 1024 × 768) */
+/**
+ * A viewport rect moved to where it sits at scrollY 0 — the hero is the top of the page, so
+ * this is its PAGE position. Homes are solved against it (not against the rect at whatever
+ * scroll the layout ran at), so the rest state is one composition whatever the scroll, and a
+ * mid-page resize does not hand out cells that lie behind the name at the top.
+ */
+export function atPageTop(rect: Rect, scrollY: number): Rect {
+  return { left: rect.left, right: rect.right, top: rect.top + scrollY, bottom: rect.bottom + scrollY };
+}
+
+/** the lattice's shape for a count: 4 × 4 for sixteen, 5 × 2 for ten (five across a 1024-wide viewport, two rows) */
 export function latticeShape(count: number): { cols: number; rows: number } {
   return count >= 16 ? { cols: 4, rows: 4 } : { cols: 5, rows: 2 };
+}
+
+/** the seeded order in which the lattice's cells are visited — slot k is cell order[k] (row-major); the targets and the casting share it so both see the same grid */
+export function latticeOrder(count: number, seed: number): number[] {
+  const { cols, rows } = latticeShape(count);
+  const cells = cols * rows;
+  const order = Array.from({ length: cells }, (_, i) => i);
+  for (let i = cells - 1; i > 0; i--) {
+    const j = Math.floor(rand(i, seed + 21) * (i + 1));
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+  return order;
 }
 
 /**
@@ -158,11 +240,7 @@ export function latticeShape(count: number): { cols: number; rows: number } {
 export function latticeTargets(fit: FieldFit, count: number, seed: number): Vec3[] {
   const { cols, rows } = latticeShape(count);
   const cells = cols * rows;
-  const order = Array.from({ length: cells }, (_, i) => i);
-  for (let i = cells - 1; i > 0; i--) {
-    const j = Math.floor(rand(i, seed + 21) * (i + 1));
-    [order[i], order[j]] = [order[j], order[i]];
-  }
+  const order = latticeOrder(count, seed);
   const spanW = fit.viewW * (1 - 2 * FIELD.MARGIN), spanH = fit.viewH * (1 - 2 * FIELD.MARGIN);
   const cellW = spanW / cols, cellH = spanH / rows;
   const out: Vec3[] = [];

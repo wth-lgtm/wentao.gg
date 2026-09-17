@@ -1,7 +1,7 @@
 // The jack's LOOK, shared by every scene that draws one: the geometry singleton, the seven
 // material recipes and their neighbour-occlusion shader, the one-plane environment and the
 // key light. Lifted verbatim from ConnectorField.tsx (the GitHub card's scene) when the hero
-// got the same object (HeroConnectors.tsx) — lusion.co uses one body across its whole page and
+// got the same object (JackFieldScene.tsx) — lusion.co uses one body across its whole page and
 // lets arrangement, count, scale and light differentiate, and every number here was measured
 // against THIS jack (the profile off cross.buf, the ao bake, the sphere-body contact model that
 // is exact only because its arm tips lie on the 1.05 sphere), so two scenes read as two rooms of

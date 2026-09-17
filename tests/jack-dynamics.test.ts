@@ -361,23 +361,28 @@ test("keep-out: a box's strength scales the band — half strength, half the pus
   assert.equal(jacks.bodies[0].r, DYN.BODY_R, "the card's default is untouched");
 });
 
-test("keep-out at CAP_CLICK 25: the depth is the setup's — 0.10–0.14 u from the band's edge, ~0.25 from mid-band, ~0.6 when the body is already at the inflated edge", () => {
-  const launch = (scale: number, startD: number) => {
+test("keep-out under a click burst: with the cap LIFTED (capUntil ahead, as clickWorld leaves it) a 25 u/s body reaches 0.40–0.46 u from the band's edge, 0.57–0.59 from mid-band, ~0.92 parked; clipped to 20 it would read 0.10–0.14", () => {
+  const launch = (scale: number, startD: number, lift: boolean) => {
     const w = createWorld([scale], { viewW: 24, viewH: 15 }, SEED);
     setKeepOut(w, [BOX]);
     const b = w.bodies[0];
     b.pos = { x: -4, y: 1 - 0.75 - (b.r + DYN.KEEP_PAD) - startD, z: 0 };
     b.target = { ...b.pos };
     b.vel = { x: 0, y: DYN.CAP_CLICK, z: 0 };
-    let minD = Infinity;
-    for (let i = 0; i < 120; i++) { stepWorld(w, 1 / 60, null, 1); minD = Math.min(minD, clearanceTo(b.pos.x, b.pos.y, b.r)); }
-    return -minD;
+    if (lift) w.capUntil = w.time + DYN.CAP_CLICK_S;
+    let minD = Infinity, vmax = 0;
+    for (let i = 0; i < 120; i++) { stepWorld(w, 1 / 60, null, 1); minD = Math.min(minD, clearanceTo(b.pos.x, b.pos.y, b.r)); vmax = Math.max(vmax, Math.hypot(b.vel.x, b.vel.y, b.vel.z)); }
+    return { pen: -minD, vmax };
   };
   for (const s of [0.86, 1, 1.2]) {
-    const edge = launch(s, DYN.KEEP_BAND + 0.01), mid = launch(s, DYN.KEEP_BAND / 2), parked = launch(s, 0.05);
-    assert.ok(edge > 0.09 && edge < 0.15, `scale ${s} from the band's edge: ${edge} u`);
-    assert.ok(mid > 0.2 && mid < 0.3, `scale ${s} from mid-band: ${mid} u`);
-    assert.ok(parked > 0.5 && parked < 0.65, `scale ${s} parked at the inflated edge: ${parked} u`);
-    assert.ok(edge < mid && mid < parked, "less run-up, deeper");
+    const edge = launch(s, DYN.KEEP_BAND + 0.01, true), mid = launch(s, DYN.KEEP_BAND / 2, true), parked = launch(s, 0.05, true);
+    assert.ok(edge.vmax > DYN.CAP + 1, `the cap was lifted: peak ${edge.vmax} u/s`);
+    assert.ok(edge.pen > 0.38 && edge.pen < 0.48, `scale ${s} from the band's edge: ${edge.pen} u`);
+    assert.ok(mid.pen > 0.55 && mid.pen < 0.62, `scale ${s} from mid-band: ${mid.pen} u`);
+    assert.ok(parked.pen > 0.88 && parked.pen < 0.95, `scale ${s} parked at the inflated edge: ${parked.pen} u`);
+    assert.ok(edge.pen < mid.pen && mid.pen < parked.pen, "less run-up, deeper");
+    // the clipped launch the earlier comments described, kept as the contrast
+    const clipped = launch(s, DYN.KEEP_BAND + 0.01, false);
+    assert.ok(clipped.vmax <= DYN.CAP + 1e-6 && clipped.pen > 0.09 && clipped.pen < 0.15, `clipped: ${clipped.pen} u at ${clipped.vmax} u/s`);
   }
 });

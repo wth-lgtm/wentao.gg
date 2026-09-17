@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { CAST_10, CAST_16, FIELD, LIGHT_WHITE, SEED_FIELD, fieldCamera, fieldCasting, fieldCount, fieldScales, keepOutFor, latticeShape, latticeTargets, onScreen, placeWorld, solveTargets, type Rect } from "../app/lib/fieldLayout";
-import { DYN, createWorld } from "../app/lib/jackDynamics";
+import { CAST_10, CAST_16, FIELD, LIGHT_WHITE, SEED_FIELD, atPageTop, fieldCamera, fieldCasting, fieldCount, fieldScales, keepOutFor, latticeOrder, latticeShape, latticeTargets, onScreen, placeWorld, solveTargets, type Rect } from "../app/lib/fieldLayout";
+import { DYN, createWorld, isResting, setKeepOut, stepWorld, type KeepOut } from "../app/lib/jackDynamics";
 
 const TAN = Math.tan((FIELD.FOV / 2) * Math.PI / 180);
 
@@ -25,8 +25,10 @@ test("the size rule: a unit jack's diameter is 1.15 × the h1's font size — 12
   assert.ok(Math.abs(b.pxPerUnit - 48.17) < 0.01 && Math.abs(b.z - 35.96) < 0.01, `${b.pxPerUnit} px/u, z ${b.z}`);
   const c = fieldCamera(1440, 700, 112);
   assert.ok(Math.abs(c.z - 26.97) < 0.01 && c.z > FIELD.Z_MIN, `z ${c.z}`);
-  // the largest cast ≈ the wordmark's cap height, the smallest ≈ a lowercase letter
-  assert.ok(FIELD.SCALE_MAX * a.pxPerUnit * FIELD.UNIT_DIAM > 0.7 * 112 * 1.6 && FIELD.SCALE_MIN * a.pxPerUnit * FIELD.UNIT_DIAM < 0.6 * 112 * 1.6);
+  // the cast's span in px beside the 112 px wordmark (cap height ≈ 78 px): the largest jack 148 px,
+  // the smallest 93 px — a jack's arms make its disc read smaller than the number says
+  const largest = FIELD.SCALE_MAX * a.pxPerUnit * FIELD.UNIT_DIAM, smallest = FIELD.SCALE_MIN * a.pxPerUnit * FIELD.UNIT_DIAM;
+  assert.ok(Math.abs(largest - 148) < 1 && Math.abs(smallest - 93) < 1, `${smallest}–${largest} px`);
 });
 
 test("no h1 to measure: the view is 9 u tall, so 1440 × 900 wants z 20.3, gets the 24 floor and 84.6 px/u; degenerate inputs stay finite", () => {
@@ -49,7 +51,7 @@ test("scales: stratified over 0.72–1.15 so ten or sixteen cover the range; ten
   assert.deepEqual(fieldScales(10, SEED_FIELD), s16.slice(0, 10));
 });
 
-test("casting: sixteen = accent 5 (4 matte, 1 glossy), white 6 (5/1), black 5 (3/2); ten = 3 (2/1), 4 (3/1), 3 (2/1); shuffled by the seed, deterministic, the families interleaved", () => {
+test("casting: sixteen = accent 5 (4 matte, 1 glossy), white 6 (5/1), black 5 (3/2); ten = 3 (2/1), 4 (3/1), 3 (2/1); deterministic; ON THE LATTICE no two accents share an edge and same-family edges are few", () => {
   const tally = (slots: readonly { family: string; finish: string }[]) => {
     const t: Record<string, number> = {};
     for (const s of slots) t[`${s.family}-${s.finish}`] = (t[`${s.family}-${s.finish}`] ?? 0) + 1;
@@ -57,15 +59,34 @@ test("casting: sixteen = accent 5 (4 matte, 1 glossy), white 6 (5/1), black 5 (3
   };
   assert.deepEqual(tally(CAST_16), { "accent-matte": 4, "accent-glossy": 1, "white-matte": 5, "white-glossy": 1, "black-matte": 3, "black-glossy": 2 });
   assert.deepEqual(tally(CAST_10), { "accent-matte": 2, "accent-glossy": 1, "white-matte": 3, "white-glossy": 1, "black-matte": 2, "black-glossy": 1 });
-  const c16 = fieldCasting(16, SEED_FIELD), c10 = fieldCasting(10, SEED_FIELD);
-  assert.deepEqual(tally(c16), tally(CAST_16));
-  assert.deepEqual(tally(c10), tally(CAST_10));
-  assert.notDeepEqual(c16, [...CAST_16], "it is shuffled");
-  assert.deepEqual(fieldCasting(16, SEED_FIELD), c16);
-  // interleaved: no run of the same family longer than three in slot order
-  let run = 1, worst = 1;
-  for (let i = 1; i < c16.length; i++) { run = c16[i].family === c16[i - 1].family ? run + 1 : 1; worst = Math.max(worst, run); }
-  assert.ok(worst <= 3, `a run of ${worst} of one family`);
+  for (const count of [16, 10]) {
+    const cast = fieldCasting(count, SEED_FIELD);
+    assert.deepEqual(tally(cast), tally(count === 16 ? CAST_16 : CAST_10));
+    assert.deepEqual(fieldCasting(count, SEED_FIELD), cast, "deterministic");
+    // replay the grid: slot k is cell order[k]
+    const { cols, rows } = latticeShape(count);
+    const order = latticeOrder(count, SEED_FIELD);
+    const grid: (string | null)[] = Array.from({ length: cols * rows }, () => null);
+    cast.forEach((s, k) => { grid[order[k]] = s.family; });
+    assert.ok(grid.every(Boolean), "every cell cast");
+    let accentPairs = 0, samePairs = 0;
+    const rowsText: string[] = [];
+    for (let r = 0; r < rows; r++) {
+      rowsText.push(Array.from({ length: cols }, (_, c) => grid[r * cols + c]![0].toUpperCase()).join(" "));
+      for (let c = 0; c < cols; c++) {
+        const f = grid[r * cols + c];
+        for (const [dr, dc] of [[0, 1], [1, 0]]) {
+          const rr = r + dr, cc = c + dc;
+          if (rr >= rows || cc >= cols) continue;
+          const g = grid[rr * cols + cc];
+          if (f === g) { samePairs++; if (f === "accent") accentPairs++; }
+        }
+      }
+    }
+    assert.equal(accentPairs, 0, `accents share an edge:\n${rowsText.join("\n")}`);
+    // 16 cells have 24 edges; a random 5/6/5 colouring shares ~8 of them — the greedy keeps it well under
+    assert.ok(samePairs <= (count === 16 ? 5 : 3), `${samePairs} same-family edges:\n${rowsText.join("\n")}`);
+  }
   // Lusion's light-mode whites, a field-side override
   assert.deepEqual(LIGHT_WHITE, { matte: "#8e9098", glossy: "#a3a5ad" });
 });
@@ -191,4 +212,71 @@ test("solved targets: a wall the height of the view is left sideways (nothing cu
   const s3 = solveTargets(fit, 16, SEED_FIELD, scales, [everything], false);
   assert.equal(s3.targets.length, 16);
   assert.deepEqual(s3.culled, []);
+});
+
+test("a rect moved to the page's top: the h1 measured at scrollY 250 solves as the scrollY-0 box", () => {
+  const r = atPageTop({ left: 144, top: 109, right: 799, bottom: 221 }, 250);
+  assert.deepEqual(r, { left: 144, top: 359, right: 799, bottom: 471 });
+  assert.deepEqual(atPageTop({ left: 1, top: 2, right: 3, bottom: 4 }, 0), { left: 1, top: 2, right: 3, bottom: 4 });
+});
+
+// the field's own step, as the scene runs it: the solved homes, the band on (the h1 box and the card's at half strength)
+function settledField(fit: ReturnType<typeof fieldCamera>, rects: { h1: Rect; card: Rect }, count: number) {
+  const scales = fieldScales(count, SEED_FIELD);
+  const boxes: KeepOut[] = [keepOutFor(rects.h1, fit, 1), keepOutFor(rects.card, fit, 0.5)];
+  const { targets, culled } = solveTargets(fit, count, SEED_FIELD, scales, boxes);
+  assert.deepEqual(culled, []);
+  const w = createWorld(scales, fit, SEED_FIELD);
+  placeWorld(w, targets, fit);
+  setKeepOut(w, boxes, fit.z);
+  return { w, boxes, scales, targets };
+}
+const projectedClearance = (w: ReturnType<typeof createWorld>, box: KeepOut) => {
+  let worst = Infinity;
+  for (const b of w.bodies) { const s = w.eyeZ / (w.eyeZ - b.pos.z); worst = Math.min(worst, clearanceOf(b.pos.x * s, b.pos.y * s, b.r, box)); }
+  return worst;
+};
+
+test("the whole entrance in node with the band on: over 10 s alive and the fall to rest no body's disc covers the letters (penetration < 0.2 u), the pack rests within 12 s, and it rests ON its homes", () => {
+  const fit = fieldCamera(1440, 900, 112);
+  const { w, boxes } = settledField(fit, HERO_RECTS["1440x900"], 16);
+  let worst = Infinity;
+  for (let i = 0; i < 10 * 60; i++) { stepWorld(w, 1 / 60, null, 1); worst = Math.min(worst, projectedClearance(w, boxes[0])); }
+  let E = 1, restAt = -1;
+  const t0 = w.time;
+  for (let i = 0; i < 12 * 60 && restAt < 0; i++) {
+    E = Math.max(0, E - 1 / 120);
+    if (isResting(w, stepWorld(w, 1 / 60, null, E), E)) restAt = w.time - t0;
+    worst = Math.min(worst, projectedClearance(w, boxes[0]));
+  }
+  assert.ok(worst > -0.2, `a body reached ${-worst} u into the inflated keep-out`);
+  assert.ok(restAt > 0 && restAt < 12, `rest took ${restAt} s`);
+  assert.ok(projectedClearance(w, boxes[0]) >= DYN.KEEP_BAND - 0.1, `at rest ${projectedClearance(w, boxes[0])} u from the headline's inflated box`);
+  const spread = w.bodies.reduce((n, b) => n + Math.hypot(b.pos.x - b.target.x, b.pos.y - b.target.y, b.pos.z - b.target.z), 0) / w.bodies.length;
+  assert.ok(spread < 0.15, `mean |pos − target| at rest ${spread} u`);
+});
+
+test("a headline that scrolls onto resting jacks (scrollY 250 at 1440 × 900) covers some; the band (ramped in over 0.4 s, outward speed capped at KEEP_VOUT) eases them out under 8 u/s — a kick would be 20 — and they clear it", () => {
+  const fit = fieldCamera(1440, 900, 112);
+  const { w, boxes } = settledField(fit, HERO_RECTS["1440x900"], 16);
+  for (let i = 0; i < 10 * 60; i++) stepWorld(w, 1 / 60, null, 1);
+  let E = 1;
+  for (let i = 0; i < 12 * 60; i++) { E = Math.max(0, E - 1 / 120); if (isResting(w, stepWorld(w, 1 / 60, null, E), E)) break; }
+  // the page has scrolled 250 px: the h1's box is 250 px higher in the viewport
+  const shifted: KeepOut = { ...boxes[0], cy: boxes[0].cy + 250 / fit.pxPerUnit };
+  const under = w.bodies.filter((b) => { const s = w.eyeZ / (w.eyeZ - b.pos.z); return clearanceOf(b.pos.x * s, b.pos.y * s, b.r, shifted) < 0; }).length;
+  assert.ok(under >= 1, `${under} resting jacks under the scrolled headline — the case the ramp exists for`);
+  // the scene: strength 0 → 1 over RAMP_S 0.4 s of sim time, the pointer moving (E = 1)
+  let vmax = 0;
+  const t0 = w.time;
+  for (let i = 0; i < 3 * 60; i++) {
+    setKeepOut(w, [{ ...shifted, strength: Math.min(1, (w.time - t0) / 0.4) }, boxes[1]], fit.z);
+    stepWorld(w, 1 / 60, null, 1);
+    for (const b of w.bodies) vmax = Math.max(vmax, Math.hypot(b.vel.x, b.vel.y, b.vel.z));
+  }
+  // the band drives them out no faster than KEEP_VOUT (the pull and contacts add a little); the
+  // ramp alone measured 20.4 u/s here — the cap is what makes it a nudge
+  assert.ok(vmax > 3 && vmax < DYN.KEEP_VOUT + 1.5, `the band pushed a jack to ${vmax} u/s (cap ${DYN.KEEP_VOUT})`);
+  assert.ok(vmax < 8, `the band pushed a jack to ${vmax} u/s`);
+  assert.ok(projectedClearance(w, shifted) >= -0.05, `still ${-projectedClearance(w, shifted)} u under the headline after 3 s`);
 });

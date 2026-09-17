@@ -20,7 +20,7 @@ export interface Body {
   pos: Vec3;
   vel: Vec3;
   quat: Quat;
-  /** the pull's target: (i − 5.5)·0.6 along x by default, so the card's pack keeps a statistical oldest-left drift; the hero places its own (heroLayout.ts) */
+  /** the pull's target: (i − 5.5)·0.6 along x by default, so the card's pack keeps a statistical oldest-left drift; the jack field places its own (fieldLayout.ts) */
   target: Vec3;
   /** the collision radius, BODY_R × the mesh scale */
   r: number;
@@ -172,16 +172,31 @@ export const DYN = {
    * pull and the τ 0.62 s damping stopped it; 200 still let the 1.2 jack reach 0.21 u; 240 is
    * the first round step that holds every cast scale under 0.2 u — 0.07–0.10 u at CAP 20,
    * stopped 0.12 s after entering the band (node, straight approach from the band's edge, the
-   * pull behind the body). The band is not a wall, and the setup decides the depth: at
-   * CAP_CLICK 25 the same approach reaches 0.10–0.14 u; launched from mid-band 0.25 u; with
-   * the pull INTO the box (a target behind the letters) 0.24–0.33 u; and a body already
-   * parked at the inflated edge when a burst hits it goes 0.59 u in — half a radius over the
-   * letters for a tenth of a second. K_KEEP is not raised for that case: 480 would still
-   * leave 0.2 u there and would make every ordinary flick read as a wall.
+   * pull behind the body). The band is not a wall, and the setup decides the depth. A click
+   * burst is the hard case: for CAP_CLICK_S after a click the cap is 25, and a body launched
+   * at 25 WITH the cap lifted (capUntil ahead, as clickWorld leaves it — two earlier comments
+   * quoted 0.10–0.14 u here, measured with capUntil still −1, so the first substep had clipped
+   * the launch to 20) reaches 0.40 / 0.43 / 0.46 u from the band's edge (scales 0.86 / 1 /
+   * 1.2), 0.57–0.59 u from mid-band, and 0.91–0.92 u when it was already parked at the
+   * inflated edge — most of a radius over the letters for a tenth of a second, once, after a
+   * click followed by a flick inside 0.3 s. K_KEEP is not raised for that case: 480 would
+   * still leave 0.2 u there and would make every ordinary flick read as a wall, and the text
+   * sits above the canvas in z-order regardless.
    */
   KEEP_BAND: 1.5,
   K_KEEP: 240,
   KEEP_PAD: 0.15,
+  /**
+   * The band may STOP a body at any speed, but it never drives one OUTWARD faster than this.
+   * A box can appear over resting bodies (the headline scrolled onto the jack field's
+   * homes): measured in node with the box's strength ramped in over 0.4 s, a body 1.75 u
+   * inside still left at 20.4 u/s — the ramp only delays the moment full K_KEEP meets a body
+   * that is still deep inside. Capping the outward component at 6 u/s (a third of the flick
+   * cap; ~1.5 viewport-heights per second at 58 px/u is still brisk) makes that exit a nudge,
+   * and costs a flick nothing: the deceleration of an incoming body is the push against its
+   * motion, which the cap never touches.
+   */
+  KEEP_VOUT: 6,
 } as const;
 
 const AXIS = 1 / Math.sqrt(3); // the swirl axis (1,1,1) normalised
@@ -397,9 +412,14 @@ export function stepWorld(world: World, delta: number, pointer: Pointer | null, 
         if (d >= DYN.KEEP_BAND) continue;
         const t = 1 - Math.max(d, 0) / DYN.KEEP_BAND;
         const a = DYN.K_KEEP * (box.strength ?? 1) * t * t * h;
-        if (ex > 0 && ey > 0) { v.x += (ex / outside) * Math.sign(qx) * a; v.y += (ey / outside) * Math.sign(qy) * a; }
-        else if (ex > ey) v.x += (Math.sign(qx) || 1) * a;
-        else v.y += (Math.sign(qy) || 1) * a;
+        let gx: number, gy: number;
+        if (ex > 0 && ey > 0) { gx = (ex / outside) * Math.sign(qx); gy = (ey / outside) * Math.sign(qy); }
+        else if (ex > ey) { gx = Math.sign(qx) || 1; gy = 0; }
+        else { gx = 0; gy = Math.sign(qy) || 1; }
+        // full push against an incoming body; outward, only up to KEEP_VOUT
+        const vn = v.x * gx + v.y * gy;
+        const push = Math.min(a, Math.max(0, DYN.KEEP_VOUT - vn));
+        v.x += gx * push; v.y += gy * push;
       }
       p.x += v.x * h; p.y += v.y * h; p.z += v.z * h;
       // 6. the tumble: bodies roll with their travel about the target, never spin in place

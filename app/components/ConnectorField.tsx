@@ -16,7 +16,7 @@ import WakeRibbon from "./WakeRibbon";
 // the three.js side of THIS scene only: the entrance, the idle envelope and the demand loop
 // that stops when nothing moves. The jack's look — the shared geometry, the seven materials
 // and their neighbour-occlusion shader, the one-plane environment and the key light — is
-// jackMaterials.ts, shared with the hero's scene (HeroConnectors.tsx). The pointer's wake
+// jackMaterials.ts, shared with the page's jack field (JackFieldScene.tsx). The pointer's wake
 // ribbon (WakeRibbon.tsx) sits beside it in the Canvas: it owns the render each frame so it
 // can composite over the finished panel, and a decaying field is the one other reason the
 // demand loop stays awake.
