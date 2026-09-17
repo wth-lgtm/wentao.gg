@@ -11,6 +11,8 @@
 // rate is per 60 Hz frame raised to 60·dt, so the ribbon lives the same sim time at 30, 60 and
 // 120 Hz — and under software GL, where the harness reads sim time.
 
+import { PERF } from "./scenePerf";
+
 export const WAKE = {
   /** the field is the canvas at 1/FIELD_DIV of its CSS size (Lusion: width >> 2) — DPR is not an input */
   FIELD_DIV: 4,
@@ -115,14 +117,48 @@ export function fieldScale(fieldH: number): number {
 }
 
 /**
- * The brush speed in px per 60 Hz frame, from the frame's own travel: a 120 Hz display reads
- * like a 60 Hz one and events coalesced into one frame sum instead of the last one counting.
- * dt is floored at 1/240 s — no display is faster, and a delta below it is a scheduler
- * accident, not a frame. Under swiftshader dt clamps at 1/30 (the world's clock), so a frame's
- * travel reads as half its wall speed; the harness paces its pointer in sim time for that.
+ * The brush speed in px per 60 Hz frame, from the frame's own travel over the time it REALLY
+ * took (the raw frame delta, as the scene's own pointer velocity uses it — not the world's
+ * clamped dt, which exists for integration stability): a 120 Hz display reads like a 60 Hz one,
+ * events coalesced into one frame sum instead of the last one counting, and a hand that moved
+ * 300 px while the tab was hidden for half a second reads 10 px/frame — nothing — where the
+ * clamped form read 300 / (60 · 1/30) = 150, a full-strength flick on resume (the re-review's
+ * finding). Floored at 1/240 s — no display is faster, and a delta below it is a scheduler
+ * accident, not a frame. Under swiftshader a frame is ~0.1 s, so the harness paces the brush's
+ * probes in wall time (the field's decay still runs on the sim clock).
  */
-export function brushSpeed(travelPx: number, dt: number): number {
-  return travelPx / (60 * Math.max(dt, 1 / 240));
+export function brushSpeed(travelPx: number, elapsedS: number): number {
+  return travelPx / (60 * Math.max(elapsedS, 1 / 240));
+}
+
+/**
+ * A resume frame: the first rendered frame after the loop was paused — a hidden tab, or
+ * `frameloop="never"` → demand — while the pointer may have moved. The scene signals the
+ * never → demand case (its `firstFrame`, mirrored by WakeRibbon's `visible`); a hidden tab
+ * shows as a delta at or over scenePerf's GAP, PR A's own line between a frame and a gap. On
+ * such a frame the brush re-seeds its previous point to the current one and paints nothing.
+ */
+export function resumeFrame(rawDelta: number, flagged = false): boolean {
+  return flagged || !Number.isFinite(rawDelta) || rawDelta >= PERF.GAP;
+}
+
+export interface Brush {
+  /** px per 60 Hz frame */
+  speed: number;
+  /** field texels; 0 = nothing to paint */
+  radius: number;
+  /** the share of the stroke's velocity the brush injects */
+  strength: number;
+}
+
+/**
+ * The brush for one frame: nothing on a resume frame or when the pointer did not move,
+ * otherwise speed → radius and strength. Pure, so the resume gate is tested in node.
+ */
+export function brushFor(travelPx: number, rawDelta: number, resumed: boolean, fieldH: number): Brush {
+  if (travelPx <= 0 || resumeFrame(rawDelta, resumed)) return { speed: 0, radius: 0, strength: 0 };
+  const speed = brushSpeed(travelPx, rawDelta);
+  return { speed, radius: brushRadiusTex(speed, fieldH), strength: brushStrength(speed) };
 }
 
 /** Brush radius in field texels for a speed in px per 60 Hz frame; 0 below SPEED_MIN and below half a texel. */

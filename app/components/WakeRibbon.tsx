@@ -5,7 +5,7 @@ import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { clampDelta } from "../lib/jackDynamics";
 import type { PointerRig } from "../lib/pointerRig";
-import { WAKE, awake, brushRadiusTex, brushSpeed, brushStrength, capsuleTouches, fieldScale, fieldSize, perFrame, strokeBound, type FieldSize } from "../lib/wakeField";
+import { WAKE, awake, brushFor, capsuleTouches, fieldScale, fieldSize, perFrame, strokeBound, type FieldSize } from "../lib/wakeField";
 
 // The pointer's wake ribbon — Lusion's "fluid" (lusion.co's hero: ScreenPaint + the
 // ScreenPaintDistortion post pass, quoted from its bundle). A fast flick leaves a screen-space
@@ -189,8 +189,9 @@ interface Debug {
   /** the last frame's brush: its speed in px per 60 Hz frame (from the frame's travel) and the radius in field texels */
   speed: number;
   radius: number;
-  /** the last frame's clamped delta, the field's clock */
+  /** the last frame's clamped delta, the field's clock, and its raw delta, the brush's */
   dt: number;
+  raw: number;
   /** run the copy + composite even over an empty field (the pass-through hash test) */
   force: boolean;
   /** the next composited (or forced) frame's canvas before and after the pass, as data URLs */
@@ -200,6 +201,8 @@ interface Debug {
 interface Props {
   /** the card's shared pointer — the brush follows it over the whole card, not just the canvas */
   rig: PointerRig;
+  /** the frameloop is "demand" (the card is inside its margin); a false → true is a resume, and the brush re-seeds */
+  visible: boolean;
   /** ?jacksDebug=1 — installs window.__wake beside window.__jacks */
   debug: boolean;
 }
@@ -215,7 +218,7 @@ export default function WakeRibbon(props: Props) {
   return ok ? <Ribbon {...props} /> : null;
 }
 
-function Ribbon({ rig, debug }: Props) {
+function Ribbon({ rig, visible, debug }: Props) {
   const { gl, scene, camera, size, invalidate } = useThree();
 
   const quad = useRef<{ scene: THREE.Scene; camera: THREE.OrthographicCamera; mesh: THREE.Mesh; paint: THREE.ShaderMaterial; copy: THREE.ShaderMaterial; blur: THREE.ShaderMaterial; reset: THREE.ShaderMaterial; composite: THREE.ShaderMaterial } | null>(null);
@@ -223,9 +226,15 @@ function Ribbon({ rig, debug }: Props) {
   const frameTex = useRef<THREE.FramebufferTexture | null>(null);
   // the brush: where the pointer was last frame (client px, and canvas CSS px), its radius then, and the stroke's velocity
   const prev = useRef({ cx: 0, cy: 0, x: 0, y: 0, valid: false, radius: 0 });
+  // Mirrors Field's firstFrame: the frameloop just went never → demand, so the pointer may have
+  // moved a lot since the last rendered frame while this frame's delta says otherwise.
+  const resumed = useRef(true);
+  useEffect(() => {
+    if (visible) resumed.current = true;
+  }, [visible]);
   const uVel = useRef(new THREE.Vector2());
   const weight = useRef(0);
-  const dbg = useRef({ frames: 0, speed: 0, radius: 0, dt: 0, force: false, pending: null as null | ((r: { plain: string; post: string; simDt: number }) => void) });
+  const dbg = useRef({ frames: 0, speed: 0, radius: 0, dt: 0, raw: 0, force: false, pending: null as null | ((r: { plain: string; post: string; simDt: number }) => void) });
   const drawSize = useRef(new THREE.Vector2());
 
   const quadFor = () => {
@@ -313,6 +322,7 @@ function Ribbon({ rig, debug }: Props) {
       get speed() { return d.speed; },
       get radius() { return d.radius; },
       get dt() { return d.dt; },
+      get raw() { return d.raw; },
       get force() { return d.force; },
       set force(v: boolean) { d.force = v; },
       capture: () => new Promise((resolve) => { d.pending = resolve; invalidate(); }),
@@ -329,10 +339,13 @@ function Ribbon({ rig, debug }: Props) {
     const canvas = gl.domElement;
 
     // ---- the brush: this frame's travel over the CARD, in canvas CSS px → field texels. The
-    // canvas rect is read only on a frame the pointer moved; speed is the frame's own travel per
-    // 60 Hz frame (brushSpeed — under swiftshader dt clamps at 1/30, so the harness paces its
-    // pointer in sim time); nothing when the pointer did not move ----
+    // canvas rect is read only on a frame the pointer moved; speed is the travel over the frame's
+    // REAL elapsed time (brushFor — the world's dt is clamped, a hand is not); nothing when the
+    // pointer did not move, and nothing on a resume frame (a hidden tab's gap, or the never →
+    // demand flag above), whose travel spans the whole pause: it re-seeds the previous point ----
     const p = prev.current;
+    const resume = resumed.current;
+    resumed.current = false;
     let radius = 0, speed = 0, strength = 0;
     let fromX = 0, fromY = 0, toX = 0, toY = 0;
     let painting = false;
@@ -344,15 +357,14 @@ function Ribbon({ rig, debug }: Props) {
         x = rig.cx - r.left;
         y = rig.cy - r.top;
       }
-      if (p.valid) {
-        if (moved) {
-          speed = brushSpeed(Math.hypot(x - p.x, y - p.y), dt);
-          radius = brushRadiusTex(speed, fd.size.h);
-          strength = brushStrength(speed);
-        }
+      const brush = brushFor(p.valid && moved ? Math.hypot(x - p.x, y - p.y) : 0, rawDelta, resume, fd.size.h);
+      speed = brush.speed; radius = brush.radius; strength = brush.strength;
+      // re-seed: the stop disc must not be repainted where the pointer was before the pause
+      if (resume) p.radius = 0;
+      if (p.valid && !resume) {
         fromX = p.x; fromY = p.y;
       } else {
-        // the first frame over the card has no previous point (the rig's own rule: re-entry is not a flick)
+        // the first frame over the card (the rig's own rule: re-entry is not a flick), or a resume
         fromX = x; fromY = y;
       }
       toX = x; toY = y;
@@ -369,6 +381,7 @@ function Ribbon({ rig, debug }: Props) {
     d.speed = speed;
     d.radius = radius;
     d.dt = dt;
+    d.raw = rawDelta;
     const scale = fieldScale(fd.size.h);
 
     const alive = awake(weight.current, painting);

@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { WAKE, awake, brushRadiusTex, brushSpeed, brushStrength, capsuleTouches, compositeAt, fieldScale, fieldSize, lifetimeS, perFrame, stepWeight, strokeBound } from "../app/lib/wakeField";
+import { WAKE, awake, brushFor, brushRadiusTex, brushSpeed, brushStrength, capsuleTouches, compositeAt, fieldScale, fieldSize, lifetimeS, perFrame, resumeFrame, stepWeight, strokeBound } from "../app/lib/wakeField";
+import { PERF } from "../app/lib/scenePerf";
 
 // the GitHub card's column at 1440: 691 × 273 CSS px
 const CANVAS = { w: 691, h: 273 };
@@ -20,13 +21,35 @@ test("the reference's texel lengths scale by the field's height: REF_H 600 is 1.
   assert.equal(fieldScale(fieldSize(519, 273).h), fieldScale(FIELD.h));
 });
 
-test("brush speed is px per 60 Hz frame from the frame's own travel: 120 Hz reads like 60, coalesced events sum, dt is floored at 1/240", () => {
+test("brush speed is px per 60 Hz frame from the frame's own travel over its REAL elapsed time: 120 Hz reads like 60, coalesced events sum, the floor is 1/240", () => {
   assert.equal(brushSpeed(40, 1 / 60), 40);
   assert.equal(brushSpeed(20, 1 / 120), 40, "half the travel a frame on a 120 Hz display is the same hand");
   assert.equal(brushSpeed(80, 1 / 30), 40, "two 60 Hz events landing in one 30 fps frame sum");
-  assert.equal(brushSpeed(959, 1 / 30), 479.5, "the harness's 959 px flick under swiftshader's 1/30 clamp");
+  assert.ok(Math.abs(brushSpeed(959, 0.1) - 159.8) < 0.1, "the harness's 959 px flick in one ~0.1 s swiftshader frame: still a full brush");
   assert.equal(brushSpeed(10, 1e-3), 40, "a 1 ms delta is not a frame: floored at 1/240");
   assert.equal(brushSpeed(0, 1 / 60), 0);
+  // the re-review's finding: 300 px moved while the tab was hidden for 0.5 s. Over the real
+  // half second that is 10 px/frame — nothing; over the world's clamped 1/30 it read 150, a flick
+  assert.equal(brushSpeed(300, 0.5), 10);
+  assert.equal(300 / (60 * (1 / 30)), 150, "what the clamped form read");
+  assert.equal(brushRadiusTex(brushSpeed(300, 0.5), FIELD.h), 0);
+});
+
+test("a resume frame — a hidden tab's gap, a never → demand flag, or no delta at all — paints nothing and re-seeds", () => {
+  assert.equal(resumeFrame(1 / 60), false);
+  assert.equal(resumeFrame(0.5), false, "half a second is a slow frame, not a gap; the real-time speed covers it");
+  assert.equal(resumeFrame(PERF.GAP), true);
+  assert.equal(resumeFrame(12), true);
+  assert.equal(resumeFrame(NaN), true);
+  assert.equal(resumeFrame(1 / 60, true), true, "the scene's own signal: the frameloop just went never → demand");
+  // the whole decision, as the GPU side takes it
+  assert.deepEqual(brushFor(959, 1 / 60, true, FIELD.h), { speed: 0, radius: 0, strength: 0 }, "a 959 px flick's travel on the resume frame is not a flick");
+  assert.deepEqual(brushFor(500, 10, false, FIELD.h), { speed: 0, radius: 0, strength: 0 }, "500 px over a 10 s hidden tab");
+  assert.deepEqual(brushFor(0, 1 / 60, false, FIELD.h), { speed: 0, radius: 0, strength: 0 }, "a still pointer");
+  const flick = brushFor(160, 1 / 60, false, FIELD.h);
+  assert.ok(flick.speed === 160 && flick.strength === 1 && Math.abs(flick.radius - (100 / 600) * 68) < 1e-9, "a 160 px frame at 60 Hz: the full brush");
+  const brisk = brushFor(25, 1 / 60, false, FIELD.h);
+  assert.ok(brisk.speed === 25 && brisk.radius > 0.7 && brisk.radius < 0.72 && Math.abs(brisk.strength - 0.0625) < 1e-12);
 });
 
 test("brush radius: the ramp starts at 20 px per frame (1200 px/s) and reaches the full 100 px brush at 100 — 45 px on this column", () => {

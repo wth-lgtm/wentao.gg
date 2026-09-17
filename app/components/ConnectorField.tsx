@@ -545,7 +545,7 @@ export default function ConnectorField({
     >
       <directionalLight position={KEY.position} intensity={KEY.intensity} />
       <Field jacks={jacks} accent={accent} visible={active} inView={inView} rig={rig} debug={debug} tier={tier} onDegrade={() => setTier((t) => Math.min(2, t + 1))} />
-      <WakeRibbon rig={rig} debug={debug} />
+      <WakeRibbon rig={rig} visible={active} debug={debug} />
     </Canvas>
   );
 }
