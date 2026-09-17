@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { SEED, unknownOverride, type Jack } from "../lib/connectorJacks";
@@ -76,6 +76,8 @@ interface Debug {
   /** gl.info.programs.length (the wake ribbon adds its own), and how many of them carry GLASS.PROGRAM_KEY (must be 1: the pre-pass and every glass share it) */
   programs: number;
   glassPrograms: number;
+  /** every live program of this renderer — three's parameter-derived cache key (the custom key last) and how many materials hold it: the diagnosis behind `glassPrograms` */
+  programKeys: { key: string; usedTimes: number }[];
   bodies(): { x: number; y: number; z: number; vx: number; vy: number; vz: number; v: number; scale: number; known: boolean }[];
   step(dt: number): void;
 }
@@ -142,8 +144,15 @@ function Field({ jacks, accent, visible, inView, rig, debug, tier, onDegrade }: 
 
   // The environment: one PMREM from the module scene, once per context. 256 cubeUV is what
   // fromScene produces at every input resolution, and it is enough — the key plane at ~8 u
-  // subtends ~28°, crisp in mirror clearcoat.
-  useEffect(() => {
+  // subtends ~28°, crisp in mirror clearcoat. A LAYOUT effect, not a passive one: React flushes
+  // passive effects after paint, and R3F's first frame is a rAF that can land before them —
+  // measured here (swiftshader, the card scrolled into view): frame 1 at t, `scene.environment`
+  // set 357 ms later — so the twelve glass materials compiled WITHOUT the environment map, and
+  // three keeps every program a material has ever compiled until the material is disposed
+  // (WebGLRenderer.getProgram: `materialProperties.programs`, a Map): a second "jack-glass"
+  // program for the scene's lifetime, `glassPrograms` 2 instead of 1. A layout effect runs
+  // inside the commit, before any rAF, so the first draw already sees the environment.
+  useLayoutEffect(() => {
     const pmrem = new THREE.PMREMGenerator(gl);
     const target = pmrem.fromScene(environmentScene(), 0, 0.1, 100);
     scene.environment = target.texture;
@@ -236,6 +245,7 @@ function Field({ jacks, accent, visible, inView, rig, debug, tier, onDegrade }: 
       get renderOrders() { return groups.current.map((g) => g?.renderOrder ?? -1); },
       get programs() { return gl.info.programs?.length ?? 0; },
       get glassPrograms() { return (gl.info.programs ?? []).filter((p) => p.cacheKey.includes(GLASS.PROGRAM_KEY)).length; },
+      get programKeys() { return (gl.info.programs ?? []).map((p) => ({ key: p.cacheKey, usedTimes: p.usedTimes })); },
       bodies: () => world.bodies.map((b, i) => ({ x: b.pos.x, y: b.pos.y, z: b.pos.z, vx: b.vel.x, vy: b.vel.y, vz: b.vel.z, v: Math.hypot(b.vel.x, b.vel.y, b.vel.z), scale: jacks[i].scale, known: jacks[i].known })),
       step: (dt: number) => { stepWorld(world, dt, null, self.E); invalidate(); },
     };

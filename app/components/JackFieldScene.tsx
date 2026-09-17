@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { DYN, clampDelta, clickWorld, createWorld, isResting, setKeepOut, setView, stepWorld, type KeepOut, type Pointer, type Vec3, type World } from "../lib/jackDynamics";
@@ -163,6 +163,8 @@ interface Debug {
   /** gl.info.programs.length, and how many of them carry GLASS.PROGRAM_KEY (must be 1: the pre-pass added none) */
   programs: number;
   glassPrograms: number;
+  /** every live program of this renderer — three's parameter-derived cache key (the custom key last) and how many materials hold it: the diagnosis behind `glassPrograms` */
+  programKeys: { key: string; usedTimes: number }[];
   /** occlusion neighbours per jack (0: the glass carries no neighbour loop) */
   near: number;
   /** how many times layout() has re-solved (mount, resize, the h1 or the card changing size) */
@@ -327,8 +329,14 @@ function Field({ packs, accent, theme, visible, rig, debug, tier, onDegrade }: {
   });
 
   // The environment: one PMREM from the shared one-plane rig, once per context, as the card;
-  // its intensity per theme (ENV_DARK / ENV_LIGHT).
-  useEffect(() => {
+  // its intensity per theme (ENV_DARK / ENV_LIGHT). LAYOUT effects, not passive ones: React
+  // flushes passive effects after paint and R3F's first frame is a rAF that can land before
+  // them — on the card it did (ConnectorField.tsx has the measurement), and the materials that
+  // drew that frame compiled without the environment map and kept that program for the scene's
+  // lifetime (three keeps every program a material has compiled until it is disposed): a second
+  // glass program, `glassPrograms` 2. The field has been winning the same race (it mounts on an
+  // idle page); a layout effect runs inside the commit, before any rAF, so it cannot lose it.
+  useLayoutEffect(() => {
     const pmrem = new THREE.PMREMGenerator(gl);
     const target = pmrem.fromScene(environmentScene(), 0, 0.1, 100);
     scene.environment = target.texture;
@@ -339,7 +347,7 @@ function Field({ packs, accent, theme, visible, rig, debug, tier, onDegrade }: {
       pmrem.dispose();
     };
   }, [gl, scene, invalidate]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     scene.environmentIntensity = envOverride.current ?? (theme === "light" ? ENV_LIGHT : ENV_DARK);
     invalidate();
   }, [theme, scene, invalidate]);
@@ -541,6 +549,7 @@ function Field({ packs, accent, theme, visible, rig, debug, tier, onDegrade }: {
       get renderOrders() { return groups.current.map((g) => g?.renderOrder ?? -1); },
       get programs() { return gl.info.programs?.length ?? 0; },
       get glassPrograms() { return (gl.info.programs ?? []).filter((p) => p.cacheKey.includes(GLASS.PROGRAM_KEY)).length; },
+      get programKeys() { return (gl.info.programs ?? []).map((p) => ({ key: p.cacheKey, usedTimes: p.usedTimes })); },
       get near() { return NEAR_COUNT_GLASS; },
       get layouts() { return layouts.current; },
       get packs() { return centroids.current.map((c, p) => ({ x: c.x, y: c.y, z: c.z, n: packs[p].n, swirlGain: packs[p].swirlGain })); },
