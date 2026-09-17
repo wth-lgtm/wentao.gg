@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { DYN, clickWorld, createWorld, isResting, stepWorld, type Pointer, type World } from "../app/lib/jackDynamics";
+import { DYN, clickWorld, createWorld, isResting, setKeepOut, stepWorld, type Pointer, type World } from "../app/lib/jackDynamics";
 import { SEED } from "../app/lib/connectorJacks";
 import { cameraFor } from "../app/lib/connectorScene";
 
@@ -255,4 +255,89 @@ test("soft bounds: a body flung past 1.3× the visible half-extents or |z| > 3 i
   assert.ok(minX > -(1.3 * VIEW.viewW / 2 + 2.5), `x reached ${minX}`);
   assert.ok(maxAbsZ < 5, `z reached ${maxAbsZ}`);
   assert.ok(b.pos.x > minX + 1, "it came back");
+});
+
+// ---- the keep-out band (added for the hero; the card passes no rects and is untouched) ----
+
+// a keep-out box on the z = 0 plane: 6 u wide, 1.5 u tall, centred at (−4, 1) — a wordmark's worth
+const BOX = { cx: -4, cy: 1, hw: 3, hh: 0.75 };
+const clearanceTo = (x: number, y: number, r: number, k = BOX) => {
+  const ex = Math.abs(x - k.cx) - k.hw, ey = Math.abs(y - k.cy) - k.hh;
+  return Math.hypot(Math.max(ex, 0), Math.max(ey, 0)) + Math.min(Math.max(ex, ey), 0) - (r + DYN.KEEP_PAD);
+};
+
+test("keep-out: a fresh world has none; a body resting exactly BAND from the inflated box feels nothing, and one wandering beyond it steps EXACTLY as with no keep-out", () => {
+  const w = createWorld([1, 0.9], { viewW: 24, viewH: 15 }, SEED);
+  assert.deepEqual(w.keepOut, []);
+  assert.equal(w.eyeZ, 0);
+  // at rest exactly on the band's edge (a hero target's placement): E 0, on target, no velocity → no force
+  setKeepOut(w, [BOX]);
+  const edge = w.bodies[0];
+  edge.pos = { x: -4, y: 1 - 0.75 - (edge.r + DYN.KEEP_PAD) - DYN.KEEP_BAND, z: 0 };
+  edge.target = { ...edge.pos };
+  edge.vel = { x: 0, y: 0, z: 0 };
+  w.bodies[1].pos = { x: 8, y: 1, z: 0 }; w.bodies[1].target = { x: 8, y: 1, z: 0 }; w.bodies[1].vel = { x: 0, y: 0, z: 0 };
+  assert.ok(Math.abs(clearanceTo(edge.pos.x, edge.pos.y, edge.r) - DYN.KEEP_BAND) < 1e-9);
+  stepWorld(w, 1 / 60, null, 0);
+  assert.deepEqual(edge.vel, { x: 0, y: 0, z: 0 }, "zero force at d = BAND");
+  // wandering half a unit beyond the band, with a keep-out and without: identical trajectories
+  const a = createWorld([1, 0.9], { viewW: 24, viewH: 15 }, SEED), twin = createWorld([1, 0.9], { viewW: 24, viewH: 15 }, SEED);
+  for (const q of [a, twin]) {
+    q.bodies[0].pos = { x: -4, y: 1 - 0.75 - (1.05 + DYN.KEEP_PAD) - DYN.KEEP_BAND - 0.5, z: 0 };
+    q.bodies[1].pos = { x: 8, y: 1, z: 0 };
+    q.bodies.forEach((b) => { b.target = { ...b.pos }; b.vel = { x: 0.3, y: 0.2, z: 0 }; });
+  }
+  setKeepOut(a, [BOX]);
+  for (let i = 0; i < 30; i++) { stepWorld(a, 1 / 60, null, 1); stepWorld(twin, 1 / 60, null, 1); }
+  assert.deepEqual(a.bodies.map((b) => [b.pos, b.vel]), twin.bodies.map((b) => [b.pos, b.vel]), "the band's force is identically zero outside it");
+});
+
+test("keep-out: a body launched at CAP toward the box stops inside the band — under 0.2 u into the inflated box — and comes back out", () => {
+  const w = createWorld([1], { viewW: 24, viewH: 15 }, SEED);
+  setKeepOut(w, [BOX]);
+  const b = w.bodies[0];
+  // resting under the box, just outside the band, then flung straight up at it
+  b.pos = { x: -4, y: 1 - 0.75 - (1.05 + DYN.KEEP_PAD) - DYN.KEEP_BAND - 0.01, z: 0 };
+  b.target = { ...b.pos };
+  b.vel = { x: 0, y: DYN.CAP, z: 0 };
+  let minD = Infinity, topY = -Infinity;
+  for (let i = 0; i < 120; i++) {
+    stepWorld(w, 1 / 60, null, 1); // a flick happens with the pointer over the hero: E = 1
+    minD = Math.min(minD, clearanceTo(b.pos.x, b.pos.y, b.r));
+    topY = Math.max(topY, b.pos.y);
+  }
+  assert.ok(minD < DYN.KEEP_BAND, "it did enter the band");
+  assert.ok(minD > -0.2, `penetrated ${-minD} u into the inflated box`);
+  assert.ok(b.pos.y < topY - 0.5 && b.vel.y < 0, "it turned and is on its way back");
+  assert.ok(finite(w));
+});
+
+test("keep-out: the eye — a body is tested where the camera sees it: a z +3 body exactly BAND clear of an OFF-CENTRE box in world x projects 10% further from the centre, into the band", () => {
+  // the hero's wordmark sits left of the canvas centre, like this box; a body between them and
+  // nearer the camera is seen further left than its world x — over the letters sooner
+  const k = { cx: -8, cy: 0, hw: 4, hh: 1 };
+  const mk = (eyeZ: number) => {
+    const w = createWorld([1], { viewW: 24, viewH: 15 }, SEED);
+    setKeepOut(w, [k], eyeZ);
+    const b = w.bodies[0];
+    b.pos = { x: -8 + 4 + 1.05 + DYN.KEEP_PAD + DYN.KEEP_BAND, y: 0, z: 3 };
+    b.target = { ...b.pos };
+    b.vel = { x: 0, y: 0, z: 0 };
+    stepWorld(w, 1 / 60, null, 0);
+    return b.vel.x;
+  };
+  assert.ok(Math.abs(mk(0)) < 1e-12, "orthographic: exactly at the band's edge, no force");
+  assert.ok(mk(32) > 0, "seen from a z 32 camera the disc is inside the band, and the push is away from the box (+x)");
+});
+
+test("keep-out: a body inside the box is pushed out along its nearest face, never through the far one", () => {
+  const w = createWorld([1], { viewW: 24, viewH: 15 }, SEED);
+  setKeepOut(w, [BOX]);
+  const b = w.bodies[0];
+  b.pos = { x: -4, y: 1 - 0.5, z: 0 }; // just under the centre line: the bottom face is nearest
+  b.target = { ...b.pos };
+  b.vel = { x: 0, y: 0, z: 0 };
+  stepWorld(w, 1 / 60, null, 0);
+  assert.ok(b.vel.y < 0 && b.vel.x === 0, `pushed (${b.vel.x}, ${b.vel.y}), wanted straight down`);
+  assert.ok(Math.abs(-b.vel.y - DYN.K_KEEP / 60) < 0.05, `full strength inside: ${-b.vel.y} u/s per 1/60 step vs ${DYN.K_KEEP / 60}`);
 });
