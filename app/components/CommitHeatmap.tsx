@@ -92,7 +92,7 @@ export default function SiteStats() {
   const [bgVisible, setBgVisible] = useState(false);
   const [bgBorn, setBgBorn] = useState(false);
   const [sceneInView, setSceneInView] = useState(false);
-  const [blockSize, setBlockSize] = useState<{ w: number; h: number } | null>(null);
+  const [blockW, setBlockW] = useState<number | null>(null);
   const [sceneShown, setSceneShown] = useState(false);
   const [accentHex, setAccentHex] = useState("#3b82f6");
   const reduceMotion = useReducedMotion() ?? false;
@@ -165,7 +165,7 @@ export default function SiteStats() {
     blockObserver.current?.disconnect();
     blockObserver.current = null;
     if (node) {
-      const ro = new ResizeObserver(([e]) => setBlockSize({ w: e.contentRect.width, h: e.contentRect.height }));
+      const ro = new ResizeObserver(([e]) => setBlockW(e.contentRect.width));
       ro.observe(node);
       blockObserver.current = ro;
     }
@@ -327,7 +327,7 @@ export default function SiteStats() {
   // half-pixel band of hysteresis so a drag across the edge does not mount and unmount a
   // WebGL context on every pixel. (setState during render is React's pattern for state
   // that follows other state; an effect would cascade.)
-  const columnW = blockSize ? blockSize.w - boardW - COLUMN_GAP : 0;
+  const columnW = blockW !== null ? blockW - boardW - COLUMN_GAP : 0;
   const wantScene = columnW >= COLUMN_MIN_PX - (sceneShown ? 0.5 : 0);
   if (wantScene !== sceneShown) setSceneShown(wantScene);
   // The scene is a second reading of the same window, so it exists only when the window is
@@ -523,6 +523,15 @@ export default function SiteStats() {
                           rig={rig}
                         />
                       )}
+                      {/* The legend's ground. The pack overflows the frame and passes under the
+                          legend, and #a1a1aa on a white jack is 1.3:1 — the encoding statement
+                          lost its words wherever one crossed. A 36 px fade from the panel colour
+                          keeps it on the surface PANEL_LEGEND was chosen for: opaque to 60% (21.6
+                          px) because the 10 px glyphs sit at y ≈ 11–20, and a 30% stop measured
+                          2.3:1 at the baseline row over a white jack (7.1:1 on the panel).
+                          pointer-events-none so the ray beneath stays live; PR B's ribbon
+                          composites under it. */}
+                      <div className="absolute inset-x-0 top-0 pointer-events-none" style={{ height: 36, background: `linear-gradient(to bottom, ${PANEL} 0%, ${PANEL} 60%, transparent 100%)` }} />
                       <span className="absolute left-3 right-3 top-2 font-mono text-[10px] uppercase tracking-[0.16em] pointer-events-none select-none" style={{ color: PANEL_LEGEND }}>
                         {sceneLegend}
                       </span>

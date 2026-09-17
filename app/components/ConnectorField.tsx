@@ -37,7 +37,10 @@ const ENV = { plane: [6, 4] as [number, number], position: [5, 6, 4] as [number,
 // reaches the column) and for LEAVE_S after it leaves; 1 for ENTRANCE_S after the entrance;
 // re-armed for VISIBLE_S on every return to the screen; then a linear fall to 0 over DECAY_S.
 // All in SIM time — a hidden tab or a 4 fps run does not expire them while nothing moved.
-const IDLE = { ENTRANCE_S: 10, LEAVE_S: 8, VISIBLE_S: 4, DECAY_S: 2 } as const;
+// "Over" means over AND moving: a hand parked for PARKED_S counts as away (the ray stays
+// live, the next move re-arms E), so a cursor resting on the card lets the pack rest instead
+// of holding twelve draws a frame — the pile had a 1.2 s parked-cursor idle for the same reason.
+const IDLE = { ENTRANCE_S: 10, LEAVE_S: 8, VISIBLE_S: 4, DECAY_S: 2, PARKED_S: 3 } as const;
 // Lusion never rests; this site's rule is that a resting scene costs nothing. One flip.
 const IDLE_FOREVER = false;
 
@@ -88,6 +91,9 @@ const RECIPES: Record<Family, Record<Finish, Recipe>> = {
 // An unknown week (the route's paging cut off before it began) is a ghost: the panel lightened
 // 8%, matte, no clearcoat — outside the casting so it cannot be read as a quiet white or black.
 const GHOST: Recipe = { color: "#2a2a30", roughness: 0.8, clearcoat: 0, clearcoatRoughness: 0 };
+const recipeFor = (jack: Jack): Recipe => (jack.known ? RECIPES[jack.family][jack.finish] : GHOST);
+/** the dark theme's --accent, the card's own initial value; the live token is written in by an effect */
+const DEFAULT_ACCENT = "#3b82f6";
 
 /** The token is a hex string; the matte accent keeps 85% of it in sRGB, as color-mix would. */
 function setAccent(target: THREE.Color, accent: string, keep: number) {
@@ -162,15 +168,15 @@ const AO_GLSL = /* glsl */ `
   reflectedLight.indirectSpecular *= computeSpecularOcclusion(jackDotNV, jackOcc, material.roughness);
 `;
 
-function makeMaterial(jack: Jack, accent: string, near: number): { material: THREE.MeshPhysicalMaterial; uniforms: JackUniforms } {
-  const recipe = jack.known ? RECIPES[jack.family][jack.finish] : GHOST;
+function makeMaterial(jack: Jack, near: number): { material: THREE.MeshPhysicalMaterial; uniforms: JackUniforms } {
+  const recipe = recipeFor(jack);
   const uniforms: JackUniforms = {
     uNear: { value: Array.from({ length: near }, () => new THREE.Vector4(0, 0, 0, 1e-3)) },
     uNao: { value: 1 },
     uNaoScalar: { value: 0 },
   };
   const material = new THREE.MeshPhysicalMaterial({
-    color: colorFor(recipe, accent),
+    color: colorFor(recipe, DEFAULT_ACCENT),
     metalness: 0,
     roughness: recipe.roughness,
     clearcoat: recipe.clearcoat,
@@ -195,6 +201,8 @@ function makeMaterial(jack: Jack, accent: string, near: number): { material: THR
 }
 
 // ---- environment ----
+// Module-level and never disposed, on purpose: one 6×4 plane and one material for the page's
+// lifetime. The PMREM target built from it per context IS disposed, in the effect below.
 let envScene: THREE.Scene | null = null;
 function environmentScene(): THREE.Scene {
   if (envScene) return envScene;
@@ -241,13 +249,19 @@ function Field({ jacks, accent, visible, inView, rig, debug, tier, onDegrade }: 
   const { gl, scene, camera, size, pointer, invalidate } = useThree();
   const geometry = useMemo(jackGeometry, []);
   const near = Math.max(1, jacks.length - 1);
-  // The theme's accent is the only themed thing in here (the panel is the same in both); a
-  // flip rebuilds the twelve materials, which recompiles nothing — they share one program.
-  const mats = useMemo(() => jacks.map((j) => makeMaterial(j, accent, near)), [jacks, accent, near]);
+  // The theme's accent is the only themed thing in here (the panel is the same in both), and
+  // a flip recolours IN PLACE: rebuilding the twelve materials disposed the old set before the
+  // new one had rendered, which drove both programs' usedTimes to 0, destroyed them and
+  // recompiled them (~150 ms each) on every toggle. Twelve colour writes and one frame instead.
+  const mats = useMemo(() => jacks.map((j) => makeMaterial(j, near)), [jacks, near]);
   useEffect(() => {
     invalidate();
     return () => mats.forEach((m) => m.material.dispose());
   }, [mats, invalidate]);
+  useEffect(() => {
+    mats.forEach((m, i) => m.material.color.copy(colorFor(recipeFor(jacks[i]), accent)));
+    invalidate();
+  }, [accent, mats, jacks, invalidate]);
   const meshes = useRef<(THREE.Mesh | null)[]>([]);
 
   // The world is born once per set of jacks, with the camera fit at that moment; only the
@@ -259,9 +273,9 @@ function Field({ jacks, accent, visible, inView, rig, debug, tier, onDegrade }: 
   const frozen = useRef(false);
   const frames = useRef(0);
   const firstFrame = useRef(true);
-  const env = useRef({ E: 0, aliveUntil: -Infinity, wasOver: false, wasVisible: false });
+  const env = useRef({ E: 0, aliveUntil: -Infinity, wasOver: false, wasVisible: false, movedAt: -Infinity, rigX: NaN, rigY: NaN });
   const perf = useMemo(createSampler, []);
-  useEffect(() => { enteredAt.current = null; env.current = { E: 0, aliveUntil: -Infinity, wasOver: false, wasVisible: false }; frozen.current = false; }, [world]);
+  useEffect(() => { enteredAt.current = null; env.current = { E: 0, aliveUntil: -Infinity, wasOver: false, wasVisible: false, movedAt: -Infinity, rigX: NaN, rigY: NaN }; frozen.current = false; }, [world]);
 
   // pointer state on the CANVAS (the rig is the card's)
   const overCanvas = useRef(false);
@@ -342,7 +356,7 @@ function Field({ jacks, accent, visible, inView, rig, debug, tier, onDegrade }: 
   // Back on screen: the frameloop just went never → demand with the clock reset. One frame
   // at 1/60 restarts whatever was still moving and re-arms the envelope.
   useEffect(() => {
-    if (visible) { firstFrame.current = true; wake.current(); }
+    if (visible) { firstFrame.current = true; pointerFresh.current = true; wake.current(); }
   }, [visible]);
 
   // The entrance starts on the beat the ≥ 30%-visible observer fires — not the 300 px arm
@@ -356,7 +370,8 @@ function Field({ jacks, accent, visible, inView, rig, debug, tier, onDegrade }: 
   }, [inView, world]);
 
   // ?jacksDebug=1: sim time (the verification clock — software GL runs at a few fps), the
-  // bodies, and a step() the harness can drive.
+  // bodies, and a step() the harness can drive. Ships in production behind the flag — the
+  // design's gated fallback; the §9 harness reads it against the production build.
   useEffect(() => {
     if (!debug) return;
     const w = window as unknown as { __jacks?: Debug };
@@ -406,14 +421,17 @@ function Field({ jacks, accent, visible, inView, rig, debug, tier, onDegrade }: 
         pointerFresh.current = true;
       }
 
-      // the envelope, in sim time
+      // the envelope, in sim time; a pointer parked for PARKED_S is "away" (see IDLE), and the
+      // leave tail is for a cursor that leaves while LIVE — a parked one is already resting
       const e = env.current;
       const t = world.time;
+      if (rig.x !== e.rigX || rig.y !== e.rigY) { e.rigX = rig.x; e.rigY = rig.y; e.movedAt = t; }
+      const over = rig.over && t - e.movedAt < IDLE.PARKED_S;
       if (e.wasOver && !rig.over) e.aliveUntil = Math.max(e.aliveUntil, t + IDLE.LEAVE_S);
-      e.wasOver = rig.over;
+      e.wasOver = over;
       if (!e.wasVisible && visible) e.aliveUntil = Math.max(e.aliveUntil, t + IDLE.VISIBLE_S);
       e.wasVisible = visible;
-      const alive = IDLE_FOREVER || rig.over || t < e.aliveUntil;
+      const alive = IDLE_FOREVER || over || t < e.aliveUntil;
       e.E = alive ? 1 : Math.max(0, e.E - dt / IDLE.DECAY_S);
 
       const r = stepWorld(world, delta, ptr, e.E);

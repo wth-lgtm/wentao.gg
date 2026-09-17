@@ -47,6 +47,7 @@ export const CAMERA = {
    * column at 691 and 49% at 519 — inside the reference's 45–63%.
    */
   Z_MIN: 8.5,
+  /** the clamp's ceiling — a guard the height rule never reaches (it caps z at 9.56 for any aspect) */
   Z_MAX: 12.5,
   /** the entrance dolly starts this far out — Lusion's 25 → 17.5 */
   DOLLY_FROM: 1.43,

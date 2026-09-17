@@ -1,6 +1,6 @@
 // The jack: Lusion's six-way pipe connector, rebuilt from the profile measured on its
 // cross.buf (positions quantised to ±1, 4,940 verts) — arm outer r 0.333, bore r 0.10 to a
-// floor at 0.667, a 0.03 round on the rim and the bore mouth, a base flare from r 0.43 at
+// floor at 0.667, a ~0.01 round on the rim (r 0.328 at the tip), 0.03 on the bore mouth, a base flare from r 0.43 at
 // 0.19 to 0.333 at 0.36 — as ONE lathe arm cloned onto ±x/±y/±z around a core sphere of
 // r 0.48, which protrudes 0.0–0.03 between two arms and 0.06–0.09 in the three-arm crotch:
 // the rounded junction. The v1 recipe (arms 0.42, bore 0.24, sphere hidden inside the arm
@@ -26,8 +26,9 @@ export const PROFILE: readonly { r: number; y: number; ao: number }[] = [
   { r: 0.333, y: 0.36, ao: 0.78 }, // the fillet meets the arm, 0.490 from the centre
   { r: 0.333, y: 0.65, ao: 0.8 }, // arm mid
   { r: 0.333, y: 0.97, ao: 0.95 },
-  { r: 0.325, y: 0.991, ao: 1.0 }, // the 0.03 tip round
-  { r: 0.303, y: 1.0, ao: 1.0 }, // rim
+  { r: 0.333, y: 0.985, ao: 0.98 },
+  { r: 0.331, y: 0.995, ao: 1.0 }, // the tip round: Lusion measures r 0.333 at 0.99 and 0.328 at 1.00 — ~0.01, crisper than the 0.03 first drawn
+  { r: 0.328, y: 1.0, ao: 1.0 }, // rim
   { r: 0.13, y: 1.0, ao: 0.85 }, // tip face
   { r: 0.109, y: 0.991, ao: 0.75 }, // the 0.03 mouth round
   { r: 0.1, y: 0.97, ao: 0.7 }, // bore mouth

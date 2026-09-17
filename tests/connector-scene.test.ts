@@ -38,7 +38,7 @@ test("520×273 (the fluid card) and 380×273: the height rule binds at z 9.56 an
   }
 });
 
-test("z stays in [9.5, 12.5] whatever the canvas; a tall one is still the height rule", () => {
+test("z stays in [Z_MIN 8.5, Z_MAX 12.5] whatever the canvas; a tall one is still the height rule", () => {
   assert.equal(cameraFor(2000, 273).z, CAMERA.Z_MIN);
   const tall = cameraFor(300, 900);
   assert.ok(Math.abs(tall.z - PACK.h / CAMERA.OVERFLOW / (2 * TAN)) < 1e-9 && tall.z <= CAMERA.Z_MAX);

@@ -6,8 +6,8 @@ import { CORE, PROFILE, RADIAL_SEGMENTS, buildJackGeometry } from "../app/lib/ja
 
 test("the profile is Lusion's: arm r 0.333, bore r 0.10 to a floor at 0.667, rim at 1.0, flare 0.43 → 0.333 over 0.19 → 0.36", () => {
   const rim = PROFILE.find((p) => p.y === 1 && p.r > 0.3)!;
-  assert.ok(rim && Math.abs(rim.r - 0.303) < 1e-9);
-  assert.ok(PROFILE.filter((p) => p.r === 0.333).every((p) => p.y >= 0.36 && p.y <= 0.97));
+  assert.ok(rim && Math.abs(rim.r - 0.328) < 1e-9, "the rim is Lusion's measured r 0.328 at the tip");
+  assert.ok(PROFILE.filter((p) => p.r === 0.333).every((p) => p.y >= 0.36 && p.y <= 0.985));
   assert.ok(PROFILE.filter((p) => p.r === 0.1).every((p) => p.y >= 0.7 && p.y <= 0.97));
   assert.equal(PROFILE[PROFILE.length - 1].r, 0);
   assert.equal(PROFILE[PROFILE.length - 1].y, 0.667);
@@ -34,8 +34,9 @@ test("the merged jack: six arms and a core, ~7k triangles, an `ao` attribute in 
   assert.ok(Math.abs(lo - 0.02) < 1e-6 && Math.abs(hi - 1) < 1e-6, `ao range ${lo}..${hi}`);
   // arms reach 1.0 on every axis and nothing else does
   const bs = g.boundingSphere!;
-  // the rim ring at (0.303, 1.0) is 1.045 from the centre — inside Lusion's 1.05 body radius
-  assert.ok(Math.abs(bs.radius - Math.hypot(0.303, 1)) < 1e-3 && bs.radius < 1.05, `bounding radius ${bs.radius}`);
+  // the rim ring at (0.328, 1.0) is 1.052 from the centre — Lusion's own rim sits the same 0.002
+  // outside its 1.05 body sphere
+  assert.ok(Math.abs(bs.radius - Math.hypot(0.328, 1)) < 1e-3 && bs.radius < 1.06, `bounding radius ${bs.radius}`);
   // winding vs normals: the geometric normal of each non-degenerate triangle points the way
   // its vertices' analytic normals do (front faces are the visible ones — outer wall, tip
   // face, bore wall facing the axis, floor facing the mouth)

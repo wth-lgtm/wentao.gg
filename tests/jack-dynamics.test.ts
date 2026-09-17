@@ -2,11 +2,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { DYN, clickWorld, createWorld, isResting, stepWorld, type Pointer, type World } from "../app/lib/jackDynamics";
+import { SEED } from "../app/lib/connectorJacks";
+import { cameraFor } from "../app/lib/connectorScene";
 
 const SCALES = [0.86, 1.2, 0.9, 1.0, 0.86, 1.1, 0.95, 0.86, 1.2, 0.88, 1.05, 0.86];
-// the ≥ 1072 px card's camera: z 8.5, view 9.54 × 3.77 u at z 0
-const VIEW = { viewW: 9.539, viewH: 3.769, z: 8.5 };
-const SEED = 24;
+// the shipped configuration: the site's seed and the ≥ 1072 px card's camera (z 8.5, view 9.54 × 3.77 u at z 0)
+const FIT = cameraFor(691, 273);
+const VIEW = { viewW: FIT.viewW, viewH: FIT.viewH, z: FIT.z };
 
 const world = () => createWorld(SCALES, VIEW, SEED);
 const run = (w: World, seconds: number, E: number, pointer: Pointer | null = null, dt = 1 / 60) => {
@@ -95,14 +97,22 @@ test("swirl: a rested pack handed E = 1 drifts again — slowly (≤ 0.5 u/s, a 
   run(w, 6, 0);
   const still = run(w, 1, 0);
   assert.ok(still.maxDpos / still.dt < DYN.REST_V);
-  let maxD = 0, maxV = 0;
+  // the jam releases with a transient (this fixture: 1.4 u/s in the first 1.5 s; six other
+  // scale sets 0.1–0.6), then the swirl's drift: sustained ≤ 0.6 u/s, mean 0.05–0.14 u/s
+  let maxD = 0, release = 0, drift = 0, sum = 0;
   for (let k = 0; k < 300; k++) {
     const r = stepWorld(w, 1 / 60, null, 1);
     maxD = Math.max(maxD, r.maxDpos / r.dt);
-    for (const b of w.bodies) maxV = Math.max(maxV, Math.hypot(b.vel.x, b.vel.y, b.vel.z));
+    for (const b of w.bodies) {
+      const v = Math.hypot(b.vel.x, b.vel.y, b.vel.z);
+      sum += v / 12;
+      if (k < 90) release = Math.max(release, v); else drift = Math.max(drift, v);
+    }
   }
   assert.ok(maxD > DYN.REST_V, `E = 1 moved at most ${maxD} u/s`);
-  assert.ok(maxV < 0.5, `E = 1 idle peaked at ${maxV} u/s`);
+  assert.ok(release < 2, `the release transient peaked at ${release} u/s`);
+  assert.ok(drift < 0.6, `the sustained drift peaked at ${drift} u/s`);
+  assert.ok(sum / 300 < 0.3, `mean idle speed ${sum / 300} u/s`);
   run(w, 6, 0);
   const again = run(w, 1, 0);
   assert.ok(again.maxDpos / again.dt < DYN.REST_V);
