@@ -53,6 +53,8 @@ export interface KeepOut {
   /** half-extents */
   hw: number;
   hh: number;
+  /** the band's acceleration for this box as a fraction of K_KEEP; absent = 1 (the stone field's visitor card runs at 0.5) */
+  strength?: number;
 }
 
 export interface World {
@@ -168,9 +170,14 @@ export const DYN = {
    * K_KEEP·KEEP_BAND/3 of v²/2 across the band: a CAP 20 flick carries 200, so the panel's 120
    * absorbed 60 and a body went 0.49–0.59 u INTO the inflated box (scales 0.86–1.2) before the
    * pull and the τ 0.62 s damping stopped it; 200 still let the 1.2 jack reach 0.21 u; 240 is
-   * the first round step that holds every cast scale under 0.2 u — 0.07–0.10 u at CAP 20 and
-   * 0.12 u at CAP_CLICK 25, stopped 0.12 s after entering the band (node, straight approach
-   * from the band's edge).
+   * the first round step that holds every cast scale under 0.2 u — 0.07–0.10 u at CAP 20,
+   * stopped 0.12 s after entering the band (node, straight approach from the band's edge, the
+   * pull behind the body). The band is not a wall, and the setup decides the depth: at
+   * CAP_CLICK 25 the same approach reaches 0.10–0.14 u; launched from mid-band 0.25 u; with
+   * the pull INTO the box (a target behind the letters) 0.24–0.33 u; and a body already
+   * parked at the inflated edge when a burst hits it goes 0.59 u in — half a radius over the
+   * letters for a tenth of a second. K_KEEP is not raised for that case: 480 would still
+   * leave 0.2 u there and would make every ordinary flick read as a wall.
    */
   KEEP_BAND: 1.5,
   K_KEEP: 240,
@@ -188,12 +195,14 @@ export function clampDelta(delta: number): number {
 /**
  * Twelve bodies in Lusion's spawn box, flying toward the centre, with a random initial
  * orientation each (texture, not data: a six-way jack is symmetric under 90° turns, so
- * twelve identity quaternions would fly in as one aligned set).
+ * twelve identity quaternions would fly in as one aligned set). `bodyR` is the unit body's
+ * collision radius — BODY_R for the jack, whose arm tips lie on the 1.05 sphere; the stone
+ * field passes its own (stoneGeometry.ts STONE.R).
  */
-export function createWorld(scales: readonly number[], view: { viewW: number; viewH: number }, seed: number): World {
+export function createWorld(scales: readonly number[], view: { viewW: number; viewH: number }, seed: number, bodyR: number = DYN.BODY_R): World {
   const n = scales.length;
   const bodies: Body[] = scales.map((s, i) => {
-    const r = DYN.BODY_R * s;
+    const r = bodyR * s;
     const m = (4 / 3) * Math.PI * r * r * r;
     const pos = {
       x: (rand(i, seed + 1) - 0.5) * view.viewW,
@@ -387,7 +396,7 @@ export function stepWorld(world: World, delta: number, pointer: Pointer | null, 
         const d = outside + Math.min(Math.max(ex, ey), 0) - (b.r + DYN.KEEP_PAD);
         if (d >= DYN.KEEP_BAND) continue;
         const t = 1 - Math.max(d, 0) / DYN.KEEP_BAND;
-        const a = DYN.K_KEEP * t * t * h;
+        const a = DYN.K_KEEP * (box.strength ?? 1) * t * t * h;
         if (ex > 0 && ey > 0) { v.x += (ex / outside) * Math.sign(qx) * a; v.y += (ey / outside) * Math.sign(qy) * a; }
         else if (ex > ey) v.x += (Math.sign(qx) || 1) * a;
         else v.y += (Math.sign(qy) || 1) * a;

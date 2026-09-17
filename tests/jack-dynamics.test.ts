@@ -341,3 +341,43 @@ test("keep-out: a body inside the box is pushed out along its nearest face, neve
   assert.ok(b.vel.y < 0 && b.vel.x === 0, `pushed (${b.vel.x}, ${b.vel.y}), wanted straight down`);
   assert.ok(Math.abs(-b.vel.y - DYN.K_KEEP / 60) < 0.05, `full strength inside: ${-b.vel.y} u/s per 1/60 step vs ${DYN.K_KEEP / 60}`);
 });
+
+test("keep-out: a box's strength scales the band — half strength, half the push — and createWorld takes the unit body radius", () => {
+  const push = (strength?: number) => {
+    const w = createWorld([1], { viewW: 24, viewH: 15 }, SEED);
+    setKeepOut(w, [{ ...BOX, strength }]);
+    const b = w.bodies[0];
+    b.pos = { x: -4, y: 1 - 0.5, z: 0 }; b.target = { ...b.pos }; b.vel = { x: 0, y: 0, z: 0 };
+    stepWorld(w, 1 / 60, null, 0);
+    return -b.vel.y;
+  };
+  assert.ok(Math.abs(push(0.5) / push() - 0.5) < 1e-9, `half strength pushed ${push(0.5)} vs full ${push()}`);
+  assert.equal(push(undefined), push(1));
+  const stones = createWorld([1, 0.72], { viewW: 24, viewH: 15 }, SEED, 1.0);
+  assert.equal(stones.bodies[0].r, 1.0);
+  assert.ok(Math.abs(stones.bodies[1].r - 0.72) < 1e-12);
+  assert.ok(Math.abs(stones.bodies[0].m - (4 / 3) * Math.PI) < 1e-9, "mass follows the radius passed");
+  const jacks = createWorld([1], { viewW: 24, viewH: 15 }, SEED);
+  assert.equal(jacks.bodies[0].r, DYN.BODY_R, "the card's default is untouched");
+});
+
+test("keep-out at CAP_CLICK 25: the depth is the setup's — 0.10–0.14 u from the band's edge, ~0.25 from mid-band, ~0.6 when the body is already at the inflated edge", () => {
+  const launch = (scale: number, startD: number) => {
+    const w = createWorld([scale], { viewW: 24, viewH: 15 }, SEED);
+    setKeepOut(w, [BOX]);
+    const b = w.bodies[0];
+    b.pos = { x: -4, y: 1 - 0.75 - (b.r + DYN.KEEP_PAD) - startD, z: 0 };
+    b.target = { ...b.pos };
+    b.vel = { x: 0, y: DYN.CAP_CLICK, z: 0 };
+    let minD = Infinity;
+    for (let i = 0; i < 120; i++) { stepWorld(w, 1 / 60, null, 1); minD = Math.min(minD, clearanceTo(b.pos.x, b.pos.y, b.r)); }
+    return -minD;
+  };
+  for (const s of [0.86, 1, 1.2]) {
+    const edge = launch(s, DYN.KEEP_BAND + 0.01), mid = launch(s, DYN.KEEP_BAND / 2), parked = launch(s, 0.05);
+    assert.ok(edge > 0.09 && edge < 0.15, `scale ${s} from the band's edge: ${edge} u`);
+    assert.ok(mid > 0.2 && mid < 0.3, `scale ${s} from mid-band: ${mid} u`);
+    assert.ok(parked > 0.5 && parked < 0.65, `scale ${s} parked at the inflated edge: ${parked} u`);
+    assert.ok(edge < mid && mid < parked, "less run-up, deeper");
+  }
+});
