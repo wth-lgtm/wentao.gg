@@ -72,6 +72,19 @@ export function castingFor(n: number, seed: number): { family: Family; finish: F
 }
 
 /**
+ * The debug override, from location.search: how many of the oldest weeks the card draws as
+ * ghosts (the unknown-week glass, jackGlass.ts) on a payload that has no cut — N only with
+ * ?jacksDebug present AND jacksUnknown=N, a positive integer; 0 otherwise. The legend does
+ * not follow it: a lever for seeing the ghost, not a claim about the data.
+ */
+export function unknownOverride(search: string): number {
+  const q = new URLSearchParams(search);
+  if (!q.has("jacksDebug")) return 0;
+  const n = Number(q.get("jacksUnknown"));
+  return Number.isInteger(n) && n > 0 ? n : 0;
+}
+
+/**
  * One jack per week of the board's window, oldest first. `days` is the same array the
  * board draws (buildDayWindow, `weeks × 7` days), so a stale snapshot aligns both readings.
  *

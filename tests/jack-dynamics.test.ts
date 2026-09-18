@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 import { DYN, clickWorld, createWorld, isResting, setKeepOut, stepWorld, type Pointer, type World } from "../app/lib/jackDynamics";
 import { SEED } from "../app/lib/connectorJacks";
 import { cameraFor } from "../app/lib/connectorScene";
+import { SEED_FIELD, fieldScales } from "../app/lib/fieldLayout";
+import { packTargets } from "../app/lib/fieldPacks";
 
 const SCALES = [0.86, 1.2, 0.9, 1.0, 0.86, 1.1, 0.95, 0.86, 1.2, 0.88, 1.05, 0.86];
 // the shipped configuration: the site's seed and the ≥ 1072 px card's camera (z 8.5, view 9.54 × 3.77 u at z 0)
@@ -385,4 +387,80 @@ test("keep-out under a click burst: with the cap LIFTED (capUntil ahead, as clic
     const clipped = launch(s, DYN.KEEP_BAND + 0.01, false);
     assert.ok(clipped.vmax <= DYN.CAP + 1e-6 && clipped.pen > 0.09 && clipped.pen < 0.15, `clipped: ${clipped.pen} u at ${clipped.vmax} u/s`);
   }
+});
+
+// ---- the swirl's pivot and gain (added for the hero's packs; the card sets neither) ----
+
+// The card's twelve after 300 substeps at E = 1, captured from 7e3f48d (the parent of this round) by
+// tests' own `world()` — pos, vel, quat per body. The pivot/gain code path must reproduce it bit for bit.
+const SWIRL_FIXTURE_7E3F48D: readonly (readonly number[])[] = [
+  [-3.7462556861633356, -0.39671679863730275, 0.16282320907672249, 0.03581483977692924, 0.05833497039306969, 0.12543186570710108, 0.7640641105753725, 0.5376677197397137, 0.0562757333033817, -0.35206888519397506],
+  [-2.6039076638291068, 0.8179331630656957, -1.218000146154203, 0.03846894128918276, -0.08213558747357148, 0.016921498438362277, 0.5073113427331682, -0.5114534770272898, 0.32526182466521425, -0.612580841837566],
+  [-1.9979857140931845, -0.9574506875429227, -0.059753996413479275, 0.056804097447532675, 0.04895934570792369, 0.1441520408439128, 0.16035014032147957, -0.4312886520641281, -0.8852409907718394, -0.06801705195670807],
+  [-2.3669361513835194, 0.6443250324025942, 1.073372905624727, 0.06684130047937205, 0.12806816364132276, 0.0326611066122137, -0.3005088562709337, 0.044170336324412626, 0.25511585805446624, -0.9179647638449187],
+  [-0.7011963606146306, 1.3185651710367365, 0.3077982423396425, 0.04889390533497907, -0.05348018665503519, -0.2148604760312716, -0.12430361619949334, -0.5966976043544377, -0.07186857462295768, -0.7895159833335031],
+  [-0.47709116776873023, -0.46903815071591937, 1.302482446532824, 0.06539817155864455, 0.10006206140608755, 0.05359806761733825, -0.35363787791804446, 0.11546347832030524, -0.7496980361127822, 0.5473219264056908],
+  [0.5679629633356091, -0.8942139418370652, -0.5301936017203102, -0.12069796958455227, -0.0088500750190852, 0.03207239365254289, -0.4653889771668897, -0.43933815467272724, -0.7542677313856678, -0.14654444776461903],
+  [0.9894445007167287, 0.6861757032685419, 0.4373062830327833, 0.010640673960595289, 0.013862473255474081, -0.0675648746596398, -0.7239978631852225, -0.5525101828453644, 0.14306296113864447, -0.38741783787747397],
+  [2.3679273119530873, 0.511043816062973, -1.2221859353979256, 0.12287959943089666, -0.01629406575745482, 0.002243085189361269, 0.4679715437041453, -0.7770873889733658, 0.4196044193370921, -0.032710173562638264],
+  [0.21354497148911059, 0.8692104983538873, -1.2075289976197563, 0.12487131736097153, 0.002291787498619882, -0.1367961610711743, 0.66684702582741, 0.18757055389567512, -0.4950467602365138, 0.5244626170050053],
+  [2.8841799991954455, 0.9456809894053246, 1.0410120951521333, 0.00986365778472547, -0.11866105341424692, -0.017592365331246963, -0.9070055639891667, 0.15939873870785518, -0.3788400499994196, 0.09172330951004502],
+  [3.6269472314185425, -0.6580004564421696, 0.09309307648629107, 0.22461780337635942, 0.00506673239170971, -0.05974895193140336, -0.9626538378084353, 0.24721123475479484, -0.0622473436439111, -0.09115625142017071]
+];
+
+test("the swirl without a pivot is today's, bit for bit: the card's twelve stepped 300 substeps at E = 1 equal the fixture captured from 7e3f48d, and createWorld sets neither pivot nor gain", () => {
+  const w = world();
+  for (let i = 0; i < 300; i++) stepWorld(w, 1 / 60, null, 1);
+  w.bodies.forEach((b) => { assert.equal(b.pivot, undefined); assert.equal(b.swirlGain, undefined); });
+  const rows = w.bodies.map((b) => [b.pos.x, b.pos.y, b.pos.z, b.vel.x, b.vel.y, b.vel.z, b.quat.x, b.quat.y, b.quat.z, b.quat.w]);
+  assert.deepEqual(rows, SWIRL_FIXTURE_7E3F48D);
+  assert.ok(Math.abs(w.time - 5) < 1e-9);
+  // and an explicit gain of 1 with an origin pivot is the same arithmetic
+  const twin = world();
+  twin.bodies.forEach((b) => { b.pivot = { x: 0, y: 0, z: 0 }; b.swirlGain = 1; });
+  for (let i = 0; i < 300; i++) stepWorld(twin, 1 / 60, null, 1);
+  assert.deepEqual(twin.bodies.map((b) => [b.pos.x, b.pos.y, b.pos.z, b.vel.x, b.vel.y, b.vel.z]), rows.map((r) => r.slice(0, 6)));
+});
+
+// fourteen bodies pulled to a Fermat spiral on a 2 u disc about (px, py, 0): 10 s at E = 1 to settle,
+// then 2 s at E = 1 measured — the pack's mean displacement, its members' mean speed, mean |pos − target|
+function packRun(px: number, py: number, pivot: boolean) {
+  const n = 14;
+  const scales = fieldScales(n, SEED_FIELD);
+  const targets = packTargets({ viewW: 2 * Math.abs(px), viewH: 2 * Math.abs(py) }, [{ cx: Math.sign(px), cy: Math.sign(py), n, r: 2, swirlGain: 1 }], SEED_FIELD);
+  const w = createWorld(scales, { viewW: 24, viewH: 15 }, SEED);
+  w.bodies.forEach((b, i) => { b.target = { ...targets[i] }; if (pivot) b.pivot = { x: px, y: py, z: 0 }; });
+  const mean = () => { const c = { x: 0, y: 0, z: 0 }; for (const b of w.bodies) { c.x += b.pos.x / n; c.y += b.pos.y / n; c.z += b.pos.z / n; } return c; };
+  run(w, 10, 1);
+  const m0 = mean();
+  let speed = 0, spread = 0;
+  for (let k = 0; k < 120; k++) {
+    stepWorld(w, 1 / 60, null, 1);
+    for (const b of w.bodies) { speed += Math.hypot(b.vel.x, b.vel.y, b.vel.z) / (120 * n); spread += Math.hypot(b.pos.x - b.target.x, b.pos.y - b.target.y, b.pos.z - b.target.z) / (120 * n); }
+  }
+  const m1 = mean();
+  assert.ok(finite(w));
+  return { moved: Math.hypot(m1.x - m0.x, m1.y - m0.y, m1.z - m0.z), speed, spread, meanR: Math.hypot(m1.x, m1.y) };
+}
+
+test("the swirl about a pack's PIVOT is a rotation of the pack about itself: fourteen on a 2 u disc at the h1-side pack's place (−5.5, 4.5, 0) — 10 s at E = 1, then over 2 s the pack's mean moves < 0.1 u while its members average ≥ 0.08 u/s (the card's 0.113); the ORIGIN swirl on the same set 7 u out is a per-body shear that churns it (0.40 u/s), drags it (0.16 u) and spreads it wider (1.09 vs 0.73)", () => {
+  const piv = packRun(-5.5, 4.5, true), org = packRun(-5.5, 4.5, false);
+  assert.ok(piv.moved < 0.1, `with the pivot the pack's mean moved ${piv.moved} u in 2 s`);
+  assert.ok(piv.speed >= 0.08, `with the pivot the members average ${piv.speed} u/s`);
+  assert.ok(Math.abs(org.meanR - Math.hypot(5.5, 4.5)) < 0.3, `the origin-swirled pack sits ${org.meanR} u from the origin`);
+  assert.ok(piv.spread < org.spread, `pivot spread ${piv.spread} vs origin ${org.spread}`);
+  assert.ok(org.speed > 2 * piv.speed, `the origin shear churns: ${org.speed} vs ${piv.speed} u/s`);
+  assert.ok(org.moved > piv.moved, `the origin shear drags the pack: ${org.moved} vs ${piv.moved} u`);
+});
+
+test("the origin swirl's effect depends on WHERE a pack sits — it is 1 − |â·p̂| about (1,1,1), a fifth as strong at (5, 3) (along 0.79) as at (−5.5, 4.5) (along 0.08) — while the pivot swirl reads the same pack the same way anywhere: mean still < 0.1 u, members ≥ 0.08 u/s, the pack 5.8 u from the origin", () => {
+  const AXIS = 1 / Math.sqrt(3);
+  const along = (x: number, y: number) => Math.abs((x + y) * AXIS) / Math.hypot(x, y);
+  assert.ok(along(5, 3) > 0.75 && along(-5.5, 4.5) < 0.1, `along ${along(5, 3)} / ${along(-5.5, 4.5)}`);
+  const piv = packRun(5, 3, true), org = packRun(5, 3, false);
+  assert.ok(Math.abs(org.meanR - Math.hypot(5, 3)) < 0.3, `the pack sits ${org.meanR} u from the origin`);
+  assert.ok(piv.moved < 0.1 && piv.speed >= 0.08, `pivot at (5, 3): moved ${piv.moved} u, ${piv.speed} u/s`);
+  // the attenuated origin swirl here is quieter than the full shear at (−5.5, 4.5) by more than 2×
+  const far = packRun(-5.5, 4.5, false);
+  assert.ok(far.speed > 2 * org.speed, `origin swirl: ${far.speed} u/s at (−5.5, 4.5) vs ${org.speed} at (5, 3)`);
 });

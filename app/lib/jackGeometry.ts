@@ -11,12 +11,15 @@
 //
 // Per-vertex `ao` is Lusion's baked occlusion (cross.buf's ao attribute, mean 0.63): the
 // bore floor 0.01–0.02, the wall ~0.2, the mouth 0.70, the rim 0.99, arm mid 0.78–0.82,
-// the base fillet 0.68, the gap between two arms 0.70, the crotch 0.65. The shader applies
-// it to indirect diffuse, indirect specular and the clearcoat's indirect term — the
-// reference's bores are black holes, not shiny tubes.
+// the base fillet 0.68, the gap between two arms 0.70, the crotch 0.65. The plastic round's
+// shader applied it to indirect diffuse, indirect specular and the clearcoat's indirect term —
+// the reference's bores are black holes, not shiny tubes. Both scenes wear glass now
+// (jackGlass.ts), which does not read it — composed with alpha blending the bake read as a
+// dark ball inside every jack — so the attribute is kept for a future finish, unread by the
+// glass: three ignores an attribute the program does not declare, and it costs one upload.
 //
 // Lives under lib so the profile and the bake can be checked in node (three's geometry
-// classes need no WebGL); only ConnectorField imports it.
+// classes need no WebGL); only jackMaterials.ts (the singleton) imports it.
 
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";

@@ -3,14 +3,16 @@
 import { useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { useTheme } from "./ThemeProvider";
-import { fieldCount } from "../lib/fieldLayout";
+import { PACKS_WIDE, fieldPacks, packVariantFromSearch, type Pack } from "../lib/fieldPacks";
 import { createPointerRig } from "../lib/pointerRig";
 
-// The jack field — sixteen of the GitHub card's six-way connector jacks in Lusion's dynamics
-// (jackDynamics.ts), a FIXED, page-wide layer. The owner's notes across three rounds: the
-// card's object and its black / white / cobalt ("the previous one that's exactly the same as
-// lusion looks better"), more to play with, and "if the user scrolls, should those objects
-// stay in place as well?" — so the field lives in viewport space, rendered from page.tsx right
+// The jack field — twenty-one of the GitHub card's six-way connector jacks in Lusion's dynamics
+// (jackDynamics.ts), in PACKS (fieldPacks.ts: the card's fourteen under the name and seven above
+// it; one ten below 1280 × 800), a FIXED, page-wide layer. The owner's notes across four rounds:
+// the card's object and its black / white / cobalt ("the previous one that's exactly the same as
+// lusion looks better"), more to play with, "if the user scrolls, should those objects stay in
+// place as well?", and the card's feel — "they wanted to be together, clustered in the middle"
+// — so the field lives in viewport space, rendered from page.tsx right
 // after the fluid: above the fluid (both z-10, this one later in the DOM), below every
 // section's z-20 content, and it does not scroll — the page scrolls under it and the mouse
 // can play with the jacks anywhere. This file is the gate and the plumbing; the three.js side
@@ -43,15 +45,16 @@ const JackFieldScene = dynamic(() => import("./JackFieldScene"), { ssr: false })
 
 export default function JackField() {
   const [born, setBorn] = useState(false);
-  const [count, setCount] = useState(16);
+  const [packs, setPacks] = useState<readonly Pack[]>(PACKS_WIDE);
   const [awake, setAwake] = useState(true);
   const [accentHex, setAccentHex] = useState("#3b82f6");
   const { resolvedTheme } = useTheme();
   // Mutated in place, read by the scene's frame loop — no re-render per pointer move.
   const rig = useMemo(() => createPointerRig(), []);
 
-  // The gate, then the deferred birth. The count (16 or 10) is decided once, as the card
-  // decides its week count once: a count change would be a new world and a new entrance.
+  // The gate, then the deferred birth. The composition (fieldPacks: 21 wide, 10 narrow, the quads
+  // alternative behind ?jacksDebug=1&jacksPacks=quads) is decided once, as the card decides its
+  // week count once: a change would be a new world and a new entrance.
   useEffect(() => {
     if (
       window.innerWidth < 640 ||
@@ -63,7 +66,7 @@ export default function JackField() {
     let idleId: number | undefined;
     const init = () => {
       if (cancelled) return;
-      setCount(fieldCount(window.innerWidth, window.innerHeight));
+      setPacks(fieldPacks(window.innerWidth, window.innerHeight, packVariantFromSearch(window.location.search)));
       setBorn(true);
     };
     if ("requestIdleCallback" in window) {
@@ -119,7 +122,7 @@ export default function JackField() {
   if (!born) return null;
   return (
     <div aria-hidden className="fixed inset-0 z-10 pointer-events-none">
-      <JackFieldScene count={count} accent={accentHex} theme={resolvedTheme} visible={awake} rig={rig} />
+      <JackFieldScene packs={packs} accent={accentHex} theme={resolvedTheme} visible={awake} rig={rig} />
     </div>
   );
 }

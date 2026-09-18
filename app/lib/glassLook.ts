@@ -1,6 +1,9 @@
-// The jack field's glass. The owner on the served build: "now the object looks like solid
-// plastic, is it possible to make them look like tinted glass?" — for the FIELD only; the
-// card's opaque-panel jacks keep their plastic.
+// The jack's glass — the LOOK TABLE. The owner on the served build: "now the object looks like
+// solid plastic, is it possible to make them look like tinted glass?" — first for the field,
+// then (2026-09-17, on the packs build) "can the jacks in the github card have the same tinted
+// glass effect exactly like the jacks on hero?" — so the card's opaque-panel jacks wear it too,
+// from the one table and the one material module (jackGlass.ts), which is what makes "exactly"
+// true by construction.
 //
 // Not three's `transmission`: the field's canvas is transparent over the DOM (the fluid, the
 // rain, the text), and the transmission pass samples the scene's OWN render target, so glass
@@ -10,13 +13,14 @@
 // environment. FrontSide, ONE layer per pixel: each jack is drawn twice on the same program —
 // a depth pre-pass with colour writes off, then the glass at depthFunc LessEqual — so only
 // its nearest front surface is composited, and the jacks are interleaved back to front by a
-// per-frame groupOrder so a nearer jack still blends over a farther one (JackFieldScene.tsx).
+// per-frame groupOrder so a nearer jack still blends over a farther one (jackGlass.rankByDepth).
 // The first glass round was DoubleSide with every surface composited: an arm stacked 2 layers,
 // a tip 4, the junction 6–10 (≈ 0.99 alpha) — the "ball in the middle" the owner saw. The
-// page — dye, rain, letters — shows THROUGH the jacks, which is the read the owner asked for.
+// page — dye, rain, letters — shows THROUGH the field's jacks, and the card's opaque panel
+// (#141518 in both themes) through the card's, which is the read the owner asked for.
 //
 // Three-free (constants and GLSL strings), so it can be imported by anything and tested in
-// node; the material itself is built in JackFieldScene.tsx.
+// node; the material itself is built in jackGlass.ts.
 
 import type { Family, Finish } from "./connectorJacks";
 
@@ -25,30 +29,31 @@ export const GLASS = {
   SMOKE: "#0b0b10",
   FROSTED_WHITE: "#e6e7ec",
   /**
-   * Base opacities per family, ONE layer per pixel (the depth pre-pass; JackFieldScene.tsx).
-   * Chosen by eye on a Metal GPU across four variants in both themes (2026-09-17, frames in
-   * /tmp/hero/v6glass). The approved look at 489d4af was DoubleSide with every surface
-   * composited — an arm's mid-section stacked two layers of the old base a, effective
-   * 1 − (1 − a)², the junction six to ten. Two tables were tried first and both were wrong:
-   * - the two-layer compensation (black 0.80, accent 0.75, white 0.62, RIM 0.20) matched the
-   *   approved arm-centre density exactly and read as SOLID PLASTIC — the old glass read came
-   *   from the far walls showing through the near ones, not from the density;
-   * - the original single-layer values (0.55 / 0.50 / 0.38, RIM 0.45) read as glass but paler
-   *   than the approved frame, one layer where there had been two.
-   * This middle table keeps the page visible through every arm while holding most of the
-   * approved presence. One layer everywhere: the tips (four layers before, ≈ 0.96) and the
-   * junction (six to ten, ≈ 0.99) now sit at the base too — the junction is the point, the
-   * tips read a little lighter; this table is the knob for both.
-   * The owner's knobs remain this table (density) and RIM_OPACITY (edge);
-   * behind ?jacksDebug, `__field.setGlass({ black, accent, white, rim, frosted })` tries a
-   * table live.
+   * Base opacities per family, ONE layer per JACK per pixel (the depth pre-pass;
+   * jackGlass.ts) — but a PACK (fieldPacks.ts) is three or four jacks deep at its core,
+   * so where the jacks stack the pixel composites three or four of these layers, 1 − (1 − a)³
+   * ≈ 0.80 / 0.76 / 0.63: the core keeps its presence at ANY base, and the base only decides
+   * how clear the pack's edges and the lone jacks read — the thickness cue a jack on the
+   * lattice never had (the owner: "still kind of solid", asking for more transparency). The
+   * earlier tables, one sentence each: the DoubleSide round at 489d4af (0.55 / 0.50 / 0.38,
+   * RIM 0.45) composited every surface, so an arm stacked two layers and the junction six to
+   * ten — the approved glass read came from far walls showing through near ones, not from
+   * density; its two-layer compensation (0.80 / 0.75 / 0.62, RIM 0.20) matched that density in
+   * one layer and read as solid plastic; the lattice's middle table (0.66 / 0.60 / 0.48, RIM
+   * 0.34) kept the page visible through every arm on a field where no two jacks overlapped, and
+   * the owner still found it solid; the packs' first candidate (0.50 / 0.45 / 0.34, RIM 0.45)
+   * was compared against this one on the Mac's GPU via `__field.setGlass({ black, accent,
+   * white, rim, frosted })` behind ?jacksDebug and this one shipped (controller, 2026-09-17).
+   * 0.45 was the floor the lattice round found for a lone smoke jack's legibility on the dark
+   * theme; 0.42 in a pack is fine because the core stacks. The owner's knobs remain this table
+   * (density) and RIM_OPACITY (edge).
    */
-  OPACITY: { black: 0.66, accent: 0.6, white: 0.48 } as Record<Family, number>,
+  OPACITY: { black: 0.42, accent: 0.38, white: 0.28 } as Record<Family, number>,
   /** the two finishes: the card's glossy is CLEAR glass, its matte is FROSTED — rougher, and a little denser */
   ROUGHNESS: { clear: 0.08, frosted: 0.28 } as Record<"clear" | "frosted", number>,
   /** the white family starts frosted (0.28) and its frosted finish goes further */
   FROSTED_WHITE_ROUGHNESS: { clear: 0.28, frosted: 0.48 } as Record<"clear" | "frosted", number>,
-  /** the frosted finish's extra density over the family's base (was 0.10 with two layers) */
+  /** the frosted finish's extra density over the family's base (0.10 with two layers; 0.08 since one) */
   FROSTED_OPACITY: 0.08,
   CLEARCOAT: 1,
   CLEARCOAT_ROUGHNESS: 0.06,
@@ -58,11 +63,13 @@ export const GLASS = {
   /** Fresnel: opacity rises from the base at the centre to base + RIM at a grazing rim, with this power */
   FRESNEL_POWER: 2.5,
   /**
-   * The edge's extra opacity. Chosen with the table above (0.45 with two layers; the two-layer
-   * compensation's 0.20 lost the edge). Tuned for smoke: its rim tops out at 1.0 (0.66 + 0.34);
-   * the accent's reaches 0.94, the white's 0.82 — the darkest family sets the rim.
+   * The edge's extra opacity — up to 0.50 as the base thins (the DoubleSide round ran 0.45; the
+   * lattice's 0.34 topped smoke's rim out at 1.0 over a 0.66 base; the two-layer compensation's
+   * 0.20 lost the edge). With this table smoke's rim reaches 0.92 (0.42 + 0.50), the accent's
+   * 0.88, the white's 0.78, and frosted smoke's exactly 1.0: the silhouette stays drawn while
+   * the faces clear, which is what makes a stack of glass read as glass.
    */
-  RIM_OPACITY: 0.34,
+  RIM_OPACITY: 0.5,
   /** rim brightening added to the outgoing light, so edges catch the key like real glass */
   RIM_LIGHT: 0.08,
   /** one injected source for every family, so three compiles ONE program (uniforms carry the differences) */
