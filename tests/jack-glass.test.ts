@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import * as THREE from "three";
 import { LIGHT_WHITE } from "../app/lib/fieldLayout";
 import { GLASS, GLASS_FRESNEL_GLSL, GLASS_RIM_GLSL, GLASS_UNIFORM_GLSL, glassRecipe } from "../app/lib/glassLook";
-import { GHOST_GLASS, depthPrepassMaterial, dressGlass, ghostGlass, makeGlassMaterial, rankByDepth, tintGlass } from "../app/lib/jackGlass";
+import { GHOST_GLASS, depthPrepassMaterial, dressGlass, ghostGlass, makeDressedGlass, makeGlassMaterial, rankByDepth, tintGlass } from "../app/lib/jackGlass";
 
 // The glass the hero and the card BOTH wear, from one module (the owner: "exactly like the
 // jacks on hero"): these pin the material's flags, the one program key, the injection's
@@ -108,6 +108,24 @@ test("ghostGlass: the unknown week is #2a2a30 at 0.32 with frosted white's rough
   assert.equal(k.material.color.getHexString(), "2563eb");
   assert.equal(k.glass.uGlassOpacity.value, GLASS.OPACITY.accent);
   g.material.dispose(); k.material.dispose();
+});
+
+test("makeDressedGlass: an unknown week is BORN the ghost — tint, opacity and uGlassOpacity right before any effect runs; a known week is born its recipe", () => {
+  const ghost = makeDressedGlass({ family: "white", finish: "glossy" }, false, "dark", ACCENT);
+  assert.equal(ghost.material.color.getHexString(), "2a2a30", "born the ghost's tint, not frosted white");
+  assert.equal(ghost.material.opacity, GHOST_GLASS.OPACITY);
+  assert.equal(ghost.glass.uGlassOpacity.value, GHOST_GLASS.OPACITY);
+  assert.equal(ghost.material.roughness, glassRecipe("white", "matte", ACCENT, null).roughness);
+  assert.equal(ghost.material.customProgramCacheKey(), GLASS.PROGRAM_KEY, "still the one program");
+  const known = makeDressedGlass({ family: "white", finish: "glossy" }, true, "dark", ACCENT);
+  const r = glassRecipe("white", "glossy", ACCENT, null);
+  assert.equal(known.material.color.getHexString(), r.color.slice(1));
+  assert.equal(known.glass.uGlassOpacity.value, r.opacity);
+  // the accent flip that follows (the card's layout effect) changes neither
+  dressGlass(ghost, { family: "white", finish: "glossy" }, false, "dark", "#2563eb");
+  assert.equal(ghost.material.color.getHexString(), "2a2a30");
+  assert.equal(ghost.glass.uGlassOpacity.value, GHOST_GLASS.OPACITY);
+  ghost.material.dispose(); known.material.dispose();
 });
 
 test("rankByDepth: renderOrder is a permutation of 0..n−1 ascending with z, ties by index, over ALL indices — a null group consumes its rank", () => {

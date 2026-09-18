@@ -30,7 +30,7 @@ export const GLASS = {
   FROSTED_WHITE: "#e6e7ec",
   /**
    * Base opacities per family, ONE layer per JACK per pixel (the depth pre-pass;
-   * JackFieldScene.tsx) — but a PACK (fieldPacks.ts) is three or four jacks deep at its core,
+   * jackGlass.ts) — but a PACK (fieldPacks.ts) is three or four jacks deep at its core,
    * so where the jacks stack the pixel composites three or four of these layers, 1 − (1 − a)³
    * ≈ 0.80 / 0.76 / 0.63: the core keeps its presence at ANY base, and the base only decides
    * how clear the pack's edges and the lone jacks read — the thickness cue a jack on the

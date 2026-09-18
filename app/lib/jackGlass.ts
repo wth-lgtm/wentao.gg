@@ -12,8 +12,8 @@
 // depth-write off, drawn AFTER a depth pre-pass of the same triangles on the SAME program
 // (depthPrepassMaterial: colour writes off, depth writes on), so only each jack's nearest front
 // surface is composited and the interior — the core sphere, the arm bases, the far walls — is
-// culled by the depth test. The card's AO bake and neighbour-occlusion injection are NOT on the
-// glass (composed with alpha blending they read as a dark solid ball inside every jack — the
+// culled by the depth test. The plastic round's AO bake and neighbour-occlusion injection are NOT
+// on the glass (composed with alpha blending they read as a dark solid ball inside every jack — the
 // crotch bakes at 0.65, the bores at 0.01–0.2), and glass takes no contact crease. Between
 // jacks, rankByDepth orders the groups back to front each frame so a nearer jack still blends
 // over a farther one — a pack is three or four jacks deep at its core, and the card's dozen
@@ -110,6 +110,19 @@ export function ghostGlass(m: GlassMaterial): void {
 export function dressGlass(m: GlassMaterial, slot: Slot, known: boolean, theme: "dark" | "light", accent: string): void {
   if (known) tintGlass(m, slot, theme, accent);
   else ghostGlass(m);
+}
+
+/**
+ * A slot's glass, BORN dressed: built by makeGlassMaterial and, for an unknown week, made the
+ * ghost in the same call — so the material is right before any effect runs. The card's first
+ * frame is R3F's rAF, scheduled during the commit; React's passive effects flush after paint
+ * (measured 357 ms later on the card), so a ghost dressed only by an effect would draw as a
+ * cast member for the first frame(s) of the entrance and then snap (the review of this round).
+ */
+export function makeDressedGlass(slot: Slot, known: boolean, theme: "dark" | "light", accent: string): GlassMaterial {
+  const m = makeGlassMaterial(slot, theme, accent);
+  if (!known) ghostGlass(m);
+  return m;
 }
 
 /**

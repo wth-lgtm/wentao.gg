@@ -287,7 +287,7 @@ async function run(width, height, theme, opts = {}) {
   out.drift = { ...out.drift, homesStill: JSON.stringify(f2.homes) === JSON.stringify(rest.homes), simDelta2s: +simDelta.toFixed(3), floor: +(0.006 * simDelta).toFixed(4), bodiesMoved: drifted.filter((d) => d > 0.01).length, maxBodyDelta2s: +Math.max(...drifted).toFixed(4), meanBodyDelta2s: +(drifted.reduce((a, b) => a + b, 0) / drifted.length).toFixed(4) };
   if (rest.drifting) {
     out.asserts.idleCadence = rest.idle && f2.idle && f2.E === 0 && out.framesOver2s >= 1 && out.framesOver2s <= 2 * rest.idleHz + 6 && out.idleCadence.busyFrames === 0 && (!outruns || out.framesOver2s <= 0.8 * fullRate2s);
-    out.asserts.driftSways = out.drift.homesStill && simDelta > 0 && out.drift.maxBodyDelta2s > 0.006 * simDelta && out.drift.maxBodyDelta2s < reach;
+    out.asserts.driftSways = out.drift.homesStill && simDelta > 0 && Math.max(...drifted) > 0.006 * simDelta && Math.max(...drifted) < reach;
   } else {
     out.asserts.idleCadence = rest.frozen && f2.frozen && f2.E === 0 && out.framesOver2s === 0;
     out.asserts.driftSways = out.drift.homesStill && out.drift.maxBodyDelta2s < 1e-3;

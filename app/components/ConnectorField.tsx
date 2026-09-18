@@ -7,7 +7,7 @@ import { SEED, unknownOverride, type Jack } from "../lib/connectorJacks";
 import { CAMERA, PANEL, cameraFor, type CameraFit } from "../lib/connectorScene";
 import { GLASS } from "../lib/glassLook";
 import { DYN, clampDelta, clickWorld, createWorld, isResting, setView, stepWorld, type Pointer, type World } from "../lib/jackDynamics";
-import { depthPrepassMaterial, dressGlass, makeGlassMaterial, rankByDepth } from "../lib/jackGlass";
+import { depthPrepassMaterial, dressGlass, makeDressedGlass, rankByDepth } from "../lib/jackGlass";
 import { KEY, environmentScene, jackGeometry } from "../lib/jackMaterials";
 import type { PointerRig } from "../lib/pointerRig";
 import { createSampler, sampleFrame } from "../lib/scenePerf";
@@ -99,14 +99,19 @@ function Field({ jacks, accent, visible, inView, rig, debug, tier, onDegrade }: 
   // materials disposed the old set before the new one had rendered, which drove the program's
   // usedTimes to 0, destroyed it and recompiled it (~150 ms) on every toggle. Twelve uniform
   // writes and one frame instead. Twelve glass materials (jackGlass.ts, the hero's), one program
-  // (GLASS.PROGRAM_KEY); a known week wears its slot's tint, an unknown week the ghost
-  // (jackGlass.dressGlass branches, so a flip never wipes the ghost back to its family's tint).
-  const mats = useMemo(() => jacks.map((j) => makeGlassMaterial(j, "dark", "#3b82f6")), [jacks]);
+  // (GLASS.PROGRAM_KEY). A known week wears its slot's tint, an unknown week the ghost — dressed
+  // AT BIRTH (jackGlass.makeDressedGlass) and again on every accent flip (jackGlass.dressGlass
+  // branches on `known`, so a flip never wipes the ghost back to its family's tint). Both before
+  // the first draw: the birth is synchronous, the flip a LAYOUT effect — R3F's first frame is a
+  // rAF scheduled in the commit and a passive effect flushes after paint (measured 357 ms later
+  // on this card), so an effect-only dressing drew a ghost as a cast member for the entrance's
+  // first frame(s), and the light theme's accent as the dark one's.
+  const mats = useMemo(() => jacks.map((j) => makeDressedGlass(j, j.known, "dark", "#3b82f6")), [jacks]);
   useEffect(() => {
     invalidate();
     return () => mats.forEach((m) => m.material.dispose());
   }, [mats, invalidate]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     mats.forEach((m, i) => dressGlass(m, jacks[i], jacks[i].known, "dark", accent));
     invalidate();
   }, [accent, mats, jacks, invalidate]);
