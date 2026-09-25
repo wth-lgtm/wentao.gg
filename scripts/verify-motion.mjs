@@ -1289,6 +1289,7 @@ async function resizeMidScroll(vp, theme) {
     { name: "rest mid-Experience, scroll on below Education, width 1440 → 1400", to: [1400, 900], where: "below" },
     { name: "rest mid-Experience, scroll on below Education, height 900 → 700 (Experience flips to flow above)", to: [1440, 700], where: "below" },
     { name: "rest above Experience, scroll on into mid-Experience (pinned), width 1440 → 1400", to: [1400, 900], where: "inside" },
+    { name: "rest mid-Experience, scroll on into mid-Projects, width 1440 → 1000 (Projects reflows inside, its top barely moves)", to: [1000, 900], where: "midProjects" },
   ];
   for (const k of cases) {
     const { ctx, page } = await openPage(vp, theme);
@@ -1297,7 +1298,8 @@ async function resizeMidScroll(vp, theme) {
     const start = k.where === "inside" ? ex.pageTop - 600 : await yForBeat(page, "experience", 2);
     await scrollTo(page, start); await settled(page); await sleep(400); // a rest place is captured here
     const rest = await page.evaluate(() => window.__chapters.restPlace);
-    const target = k.where === "inside" ? ex.pageTop + 0.5 * (ex.height - ex.stageH) : ed.top + ed.height + 350;
+    const pr = k.where === "midProjects" ? await page.evaluate(() => { const e = document.getElementById("projects"); const r = e.getBoundingClientRect(); return { top: r.top + scrollY, height: r.height }; }) : null;
+    const target = k.where === "inside" ? ex.pageTop + 0.5 * (ex.height - ex.stageH) : pr ? pr.top + pr.height / 2 - 450 : ed.top + ed.height + 350;
     await scrollOn(page, target);
     let before;
     // inside the pinned chapter the place is its pin; the entry that pin marks is the target (shown may still be one

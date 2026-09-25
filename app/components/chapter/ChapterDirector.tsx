@@ -47,6 +47,8 @@ import { getFieldPacks, onFieldPacks } from "../../lib/fieldPresence";
 //   scrolled so its row is the marked one in the next frame (E10): pinned, to its beat; flow, onto the reading line.
 
 type Mode = ChapterMode;
+/** the elements, outside the chapters, a resize mid-scroll can anchor the reader's place on (placeFromCache) */
+const ANCHOR_SELECTOR = "h2, h3, h4, li, article, p";
 const FOLLOW_TAU_MS = BEAT_MS / 3; // the rail head closes a released gap in about one beat
 // Review builds only (NEXT_PUBLIC_REVIEW_FLAGS=1, inlined at build): ?pin= and the ?chapterDebug surface with its
 // callback counters. Every read of it is a build-time constant, so a production build compiles all of it out.
@@ -478,8 +480,11 @@ function createDirector(): () => void {
   let liveY: number | null = null;
   let ownScrollY: number | null = null;
   let readerScrolled = false;
-  /** the page's top-level sections (main's children, the footer) at the last measure: the anchors outside chapters */
+  /** the page's top-level sections (main's children, the footer) at the last measure, and finer anchors inside the
+   *  ones that are not chapters (their headings, list items, articles, paragraphs): where a resize mid-scroll finds
+   *  the reader outside every chapter, from cached geometry alone */
   let sections: { el: Element; top: number }[] = [];
+  let anchors: { el: Element; top: number; bottom: number }[] = [];
   let cachedVh = window.innerHeight;
   // A hard load of /#section lands on it once the modes are decided, unless the reader has already moved. The
   // browser's own fragment scroll is smooth here (html { scroll-behavior: smooth }) and can be cut short — by a
@@ -541,24 +546,39 @@ function createDirector(): () => void {
     const main = document.querySelector("main");
     const roots = [...(main?.children ?? []), ...document.querySelectorAll("body > footer")];
     sections = roots.map((el) => ({ el, top: el.getBoundingClientRect().top + sy }));
+    anchors = [];
+    for (const root of roots) {
+      if (root.hasAttribute("data-chapter")) continue;
+      for (const el of root.querySelectorAll(ANCHOR_SELECTOR)) {
+        if (el.closest("[data-chapter]")) continue;
+        const r = el.getBoundingClientRect();
+        if (r.height > 0) anchors.push({ el, top: r.top + sy, bottom: r.bottom + sy });
+      }
+    }
     cachedVh = window.innerHeight;
   }
 
   /** the reader's place at scroll `y` in the CACHED layout (pure: no layout read) — inside a chapter, its shown
-   *  row or pin; outside, the top-level section at the viewport centre */
+   *  row or pin; outside, the deepest cached anchor whose box spans the viewport centre (the tightest box), else
+   *  the top-level section there. A section's top alone missed a resize that reflows the inside of a tall section
+   *  but leaves its top where it was (1440 → 1000 mid-Projects: the centre block drifted 52 px, the correction a
+   *  no-op). */
   const placeFromCache = (y: number): { place: Place; el: Element | null } => {
     const centreY = y + cachedVh / 2;
     let sec: { el: Element; top: number } | null = null;
     for (const s of sections) if (s.top <= centreY) sec = s;
+    let tight: { el: Element; top: number; bottom: number } | null = null;
+    for (const a of anchors) if (a.top <= centreY && a.bottom > centreY && (!tight || a.bottom - a.top < tight.bottom - tight.top)) tight = a;
+    const at = tight ?? sec;
     const place = snapshotPlace({
       scrollY: y,
       viewportH: cachedVh,
       readingLine: readingLine(),
       chapters: runtimes.map((rt) => rt.box()),
       shown: Object.fromEntries(runtimes.map((rt) => [rt.id, rt.commit.shown])),
-      centre: sec ? { key: "element", pageTop: sec.top } : null,
+      centre: at ? { key: "element", pageTop: at.top } : null,
     });
-    return { place, el: sec ? sec.el : null };
+    return { place, el: at ? at.el : null };
   };
 
   // the place at the last scroll rest: what a resize restores (by the time a resize event runs, svh units and
