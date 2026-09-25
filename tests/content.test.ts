@@ -45,7 +45,7 @@ test("no detailed bullets (owner, 2026-09-24): no role carries a description, no
   for (const r of EXPERIENCE) assert.deepEqual(Object.keys(r).sort(), ["company", "companyUrl", "location", "logo", "period", "technologies", "title"]);
   for (const s of EDUCATION) assert.deepEqual(Object.keys(s).sort(), ["degrees", "logo", "name", "url"]);
   const root = path.join(import.meta.dirname, "..");
-  for (const f of ["app/lib/content/experience.ts", "app/lib/content/education.ts"]) {
+  for (const f of ["app/components/Experience.tsx", "app/components/Education.tsx", "app/lib/content/experience.ts", "app/lib/content/education.ts"]) {
     const src = fs.readFileSync(path.join(root, f), "utf8");
     for (const gone of ["Applied AI Team", "Perelman", "Biomechatronics", "Carnegie Mellon Racing", "description:", "highlights:"]) {
       assert.ok(!src.includes(gone), `${f} still carries "${gone}"`);
