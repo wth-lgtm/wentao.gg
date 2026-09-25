@@ -160,3 +160,20 @@ test("the marked entry survives every flip: a sweep of fractional tops, lines, o
   }
   assert.ok(cases > 1000);
 });
+
+test("the reading place is the MARKED chapter, even when the viewport's centre already sits in the next one", () => {
+  // 390 × 844 (the line at 523, the centre at 422): JST (Experience's beat 4) is marked with its top at 223 and
+  // Experience's section ends at 357; Education's dial and panel start there, its first row 76 px below the line. The
+  // centre is inside Education, but the reader's mark is JST: a rotation must keep JST, not an unmarked UPenn.
+  const line = 523;
+  const ex: ChapterBox = { id: "experience", top: 700, height: 1074, mode: "flow", stageHeight: 844, beatTops: [800, 990, 1180, 1400, 1640], layout: EXPERIENCE_LAYOUT };
+  const ed: ChapterBox = { id: "education", top: 1774, height: 700, mode: "flow", stageHeight: 844, beatTops: [2016, 2256], layout: EDUCATION_LAYOUT };
+  const scrollY = 1640 - 223;
+  assert.ok(scrollY + 422 >= ed.top, "the centre is inside Education");
+  const place = snapshotPlace({ scrollY, viewportH: 844, readingLine: line, chapters: [ex, ed], shown: { experience: 4, education: -1 }, centre: null });
+  assert.equal(place.kind === "chapter" ? `${place.id}:${place.beat}` : place.kind, "experience:4");
+  // after the rotation (844 × 390, the line at 242) JST lands as the last row across the line
+  const exL: ChapterBox = { ...ex, top: 500, height: 900, stageHeight: 390, beatTops: [560, 700, 840, 990, 1150.5] };
+  const y = correctPlace(place, { chapters: [exL, { ...ed, top: 1400, beatTops: [1500, 1640] }], pageTopOf: () => null, readingLine: 242 })!;
+  assert.equal(markedAfter(exL.beatTops, y, 242), 4);
+});

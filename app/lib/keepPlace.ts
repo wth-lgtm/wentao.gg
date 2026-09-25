@@ -6,7 +6,7 @@
 // chapter's mode in one commit, then applies one instant scrollTo computed here. Pure: the director measures,
 // this decides.
 //
-//   Where the reader was                               Where the correction puts them
+//   Where the reader was (the marked chapter, else the one at the viewport's centre)  Where the correction puts them
 //   inside chapter C, which is (still) pinned          the same pin in C (the same entry, the same instant)
 //   inside chapter C, which just became pinned         pinAtBeat(shown) in C
 //   inside chapter C, which just flowed (from pinned)  C's shown row just past the reading line (LAND_PX above it)
@@ -69,7 +69,12 @@ function pinOf(ch: ChapterBox, scrollY: number): number {
 
 export function snapshotPlace(input: PlaceInput): Place {
   const centreY = input.scrollY + input.viewportH / 2;
-  const c = input.chapters.find((ch) => centreY >= ch.top && centreY < ch.top + ch.height);
+  // the MARKED chapter first: the reader's eye is at its mark (the reading line, or the docked stage), and the
+  // viewport's centre can already sit in the next chapter — a phone with JST marked just past the 62 % line had its
+  // centre in Education, which kept an unmarked Education row, and after a rotation nothing was marked at all.
+  // Otherwise the chapter that contains the centre.
+  const c = input.chapters.find((ch) => (input.shown[ch.id] ?? -1) >= 0)
+    ?? input.chapters.find((ch) => centreY >= ch.top && centreY < ch.top + ch.height);
   let beat = c ? input.shown[c.id] ?? -1 : -1;
   const marked = beat >= 0;
   // nothing marked in a static or flow chapter (the static still marks nothing; a flow list may be disengaged): the
