@@ -32,7 +32,8 @@ import { getFieldPacks, onFieldPacks } from "../../lib/fieldPresence";
 //
 //   KEEP YOUR PLACE. A flip snapshots one reading place from the layout still on screen, writes every mode in
 //   one go, then applies ONE instant scrollTo (keepPlace.ts) with overflow-anchor held off until the second
-//   frame.
+//   frame. A resize restores the place from the last scroll rest while the reader is still there, and the place
+//   at the last scroll frame (cached geometry, no layout read) once they have scrolled since.
 //
 //   MARKS. Each chapter's runtime subscribes to the scroll store only while it is within a viewport (an
 //   IntersectionObserver, 100 % margin). In the read phase it turns the scroll into ONE target beat — pinned:
@@ -353,6 +354,8 @@ interface DirectorDebug {
   readonly callbacks: number;
   evaluate(): void;
   readonly restPlace: Place | null;
+  readonly restStale: boolean;
+  readonly liveY: number | null;
   readonly landHash: string | null;
   readonly corrections: unknown[];
 }
@@ -365,7 +368,7 @@ function createDirector(): () => void {
   const onNear = () => {
     const any = runtimes.some((rt) => rt.subscribed);
     if (any && !unsubscribe) { unsubscribe = subscribeScroll(onScroll); kick(); }
-    else if (!any && unsubscribe) { unsubscribe(); unsubscribe = null; owner = null; }
+    else if (!any && unsubscribe) { unsubscribe(); unsubscribe = null; owner = null; liveY = null; }
     else if (any) kick();
   };
   const runtimes: ChapterRuntime[] = [...document.querySelectorAll<HTMLElement>("[data-chapter]")].map((el) => new ChapterRuntime(el, onNear));
@@ -378,6 +381,9 @@ function createDirector(): () => void {
   // keeps them unless the other is nearer by more than HYSTERESIS_PX. A handover lands on one beat: the old
   // owner clears on the same boundary the new one docks on.
   const onScroll = (s: Readonly<ScrollState>) => {
+    // the scroll this frame, against the geometry cached before any resize still to be evaluated: where a resize
+    // that arrives mid-scroll finds the reader (placeFromCache)
+    if (!resizePending) liveY = s.y;
     const near = runtimes.filter((rt) => rt.subscribed);
     const line = readingLine();
     for (const rt of near) rt.gate(s, line);
@@ -421,6 +427,19 @@ function createDirector(): () => void {
   const corrections: unknown[] = [];
   let restTimer: ReturnType<typeof setTimeout> | undefined;
   let restPlace: { place: Place; el: Element | null } | null = null;
+  // KEEP-YOUR-PLACE ACROSS A RESIZE MID-SCROLL. The rest place is taken 160 ms after scrolling stops, so it is only
+  // the reader's place while they are still there: any scroll of theirs since makes it stale (a phone rotated
+  // during momentum, a window snapped mid-fling or mid-glide, DevTools opened mid-scroll — restoring the rest place
+  // then threw the reader thousands of px back). A stale rest place gives way to the place at the last scroll
+  // frame, computed from the geometry cached before the resize (pure arithmetic; no layout read while scrolling).
+  // The director's own scrolls (a correction, a hash landing) are not the reader's.
+  let restStale = true;
+  let liveY: number | null = null;
+  let ownScrollY: number | null = null;
+  let readerScrolled = false;
+  /** the page's top-level sections (main's children, the footer) at the last measure: the anchors outside chapters */
+  let sections: { el: Element; top: number }[] = [];
+  let cachedVh = window.innerHeight;
   // A hard load of /#section lands on it once the modes are decided, unless the reader has already moved. The
   // browser's own fragment scroll is smooth here (html { scroll-behavior: smooth }) and can be cut short — by a
   // mode flip above the target, or by framer's keyframe measurement, which restores the scrollY it read
@@ -457,7 +476,7 @@ function createDirector(): () => void {
 
   /** the reader's place in the layout on screen (fresh measures: layout reads, never while scrolling) */
   const snapshot = (): { place: Place; el: Element | null } => {
-    for (const rt of runtimes) rt.measure();
+    measureAll();
     const sy = window.scrollY, vh = window.innerHeight;
     const centreY = sy + vh / 2;
     const inside = runtimes.find((rt) => centreY >= rt.geom.pageTop && centreY < rt.geom.pageTop + rt.geom.height);
@@ -474,6 +493,33 @@ function createDirector(): () => void {
     return { place, el };
   };
 
+  /** every cached measure (layout reads): the chapters, the top-level sections, the viewport */
+  function measureAll(): void {
+    for (const rt of runtimes) rt.measure();
+    const sy = window.scrollY;
+    const main = document.querySelector("main");
+    const roots = [...(main?.children ?? []), ...document.querySelectorAll("body > footer")];
+    sections = roots.map((el) => ({ el, top: el.getBoundingClientRect().top + sy }));
+    cachedVh = window.innerHeight;
+  }
+
+  /** the reader's place at scroll `y` in the CACHED layout (pure: no layout read) — inside a chapter, its shown
+   *  row or pin; outside, the top-level section at the viewport centre */
+  const placeFromCache = (y: number): { place: Place; el: Element | null } => {
+    const centreY = y + cachedVh / 2;
+    let sec: { el: Element; top: number } | null = null;
+    for (const s of sections) if (s.top <= centreY) sec = s;
+    const place = snapshotPlace({
+      scrollY: y,
+      viewportH: cachedVh,
+      readingLine: readingLine(),
+      chapters: runtimes.map((rt) => rt.box()),
+      shown: Object.fromEntries(runtimes.map((rt) => [rt.id, rt.commit.shown])),
+      centre: sec ? { key: "element", pageTop: sec.top } : null,
+    });
+    return { place, el: sec ? sec.el : null };
+  };
+
   // the place at the last scroll rest: what a resize restores (by the time a resize event runs, svh units and
   // every wrap have already moved, so the layout on screen can no longer say where the reader was)
   const captureRest = () => {
@@ -483,11 +529,22 @@ function createDirector(): () => void {
     // entry the reader will see marked, so wait for it
     if (runtimes.some((rt) => rt.commit.pending || rt.commit.held)) { restTimer = setTimeout(captureRest, 120); return; }
     restPlace = snapshot();
+    restStale = false;
+    ownScrollY = null;
   };
   const onScrollEvent = () => {
     if (resizePending) return;
+    // a scroll that lands where the director itself just scrolled is its own; any other is the reader's
+    const own = ownScrollY !== null && Math.abs(window.scrollY - ownScrollY) < 2;
+    if (!own) { ownScrollY = null; restStale = true; readerScrolled = true; }
     clearTimeout(restTimer);
     restTimer = setTimeout(captureRest, 160);
+  };
+  /** the director's own instant scroll (a correction, a landing): not the reader's, so it leaves the rest place fresh */
+  const scrollOwn = (y: number) => {
+    ownScrollY = Math.round(y);
+    window.scrollTo({ top: Math.round(y), behavior: "instant" });
+    if (unsubscribe) liveY = window.scrollY;
   };
 
   const placeDials = () => {
@@ -533,13 +590,18 @@ function createDirector(): () => void {
     const changed = runtimes.some((rt, i) => rt.currentMode() !== next[i]);
     if (!changed && !firstTime && !resized) {
       lineY = lineNow();
-      for (const rt of runtimes) rt.measure();
+      measureAll();
       placeDials();
       kick();
       return;
     }
-    // one reading place: after a resize, the one from the last rest; otherwise from the layout still on screen
-    const held = resized && restPlace ? restPlace : snapshot();
+    // one reading place: after a resize, the rest place if the reader has not scrolled since, else the place at
+    // the last scroll frame in the layout cached before the resize, else (no chapter near) the layout on screen;
+    // without a resize, the layout still on screen
+    const held = !resized ? snapshot()
+      : restPlace && !restStale ? restPlace
+      : liveY !== null ? placeFromCache(liveY)
+      : snapshot();
     // the place was read against the old line; the correction and every gate from here read the new one
     lineY = lineNow();
     if (changed || resized) {
@@ -548,7 +610,7 @@ function createDirector(): () => void {
     }
     // every mode in one go
     runtimes.forEach((rt, i) => rt.setMode(next[i]));
-    for (const rt of runtimes) rt.measure();
+    measureAll();
     placeDials();
     if (changed || resized) {
       const pageTopOf = (key: string): number | null => (key === "element" && held.el && held.el.isConnected ? held.el.getBoundingClientRect().top + window.scrollY : null);
@@ -558,19 +620,21 @@ function createDirector(): () => void {
           corrections.push({ place: held.place, y, from: window.scrollY, resized, changed });
           if (corrections.length > 20) corrections.shift();
         }
-        if (y !== null && Math.abs(window.scrollY - y) >= 1) window.scrollTo({ top: Math.round(y), behavior: "instant" });
+        if (y !== null && Math.abs(window.scrollY - y) >= 1) scrollOwn(y);
+        else if (unsubscribe) liveY = window.scrollY;
       };
+      readerScrolled = false;
       correct();
       cancelAnimationFrame(anchorRelease);
       anchorRelease = requestAnimationFrame(() => {
         // a second look after the next layout (late images, fonts), then anchoring comes back and the rest place
         // is taken afresh from the corrected layout
-        for (const rt of runtimes) rt.measure();
+        measureAll();
         correct();
         anchorRelease = requestAnimationFrame(() => {
           html.style.removeProperty("overflow-anchor");
-          // the corrected place stands until the next scroll rest (the marks re-dock on the next beat)
-          if (held.place.kind !== "none") restPlace = held;
+          // the corrected place stands until the reader's next scroll (the marks re-dock on the next beat)
+          if (held.place.kind !== "none" && !readerScrolled) { restPlace = held; restStale = false; }
         });
       });
     }
@@ -589,7 +653,7 @@ function createDirector(): () => void {
     cancelAnimationFrame(anchorRelease);
     const land = () => {
       const y = Math.round(el.getBoundingClientRect().top + window.scrollY);
-      if (Math.abs(window.scrollY - y) >= 2) window.scrollTo({ top: y, behavior: "instant" });
+      if (Math.abs(window.scrollY - y) >= 2) scrollOwn(y);
     };
     land();
     anchorRelease = requestAnimationFrame(() => {
@@ -667,6 +731,8 @@ function createDirector(): () => void {
       },
       evaluate: () => evaluate(),
       get restPlace() { return restPlace ? restPlace.place : null; },
+      get restStale() { return restStale; },
+      get liveY() { return liveY; },
       get landHash() { return landHash; },
       get corrections() { return corrections; },
     };
