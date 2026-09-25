@@ -61,7 +61,11 @@
     }
   }
 
-  /* The dial: folio, the display title (OC-H), the readout. */
+  /* The dial: folio, the display title (OC-H), the readout. The dial is a size container, so the title is sized
+     to the column it sits in (cqi), not only to the window: a title sized from the viewport alone ran past its
+     368 px dial and under the panel as soon as anything grew it — WCAG 1.4.12 text spacing, a 24 px default font,
+     a 1,024 px window in flow. */
+  .ch-dial { container-type: inline-size; }
   .ch-folio {
     display: flex;
     align-items: center;
@@ -79,9 +83,16 @@
     background: var(--border);
   }
   .ch-title { margin: 0; }
+  /* Flow: the display size, capped by the window's height as well (a landscape phone got a 72 px title on a
+     390 px screen) and by the column: 19cqi is "Experience" (5.03 em wide) in its dial with ≈ 4 % to spare. If
+     it still cannot fit (text-spacing overrides), the one word wraps, hyphenated where the dictionary allows —
+     a last resort, never an overlap. */
   .ch-title-text {
     display: block;
     font-size: clamp(2.5rem, 9vw, 4.5rem);
+    font-size: min(clamp(2.5rem, min(9vw, 11svh), 4.5rem), 19cqi);
+    overflow-wrap: anywhere;
+    hyphens: auto;
     line-height: 1.02;
     font-weight: 700;
     letter-spacing: -0.035em;
@@ -486,7 +497,10 @@
   }
   /* OC-T: the pinned panel's chapter-local glass fill (--chapter-panel-tint, globals.css); the blur stays */
   .chapter[data-mode="pinned"] .ch-panel { align-self: center; --glass-tint: var(--chapter-panel-tint); }
-  .chapter[data-mode="pinned"] .ch-title-text { font-size: clamp(3rem, 4.4vw, 4rem); }
+  .chapter[data-mode="pinned"] .ch-title-text {
+    font-size: clamp(3rem, 4.4vw, 4rem);
+    font-size: min(clamp(3rem, min(4.4vw, 8svh), 4rem), 19cqi);
+  }
   @media (min-width: 1024px) {
     .chapter[data-mode="pinned"] .ch-grid { grid-template-rows: minmax(0, 1fr); align-items: center; }
     .chapter[data-mode="pinned"] .ch-dial {
@@ -500,10 +514,13 @@
       display: flex;
       align-items: center;
       gap: 16px;
-      height: 72px;
+      min-height: 72px; /* DIAL_ROW_PX; the director measures the row when text spacing grows it */
     }
     .chapter[data-mode="pinned"] .ch-folio { margin: 0; }
-    .chapter[data-mode="pinned"] .ch-title-text { font-size: clamp(2rem, 5vw, 2.75rem); }
+    .chapter[data-mode="pinned"] .ch-title-text {
+      font-size: clamp(2rem, 5vw, 2.75rem);
+      font-size: min(clamp(2rem, 5vw, 2.75rem), 19cqi);
+    }
     .chapter[data-mode="pinned"] .ch-readout { margin: 0 0 0 auto; font-size: clamp(1.75rem, 4vw, 2.25rem); }
   }
 
@@ -530,7 +547,10 @@
       row-gap: 16px;
     }
     html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-panel { align-self: center; --glass-tint: var(--chapter-panel-tint); }
-    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-title-text { font-size: clamp(3rem, 4.4vw, 4rem); }
+    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-title-text {
+      font-size: clamp(3rem, 4.4vw, 4rem);
+      font-size: min(clamp(3rem, min(4.4vw, 8svh), 4rem), 19cqi);
+    }
     html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .yw-window { display: inline-block; }
     html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .yw-range { display: none; }
   }
@@ -539,9 +559,12 @@
     html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-dial { align-self: start; }
   }
   @media screen and (prefers-reduced-motion: no-preference) and (forced-colors: none) and (min-width: 700px) and (max-width: 1023.98px) and (min-height: 720px) {
-    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-dial { display: flex; align-items: center; gap: 16px; height: 72px; }
+    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-dial { display: flex; align-items: center; gap: 16px; min-height: 72px; }
     html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-folio { margin: 0; }
-    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-title-text { font-size: clamp(2rem, 5vw, 2.75rem); }
+    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-title-text {
+      font-size: clamp(2rem, 5vw, 2.75rem);
+      font-size: min(clamp(2rem, 5vw, 2.75rem), 19cqi);
+    }
     html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-readout { margin: 0 0 0 auto; font-size: clamp(1.75rem, 4vw, 2.25rem); }
   }
 

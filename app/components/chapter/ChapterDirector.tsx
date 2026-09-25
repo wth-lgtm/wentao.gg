@@ -430,8 +430,12 @@ function createDirector(): () => void {
   const decide = (rt: ChapterRuntime, motion: boolean, stageH: number, narrow: boolean): Mode => {
     if (!motion) return "static";
     if (!pinMq.matches || !pinSet[rt.id]) return "flow";
-    // the panel is the same width and type in flow and pinned (one grid), so its height here is its pinned height
-    return bandFits(rt.panel.offsetHeight, stageH, rt.currentMode() === "pinned", narrow ? DIAL_ROW_PX : 0) ? "pinned" : "flow";
+    // the panel is the same width and type in flow and pinned (one grid), so its height here is its pinned height;
+    // at 700–1023 px the compact dial row comes off the band too — DIAL_ROW_PX, or the row as it stands when it is
+    // pinned and text spacing or a large default font has grown it
+    const pinnedNow = rt.currentMode() === "pinned";
+    const dialRow = narrow ? Math.max(DIAL_ROW_PX, pinnedNow ? rt.dial.offsetHeight + 16 : 0) : 0;
+    return bandFits(rt.panel.offsetHeight, stageH, pinnedNow, dialRow) ? "pinned" : "flow";
   };
 
   /** the element at the viewport centre outside every chapter: the deepest one whose box spans the centre line */
@@ -622,7 +626,7 @@ function createDirector(): () => void {
   const ro = new ResizeObserver(request);
   const main = document.querySelector("main");
   if (main) ro.observe(main);
-  for (const rt of runtimes) { ro.observe(rt.el); ro.observe(rt.panel); }
+  for (const rt of runtimes) { ro.observe(rt.el); ro.observe(rt.panel); ro.observe(rt.dial); }
 
   window.addEventListener("resize", onResize);
   window.addEventListener("scroll", onScrollEvent, { passive: true });
