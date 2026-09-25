@@ -7,9 +7,9 @@ import { atBeat, BEAT_MS } from "../../lib/mechanism";
 import { getScroll, scrollStoreCalls, subscribeScroll, type ScrollState } from "../../lib/scrollStore";
 import { getSiteMotion, subscribeSiteMotion } from "../../lib/siteMotion";
 import {
-  DIAL_ROW_PX, HYSTERESIS_PX, PIN_CHAPTERS, PIN_QUERY, STAGE_CLEAR, TOOLBAR_PX, TWO_COLUMN_MIN,
-  activeItemAt, bandFits, beatCount, beatOf, beatToActive, chapterPin, createReadingLine, headClamp, pinAtBeat,
-  pinSetFromFlag, railHeadAt, readingLineActive, type ChapterLayout,
+  PIN_CHAPTERS, PIN_QUERY, STAGE_CLEAR, TOOLBAR_PX, TWO_COLUMN_MIN,
+  activeItemAt, beatCount, beatOf, beatToActive, chapterPin, createReadingLine, decideMode, headClamp, pickOwner,
+  pinAtBeat, pinSetFromFlag, railHeadAt, readingLineActive, type ChapterLayout,
 } from "../../lib/chapterList";
 import { createCommit, type Commit } from "../../lib/chapterCommit";
 import { emitChapterStep } from "../../lib/chapterBus";
@@ -420,11 +420,7 @@ function createDirector(): () => void {
     const near = runtimes.filter((rt) => rt.subscribed);
     const line = readingLine();
     for (const rt of near) rt.gate(s, line);
-    const dist = (rt: ChapterRuntime) => Math.abs(rt.focusY - line);
-    let best: ChapterRuntime | null = null;
-    for (const rt of near) if (rt.engaged && (!best || dist(rt) < dist(best))) best = rt;
-    if (owner && owner !== best && owner.subscribed && owner.engaged && best && dist(owner) - dist(best) <= HYSTERESIS_PX) best = owner;
-    owner = best;
+    owner = pickOwner(near, line, owner);
     for (const rt of near) rt.apply(rt === owner);
   };
   const kickRead = () => onScroll(getScroll());
@@ -496,15 +492,13 @@ function createDirector(): () => void {
 
   const indexOpen = () => document.body.style.overflow === "hidden";
 
+  // the panel is the same width and type in flow and pinned (one grid), so its height here is its pinned height
+  // (decideMode, chapterList.ts, holds the rule; the reads happen only where it needs them)
   const decide = (rt: ChapterRuntime, motion: boolean, stageH: number, narrow: boolean): Mode => {
-    if (!motion) return "static";
-    if (!pinMq.matches || !pinSet[rt.id]) return "flow";
-    // the panel is the same width and type in flow and pinned (one grid), so its height here is its pinned height;
-    // at 700–1023 px the compact dial row comes off the band too — DIAL_ROW_PX, or the row as it stands when it is
-    // pinned and text spacing or a large default font has grown it
+    const pinQuery = pinMq.matches, inPinSet = !!pinSet[rt.id];
+    if (!motion || !pinQuery || !inPinSet) return decideMode({ motion, pinQuery, inPinSet, panelH: 0, stageH, pinnedNow: false, narrow, dialH: 0 });
     const pinnedNow = rt.currentMode() === "pinned";
-    const dialRow = narrow ? Math.max(DIAL_ROW_PX, pinnedNow ? rt.dial.offsetHeight + 16 : 0) : 0;
-    return bandFits(rt.panel.offsetHeight, stageH, pinnedNow, dialRow) ? "pinned" : "flow";
+    return decideMode({ motion, pinQuery, inPinSet, panelH: rt.panel.offsetHeight, stageH, pinnedNow, narrow, dialH: narrow && pinnedNow ? rt.dial.offsetHeight : 0 });
   };
 
   /** the element at the viewport centre outside every chapter: the deepest one whose box spans the centre line */

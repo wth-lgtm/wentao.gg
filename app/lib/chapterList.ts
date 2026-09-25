@@ -219,6 +219,48 @@ export function bandFits(listHeight: number, stageHeight: number, pinnedNow: boo
   return pinnedNow ? listHeight <= band : listHeight <= band - PIN_SLACK_PX;
 }
 
+/**
+ * A chapter's mode from the live window (the ChapterDirector's decision, pure): static when motion is not allowed;
+ * flow when the window fails PIN_QUERY or the chapter is out of the pin set; otherwise pinned exactly while its
+ * panel fits the band (bandFits: PIN_SLACK_PX of slack to pin, none to stay). 700–1023 px wide (`narrow`) the
+ * compact dial row comes off the band too: DIAL_ROW_PX, or the row as it stands (`dialH` + its 16 px gap) when it
+ * is pinned and text spacing or a large default font has grown it.
+ */
+export function decideMode(i: {
+  motion: boolean;
+  pinQuery: boolean;
+  inPinSet: boolean;
+  panelH: number;
+  stageH: number;
+  pinnedNow: boolean;
+  narrow: boolean;
+  /** the pinned compact dial row's height (read only when narrow and pinned) */
+  dialH: number;
+}): "pinned" | "flow" | "static" {
+  if (!i.motion) return "static";
+  if (!i.pinQuery || !i.inPinSet) return "flow";
+  const dialRow = i.narrow ? Math.max(DIAL_ROW_PX, i.pinnedNow ? i.dialH + 16 : 0) : 0;
+  return bandFits(i.panelH, i.stageH, i.pinnedNow, dialRow) ? "pinned" : "flow";
+}
+
+/** What pickOwner reads of a chapter: its gate this frame and its target row's viewport y. */
+export interface OwnerCandidate { engaged: boolean; focusY: number }
+
+/**
+ * The ONE chapter that owns the marks this frame (the accent is spent once per viewport), among the chapters near
+ * the screen: of those engaged, the one whose target row is nearest the reading line (the reader's eye). The
+ * current owner keeps the marks unless another is nearer by more than HYSTERESIS_PX, so two chapters engaged at
+ * once (a released pinned stage still in the middle third while the next list's first row reaches the line)
+ * never trade the marks back and forth.
+ */
+export function pickOwner<T extends OwnerCandidate>(candidates: readonly T[], line: number, prev: T | null): T | null {
+  const dist = (c: T) => Math.abs(c.focusY - line);
+  let best: T | null = null;
+  for (const c of candidates) if (c.engaged && (!best || dist(c) < dist(best))) best = c;
+  if (prev && best && prev !== best && prev.engaged && candidates.includes(prev) && dist(prev) - dist(best) <= HYSTERESIS_PX) return prev;
+  return best;
+}
+
 /** Review builds only (NEXT_PUBLIC_REVIEW_FLAGS=1): ?pin=exp,edu,proj (or ?pin=none) overrides the pin set. */
 export function pinSetFromFlag(search: string): Readonly<Record<string, boolean>> | null {
   const v = new URLSearchParams(search).get("pin");
