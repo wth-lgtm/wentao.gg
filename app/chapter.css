@@ -573,6 +573,19 @@
     html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-grid { grid-template-rows: minmax(0, 1fr); align-items: center; }
     html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-dial { align-self: start; }
   }
+  /* Where the director will place the dial in the corridor between the jack packs (two columns, a fine pointer:
+     the field's gate), the first paint cannot know where that is — the corridor depends on the window and the
+     field's composition. So the dial waits unseen until the director's first evaluation writes data-mode and
+     --ch-dial-top in one task, and appears in place: a hard load of /#experience no longer shows the title at
+     the stage's top and then moves it (a layout shift, 0.0167). If the director never runs, it appears after
+     1.5 s where it is. */
+  @media screen and (prefers-reduced-motion: no-preference) and (forced-colors: none) and (min-width: 1024px) and (min-height: 720px) and (hover: hover) and (pointer: fine) {
+    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-dial {
+      visibility: hidden;
+      animation: ch-dial-unhide 0s linear 1.5s forwards;
+    }
+  }
+  @keyframes ch-dial-unhide { to { visibility: visible; } }
   @media screen and (prefers-reduced-motion: no-preference) and (forced-colors: none) and (min-width: 700px) and (max-width: 1023.98px) and (min-height: 720px) {
     html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-grid { grid-template-rows: auto auto; align-content: center; }
     html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-panel { align-self: start; }
