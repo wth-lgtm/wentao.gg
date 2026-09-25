@@ -539,6 +539,14 @@ export function createDirector(): () => void {
     return node ?? null;
   };
 
+  /** each chapter's marked entry as the reader will see it: the committed beat, or, while a step is pending or held,
+   *  its target. The commit holds every step while the scroll is faster than COMMIT_MAX_V (a fling), the one that
+   *  clears the marks included, so `shown` then still names the chapter the reader flung out of — and a resize or a
+   *  rotation landing mid-fling restored it (723 to 1774 px back, the phone rotated during momentum). captureRest
+   *  waits for no step pending or held, so the rest place it stores is the committed beat either way. */
+  const markedNow = (): Record<string, number> =>
+    Object.fromEntries(runtimes.map((rt) => [rt.id, rt.commit.held || rt.commit.pending ? rt.commit.target : rt.commit.shown]));
+
   /** the reader's place in the layout on screen (fresh measures: layout reads, never while scrolling) */
   const snapshot = (): { place: Place; el: Element | null } => {
     measureAll();
@@ -552,7 +560,7 @@ export function createDirector(): () => void {
       viewportH: vh,
       readingLine: readingLine(),
       chapters: runtimes.map((rt) => rt.box()),
-      shown: Object.fromEntries(runtimes.map((rt) => [rt.id, rt.commit.shown])),
+      shown: markedNow(),
       centre: el ? { key: "element", pageTop: el.getBoundingClientRect().top + sy } : null,
     });
     return { place, el };
@@ -594,7 +602,7 @@ export function createDirector(): () => void {
       viewportH: cachedVh,
       readingLine: readingLine(),
       chapters: runtimes.map((rt) => rt.box()),
-      shown: Object.fromEntries(runtimes.map((rt) => [rt.id, rt.commit.shown])),
+      shown: markedNow(),
       centre: at ? { key: "element", pageTop: at.top } : null,
     });
     return { place, el: at ? at.el : null };

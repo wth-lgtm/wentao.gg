@@ -33,7 +33,8 @@
 //   focusFollows / tabLeavesChapter   pinned and flow: Tab through the links, the lit entry is the focused one; Tab leaves
 //   anchorsAtPin0           a hard load of /#experience lands at the section top, pin 0, the first entry marked;
 //                           a flow chapter (/#education) lands at its top with a mark, the CSS rail agreeing with the dots
-//   keepPlaceOnResize       1440×900 → 1440×700 → back, mid-Experience, mid-Education and below: ± 40 px
+//   keepPlaceOnResize       1440×900 → 1440×700 → back, mid-Experience, mid-Education and below: ± 40 px; Education's
+//                           last row marked above the band (its list's bottom at 110–200 px), resized or rotated
 //   markedAfterFlip         the MARKED entry after every flip is the one before: resizes across the pin gate (and 150 /
 //                           200 / 300 % zoom's CSS viewports), Reduce Motion round trips mid-Education (820×1180, 390×844),
 //                           phone rotation round trips at ten positions
@@ -59,7 +60,8 @@
 //   restAtTopPixels         SSIM ≥ 0.99 against Spike 0's f4b738f first screens (capture-top.mjs)
 //   (fix round 1)
 //   keepPlaceHeightOnly     a height-only resize with a flow chapter on a non-last entry: the mark is the live-line row
-//   resizeMidScroll         a resize while the reader is still scrolling: their place holds ± 40 px (not the last rest)
+//   resizeMidScroll         a resize while the reader is still scrolling: their place holds ± 40 px (not the last rest);
+//                           and mid-fling (≥ 5000 px/s, the resize before the velocity zeroes), desktop and a phone rotation
 //   textSpacing             WCAG 1.4.12 CSS and a 24 px root at every size: layoutSane (title glyphs included) holds
 //   touchTargets            every row link by elementFromPoint: its centre hits it, vertical reach ≥ 24 px
 //   printNeutral            print emulation changes no mode or mark, prints the marks neutral; the round trip moves nothing
@@ -1509,6 +1511,47 @@ async function resizeMidScroll(vp, theme) {
     if (!good) ok = false;
     const corr = await page.evaluate(() => window.__chapters.corrections.slice(-2));
     rows.push({ case: k.name, restPlaceKind: rest?.kind ?? null, restStaleAtResize: stale, before, after, good, lastCorrections: corr.map((c) => ({ kind: c.place.kind, y: c.y === null ? null : Math.round(c.y), from: Math.round(c.from) })) });
+    await ctx.close();
+  }
+  // A FLING (≥ 5000 px/s, past COMMIT_MAX_V's 3000, where the commit holds every step, the one clearing the marks
+  // included) with the resize or rotation arriving before VELOCITY_ZERO_MS (120 ms) has zeroed the velocity: the
+  // place is the entry the reader will see, not the chapter they flung out of (restored 723–1774 px back).
+  const flings = [
+    { name: "fling from mid-Experience to mid-Education, width 1440 → 1400", vp: "1440x900", to: [1400, 900], where: "eduMid" },
+    { name: "fling from mid-Experience to mid-Education, height 900 → 700 (Experience flips to flow above)", vp: "1440x900", to: [1440, 700], where: "eduMid" },
+    { name: "fling from mid-Experience to Projects' top, width 1440 → 1400", vp: "1440x900", to: [1400, 900], where: "projTop" },
+    { name: "390 × 844: fling from Experience into mid-Education, rotate to 844 × 390", vp: "390x844m", to: [844, 390], where: "eduMid" },
+  ];
+  for (const k of flings) {
+    const { ctx, page } = await openPage(parseVp(k.vp), theme);
+    await scrollTo(page, await yForBeat(page, "experience", k.vp === "1440x900" ? 2 : 1)); await settled(page); await sleep(400);
+    const target = await page.evaluate((where) => {
+      const r = document.getElementById("education").getBoundingClientRect();
+      return where === "eduMid" ? r.top + scrollY + r.height * 0.55 - innerHeight / 2 : document.getElementById("projects").getBoundingClientRect().top + scrollY - 100;
+    }, k.where);
+    // 140 px every 16 ms, then the resize at once
+    const fling = await page.evaluate((t) => new Promise((res) => {
+      const y0 = scrollY, t0 = performance.now();
+      const id = setInterval(() => {
+        const y = Math.min(t, scrollY + 140);
+        window.scrollTo({ top: y, behavior: "instant" });
+        if (y >= t) { clearInterval(id); res({ pxPerS: Math.round(((y - y0) / (performance.now() - t0)) * 1000), held: window.__chapters.list.some((c) => c.held || c.pending) }); }
+      }, 16);
+    }), target);
+    const before = await markCentre(page);
+    const lineOf = () => page.evaluate(() => Math.round(0.62 * document.documentElement.clientHeight));
+    const lineA = await lineOf();
+    const t0 = Date.now();
+    await page.setViewportSize({ width: k.to[0], height: k.to[1] });
+    const resizeMs = Date.now() - t0;
+    await sleep(900); await settled(page);
+    const t = await anchorTop(page);
+    // a kept row inside a flow chapter follows the reading line, so the line's own shift is allowed on top of ± 40
+    const allowed = 40 + Math.abs((await lineOf()) - lineA);
+    const good = fling.pxPerS >= 5000 && before && t !== null && Math.abs(t - before.top) <= allowed;
+    if (!good) ok = false;
+    const corr = await page.evaluate(() => window.__chapters.corrections.slice(-1));
+    rows.push({ case: k.name, fling, resizeMs, before, after: { top: t }, moved: t === null || !before ? null : Math.round(t - before.top), allowed, good, lastCorrection: corr.map((c) => ({ place: c.place.kind === "chapter" ? `${c.place.id}:${c.place.beat}` : c.place.kind, y: c.y === null ? null : Math.round(c.y), from: Math.round(c.from) })) });
     await ctx.close();
   }
   return report("resizeMidScroll", vp.spec, theme, ok, { rows });
