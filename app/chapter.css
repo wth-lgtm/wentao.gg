@@ -496,6 +496,16 @@
   @media (max-width: 1023.98px) {
     .chapter[data-mode="flow"] .ch-readout { display: none; }
   }
+  /* FIRST PAINT of a chapter that will flow (motion on, no data-mode yet): no readout either, so the first paint is
+     the flow layout and hydration moves nothing. Under 1024 px the static readout ("2026–2020", 56 px and its 16 px
+     margin) sat in the column above the list until the director wrote flow and hid it: every flow chapter shrank by
+     ≈ 57 px on its first evaluation and everything below moved (0.137 CLS on a phone's hard load of /#education).
+     A chapter out of the pin set always flows; a pin-set chapter flows wherever PIN_QUERY fails. The static
+     readout is left to JS off, reduced motion and forced colours, where the director also chooses static. */
+  html[data-site-motion="on"] .chapter:not([data-mode]):not([data-pin-default]) .ch-readout { display: none; }
+  @media not screen and (prefers-reduced-motion: no-preference) and (forced-colors: none) and (min-width: 700px) and (min-height: 720px) {
+    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-readout { display: none; }
+  }
 
   /* ---------------------------------------------------------------------------------------------------------
      Pinned (after hydration). The first-paint twin of every rule here is in the @media PIN_QUERY block below. */

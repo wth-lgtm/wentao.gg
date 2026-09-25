@@ -53,7 +53,8 @@
 //   textSpacing             WCAG 1.4.12 CSS and a 24 px root at every size: layoutSane (title glyphs included) holds
 //   touchTargets            every row link by elementFromPoint: its centre hits it, vertical reach ≥ 24 px
 //   printNeutral            print emulation changes no mode or mark, prints the marks neutral; the round trip moves nothing
-//   dialNoShift             a hard load of /#experience: no layout shift from the dial
+//   hashLoadCls             hard loads of /#experience, /#education, /#projects: non-input CLS ≤ 0.01 each, no dial shift
+//                           (every phone and tablet, three desktops; the first theme)
 //   framesMidChapter        CDP frames produced per second mid-chapter at rest (recorded)
 //   flowFillZeroJs          a flow scroll writes nothing to the rail; the fill's tip rides the reading line
 //   lcpInHero / contexts    the LCP element stays in the hero (never a chapter); WebGL contexts ≤ 3 desktop / 1 phone
@@ -145,7 +146,7 @@ async function openPage(vp, theme, { hash = "", reduce = REDUCE, extra = "" } = 
       if (c && /webgl/.test(String(type)) && !seen.has(this)) { seen.add(this); G.contexts++; }
       return c;
     };
-    // layout shifts, for `dialNoShift`
+    // layout shifts, for `hashLoadCls`
     window.__shifts = [];
     try {
       new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__shifts.push({ t: Math.round(e.startTime), v: e.value, input: e.hadRecentInput, dial: e.sources.some((x) => x.node && x.node.nodeType === 1 && !!x.node.closest?.(".ch-dial")) }); }).observe({ type: "layout-shift", buffered: true });
@@ -1345,16 +1346,25 @@ async function printNeutral(vp, theme) {
   return report("printNeutral", vp.spec, theme, ok, { rows });
 }
 
-/** a hard load of /#experience: the display title never shifts (it waits unseen for its corridor) */
-async function dialNoShift(vp, theme) {
-  if (REDUCE || vp.mobile) return;
-  const { ctx, page } = await openPage(vp, theme, { hash: "#experience" });
-  await sleep(2500);
-  const r = await page.evaluate(() => ({ shifts: window.__shifts, dialTop: getComputedStyle(document.getElementById("experience")).getPropertyValue("--ch-dial-top").trim() }));
-  await ctx.close();
-  const dial = r.shifts.filter((x) => x.dial && !x.input);
-  const cls = r.shifts.filter((x) => !x.input).reduce((n, x) => n + x.v, 0);
-  return report("dialNoShift", vp.spec, theme, dial.length === 0, { dialShifts: dial.length, dialShiftValue: +dial.reduce((n, x) => n + x.v, 0).toFixed(4), totalCls: +cls.toFixed(4), dialTop: r.dialTop || null });
+/** a hard load of /#experience, /#education and /#projects: the first paint is the hydrated layout — total
+ *  non-input CLS ≤ 0.01 on each load, and on desktop the display title never shifts (it waits unseen for its
+ *  corridor). Every phone and tablet size, and three desktops: geometry, not colour, so the first theme only. */
+async function hashLoadCls(vp, theme) {
+  if (REDUCE) return;
+  const loads = {};
+  let ok = true;
+  for (const hash of ["#experience", "#education", "#projects"]) {
+    const { ctx, page } = await openPage(vp, theme, { hash });
+    await sleep(2500);
+    const r = await page.evaluate(() => ({ shifts: window.__shifts, dialTop: getComputedStyle(document.getElementById("experience")).getPropertyValue("--ch-dial-top").trim(), modes: window.__chapters.list.map((c) => `${c.id}:${c.mode}`).join(" ") }));
+    await ctx.close();
+    const live = r.shifts.filter((x) => !x.input);
+    const cls = live.reduce((n, x) => n + x.v, 0);
+    const dial = live.filter((x) => x.dial);
+    if (cls > 0.01 || dial.length) ok = false;
+    loads[hash] = { cls: +cls.toFixed(4), entries: live.length, worst: live.length ? { t: live.reduce((a, b) => (b.v > a.v ? b : a)).t, v: +Math.max(...live.map((x) => x.v)).toFixed(4) } : null, dialShifts: dial.length, dialTop: r.dialTop || null, modes: r.modes };
+  }
+  return report("hashLoadCls", vp.spec, theme, ok, { budget: 0.01, loads });
 }
 
 /** frames produced per second mid-chapter at rest (a CDP trace: DrawFrame / BeginMainThreadFrame over 8 s); the
@@ -1508,7 +1518,7 @@ for (const spec of VIEWPORTS) {
       await guard("keepPlaceHeightOnly", () => keepPlaceHeightOnly(vp, theme));
       await guard("resizeMidScroll", () => resizeMidScroll(vp, theme));
       await guard("printNeutral", () => printNeutral(vp, theme));
-      if (spec === "1440x900" || spec === "1280x720" || spec === "1920x1080") await guard("dialNoShift", () => dialNoShift(vp, theme));
+      if (theme === THEMES[0] && (vp.mobile || spec === "1440x900" || spec === "1280x720" || spec === "1920x1080")) await guard("hashLoadCls", () => hashLoadCls(vp, theme));
       if (spec === "1440x900") await guard("framesMidChapter", () => framesMidChapter(vp, theme));
       if (core) await guard("lcpInHero", () => lcpInHero(vp, theme));
       if (core) await guard("contexts", () => contexts(vp, theme));
