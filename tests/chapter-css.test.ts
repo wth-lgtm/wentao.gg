@@ -51,7 +51,17 @@ test("display titles are capped by their column (cqi) and may wrap rather than o
   const t = rule("  .ch-title-text");
   assert.match(t, /font-size: min\(clamp\(2\.5rem, min\(9vw, 11svh\), 4\.5rem\), 19cqi\)/);
   assert.match(t, /overflow-wrap: anywhere/);
-  assert.equal((css.match(/19cqi\)/g) ?? []).length, 5, "the flow title, the pinned and narrow-pinned titles and their two first-paint twins");
+});
+
+test("one title scale per window: the title's size keys on the window alone, never on a chapter's mode", () => {
+  // Experience (pinned) and Education (flow) sit side by side on every desktop and tablet; a mode-keyed size gave
+  // the lesser chapter the bigger title. Every rule that sizes the title is a bare .ch-title-text rule.
+  const sizing = [...css.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{[^{}]*font-size:[^{}]*\}/g)].map((m) => m[1].trim()).filter((sel) => sel.includes("ch-title-text"));
+  assert.ok(sizing.length >= 3, "the < 700, 700–1023 and ≥ 1024 sizes");
+  for (const sel of sizing) assert.equal(sel, ".ch-title-text", `a title size keyed on more than the window: ${sel}`);
+  // the 700–1023 size meets the ≥ 1024 size at the boundary: 5vw of 1023 px and 4.4vw of 1024 px both clamp to 3rem
+  assert.ok(css.includes("font-size: min(clamp(2.25rem, 5vw, 3rem), 19cqi);"));
+  assert.ok(css.includes("font-size: min(clamp(3rem, min(4.4vw, 8svh), 4rem), 19cqi);"));
 });
 
 test("the entries' <ol> keeps list semantics in WebKit (role=\"list\")", () => {
