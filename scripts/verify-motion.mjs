@@ -69,12 +69,16 @@ const MATRIX = [
 ];
 // the heavier checks run where the brief's screenshots and budgets are taken; the rest run everywhere
 const CORE = new Set(["1440x900", "390x844m"]);
+// beyond the owner's matrix: a desktop window too short to pin (both chapters flow in the site's own glass),
+// where contrastRows proves the FLOW panels over the live canvases as well as the pinned one
+const EXTRA = ["1440x700"];
+const CONTRAST = new Set([...CORE, ...EXTRA]);
 
 const args = Object.fromEntries(process.argv.slice(2).map((a) => { const [k, ...v] = a.replace(/^--/, "").split("="); return [k, v.length ? v.join("=") : true]; }));
 const URL_ = (args.url ?? "http://127.0.0.1:3301/").replace(/\/?$/, "/");
 const ANGLE_NAME = args.angle ?? "metal";
 const THEMES = String(args.themes ?? "dark,light").split(",");
-const VIEWPORTS = String(args.viewports ?? MATRIX.join(",")).split(",");
+const VIEWPORTS = String(args.viewports ?? [...MATRIX, ...EXTRA].join(",")).split(",");
 const REDUCE = !!args.reduce;
 const OUT = args.out ?? "/tmp/wentao-gg-research/pr1/verify-motion";
 const BASELINE = args.baseline ?? "/tmp/wentao-gg-research/baseline";
@@ -138,8 +142,11 @@ async function openPage(vp, theme, { hash = "", reduce = REDUCE, extra = "" } = 
   page.on("pageerror", (e) => errors.push(String(e).slice(0, 300)));
   page.on("console", (m) => { if (m.type() === "error" && !/_vercel|Failed to load resource|MIME type/.test(m.text())) errors.push(m.text().slice(0, 300)); });
   await page.goto(`${URL_}?chapterDebug=1&jacksDebug=1${extra}${hash}`, { waitUntil: "load" });
-  // tuning only (OC-T search): --panel-fill=NN overrides the pinned panel's glass fill to NN % of --card
+  // tuning only (OC-T search): --panel-fill=NN overrides the pinned panel's glass fill to NN % of --card;
+  // --inactive-legend sets the pinned panel's inactive lines in --legend (light theme only)
   if (args["panel-fill"]) await page.addStyleTag({ content: `.chapter[data-mode="pinned"] .ch-panel { --glass-tint: color-mix(in oklab, var(--card) ${args["panel-fill"]}%, transparent) !important; }` });
+  if (args["flow-fill"]) await page.addStyleTag({ content: `.chapter[data-mode="flow"] .ch-panel { --glass-tint: color-mix(in oklab, var(--card) ${args["flow-fill"]}%, transparent) !important; }` });
+  if (args["inactive-legend"]) await page.addStyleTag({ content: args["inactive-legend"] === "all" ? `.chapter .ch-sub:not([data-active]) { color: var(--legend) !important; }` : `.light .chapter[data-mode="pinned"] .ch-sub:not([data-active]) { color: var(--legend) !important; }` });
   await page.waitForFunction(() => window.__chapters && window.__chapters.ready && window.__chapters.evaluations > 0, null, { timeout: 30000, polling: 100 });
   await page.evaluate(() => document.fonts.ready);
   await sleep(300);
@@ -800,6 +807,7 @@ async function glassBlurIntact(page, vp, theme) {
 async function contrastRows(page, vp, theme) {
   const L = await list(page);
   const worst = { inactive: Infinity, active: Infinity, index: Infinity, activeIndex: Infinity, tintDL: Infinity, headTintDL: Infinity };
+  const byChapter = {};
   const fails = [];
   let rowsMeasured = 0;
   const parse = (s) => { const m = s.match(/[\d.]+/g).map(Number); return { r: m[0], g: m[1], b: m[2], a: m[3] ?? 1 }; };
@@ -851,6 +859,7 @@ async function contrastRows(page, vp, theme) {
         const need = box.kind === "active" ? 7 : 4.5;
         const key = box.kind === "active" ? "active" : box.kind === "index" ? (box.activeItem ? "activeIndex" : "index") : box.kind === "inactive" ? "inactive" : null;
         if (key) worst[key] = Math.min(worst[key], cr);
+        if (key === "inactive") { const k = `${c.id}:${c.mode}`; byChapter[k] = Math.min(byChapter[k] ?? Infinity, +cr.toFixed(2)); }
         if ((box.kind === "active" || box.kind === "inactive" || box.kind === "index") && cr < need) fails.push({ chapter: c.id, beat: b, kind: box.kind, text: box.text, contrast: +cr.toFixed(2) });
       }
       // the tints' visibility: the SAME box (the active line; the active head row's right end, clear of the logo
@@ -858,6 +867,14 @@ async function contrastRows(page, vp, theme) {
       // glyph streaks would be noise between two moments; the fluid and the jacks stay live)
       const boxes2 = await page.evaluate((cid) => {
         const s = document.getElementById(cid);
+        // one mark per entry (data-grain="entry"): the ONE tint, measured over the active entry right of the logo
+        // column and clear of the link icon; otherwise the active line's tint and the head row's right end
+        if (s.dataset.grain === "entry") {
+          const li = s.querySelector("li[data-item][data-active]");
+          if (!li) return { a: null, ha: null };
+          const r = li.getBoundingClientRect();
+          return { a: { x: r.left + 80, y: r.top + 6, w: Math.max(4, r.width - 130), h: Math.max(4, r.height - 12) }, ha: null };
+        }
         const a = s.querySelector("[data-sub][data-active]");
         const ha = s.querySelector("li[data-active] .ch-head");
         const box = (e) => { if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.left + 40, y: r.top + 2, w: Math.max(4, r.width - 80), h: Math.max(4, r.height - 4) }; };
@@ -869,7 +886,7 @@ async function contrastRows(page, vp, theme) {
       await frames(page, 2);
       const fOn = path.join(OUT, "_tint-on.png"), fOff = path.join(OUT, "_tint-off.png");
       await page.screenshot({ path: fOn });
-      await page.evaluate(() => { const st = document.createElement("style"); st.id = "vm-notint"; st.textContent = "[data-chapter] .ch-sub::before, [data-chapter] .ch-head::after { opacity: 0 !important; transition: none !important; }"; document.head.appendChild(st); });
+      await page.evaluate(() => { const st = document.createElement("style"); st.id = "vm-notint"; st.textContent = "[data-chapter] .ch-sub::before, [data-chapter] .ch-head::after, [data-chapter] .ch-item::before { opacity: 0 !important; transition: none !important; }"; document.head.appendChild(st); });
       await frames(page, 2);
       await page.screenshot({ path: fOff });
       await page.evaluate((w) => { document.getElementById("vm-notint")?.remove(); document.getElementById("vm-tx")?.remove(); const el = eval(w); if (el) el.style.visibility = ""; }, rainWrap);
@@ -885,7 +902,7 @@ async function contrastRows(page, vp, theme) {
   }
   const fmt = (v) => (Number.isFinite(v) ? +v.toFixed(2) : null);
   const ok = fails.length === 0 && (worst.tintDL === Infinity || worst.tintDL >= 3) && (worst.headTintDL === Infinity || worst.headTintDL >= 3);
-  return report("contrastRows", vp.spec, theme, ok, { rowsMeasured, worstInactive: fmt(worst.inactive), worstActiveLine: fmt(worst.active), worstIndex: fmt(worst.index), worstActiveIndex: fmt(worst.activeIndex), tintDeltaLstar: fmt(worst.tintDL), headTintDeltaLstar: fmt(worst.headTintDL), fails: fails.slice(0, 10) });
+  return report("contrastRows", vp.spec, theme, ok, { rowsMeasured, worstInactive: fmt(worst.inactive), worstActiveLine: fmt(worst.active), worstIndex: fmt(worst.index), worstActiveIndex: fmt(worst.activeIndex), worstInactiveByChapter: byChapter, tintDeltaLstar: fmt(worst.tintDL), headTintDeltaLstar: fmt(worst.headTintDL), fails: fails.slice(0, 10) });
 }
 
 async function accentBudget(page, vp, theme) {
@@ -1105,10 +1122,8 @@ for (const spec of VIEWPORTS) {
           if (want("focusFollows") || want("tabLeavesChapter")) await focusChecks(page, vp, theme);
           if (want("titleClearOfPacks")) await titleClearOfPacks(page, vp, theme);
         }
-        if (core) {
-          if (want("contrastRows")) await contrastRows(page, vp, theme);
-          if (want("glassBlurIntact")) await glassBlurIntact(page, vp, theme);
-        }
+        if (CONTRAST.has(spec) && want("contrastRows")) await contrastRows(page, vp, theme);
+        if (core && want("glassBlurIntact")) await glassBlurIntact(page, vp, theme);
       }
       if (errors.length) report("pageErrors", spec, theme, false, { errors });
     } catch (err) {

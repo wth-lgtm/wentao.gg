@@ -47,11 +47,13 @@
      viewport); never under muted text (muted over a 12 % tint is 4.56:1 dark, 4.23:1 light). */
   --chapter-tint: color-mix(in oklab, var(--accent) 12%, transparent);
   --chapter-tint-soft: color-mix(in oklab, var(--accent) 8%, transparent);
-  /* OC-T (the owner: "raise only as far as the pixel contrast check requires"): the PINNED chapter panel's glass
-     fill. Pinned, the panel holds still over the fluid's dye and the jacks, and at the site's 24 % the muted rows
-     measured 4.3:1; 55 % passed four runs of four (worst 4.58) and 60 % failed one of seven (4.28), so 65 % (four
-     of four, worst 4.65). The blur stays: it still reads as glass. */
-  --chapter-panel-tint: color-mix(in oklab, var(--card) 65%, transparent);
+  /* OC-T (the owner: "raise only as far as the pixel contrast check requires"): the chapter panels' glass fill,
+     pinned and flow (chapter.css). The inactive lines are --legend, not --muted, so the check needs far less fill
+     than it did (65 % pinned with muted lines): with legend lines the pinned panel passes at the site's own 24 %,
+     but a flow panel on a short desktop window (1440 × 700, the index column over the fluid's dye) failed its
+     numerals in three runs of five at 24 % and a line at 4.42 at 32 %; at 40 % sixteen runs of sixteen passed
+     across both (worst line 4.73, numeral 4.90). The blur stays: it reads as glass. */
+  --chapter-panel-tint: color-mix(in oklab, var(--card) 40%, transparent);
 
   /* Split-flap board (dark) — opaque plastic flaps so the animated bg doesn't bleed. */
   --flap-bg: #202024;
@@ -104,9 +106,10 @@
   /* The reading chapters' marks (light): a touch less accent over the light glass. */
   --chapter-tint: color-mix(in oklab, var(--accent) 10%, transparent);
   --chapter-tint-soft: color-mix(in oklab, var(--accent) 7%, transparent);
-  /* OC-T, light: the muted rows need 90 % over dark dye (70 % failed one run of four at 3.85:1, 80 % two of four;
-     90 % passed four of four, worst 4.55). The light theme's own phone glass is already 92 %. */
-  --chapter-panel-tint: color-mix(in oklab, var(--card) 90%, transparent);
+  /* OC-T, light: NO raise. With muted lines the pinned panel needed 90 % (70–80 % failed one or two runs of four);
+     with --legend lines the site's own 40 % passes, pinned and flow, sixteen runs of sixteen (worst line 5.82,
+     numeral 4.67), so the light panels keep the site's liquid glass. */
+  --chapter-panel-tint: var(--glass-tint);
 
   /* Split-flap board (light). */
   --flap-bg: #e7e7ea;

@@ -11,7 +11,7 @@
    data-mode exists); every later decision keys on [data-mode] alone, so the director always reads the old
    layout before it flips.
 
-   Marks are ADDITIVE ONLY: nothing dims, inactive rows keep their full tokens at opacity 1, and muted text
+   Marks are ADDITIVE ONLY: nothing dims, inactive rows keep their full tokens at opacity 1, and secondary text
    never sits on a tint. Accent-derived colour appears only inside the active entry (its bar and its tint; in
    a two-beat chapter its head tint, its line's tint and tick): the accent is spent once per viewport. Only transform and opacity animate
    (ESCAPEMENT: no animated background-color or box-shadow, no filter, no backdrop-filter on rows), and
@@ -146,6 +146,11 @@
     overflow: clip;
     padding: 20px 18px 20px 16px;
   }
+  /* OC-T: the chapter panels' glass fill (--chapter-panel-tint, globals.css: dark 40 %, light the site's own 40 %),
+     pinned and flow, and before hydration wherever motion is on; the static still keeps the site's glass. The blur
+     stays. (≤ 768 px the site's near-opaque phone glass sets its own background and wins.) */
+  html[data-site-motion="on"] .chapter:not([data-mode]) .ch-panel,
+  .chapter:is([data-mode="pinned"], [data-mode="flow"]) .ch-panel { --glass-tint: var(--chapter-panel-tint); }
   @media (min-width: 640px) {
     .ch-panel { padding: clamp(24px, 1.25vw, 32px); } /* 24 px up to a 1920 px window, 32 px at 2560 */
   }
@@ -310,13 +315,16 @@
   .ch-name .ch-text-link::after { inset: -11px -4px; z-index: 1; }
   .ch-text-link:hover { color: var(--accent); }
 
-  /* the entry's line(s): dates · location, the stack, a degree */
+  /* the entry's line(s): dates · location, the stack, a degree. In --legend, the site's measured token for small
+     secondary text, not --muted: over the live canvases (the fluid's dye under the glass) muted lines measured
+     3.4:1 dark and 3.8:1 light in a flow panel, and needed a 90 % light fill pinned; legend lines pass on the
+     site's own glass (OC-T, globals.css). Still additive: the active line flips to --foreground on its tint. */
   .ch-sub {
     position: relative;
     isolation: isolate;
     margin-top: 6px;
     padding-left: 16px;
-    color: var(--muted);
+    color: var(--legend);
   }
   .ch-tick {
     position: absolute;
@@ -499,8 +507,7 @@
     grid-template-rows: auto minmax(0, 1fr);
     row-gap: 16px;
   }
-  /* OC-T: the pinned panel's chapter-local glass fill (--chapter-panel-tint, globals.css); the blur stays */
-  .chapter[data-mode="pinned"] .ch-panel { align-self: center; --glass-tint: var(--chapter-panel-tint); }
+  .chapter[data-mode="pinned"] .ch-panel { align-self: center; }
   .chapter[data-mode="pinned"] .ch-title-text {
     font-size: clamp(3rem, 4.4vw, 4rem);
     font-size: min(clamp(3rem, min(4.4vw, 8svh), 4rem), 19cqi);
@@ -554,7 +561,7 @@
       grid-template-rows: auto minmax(0, 1fr);
       row-gap: 16px;
     }
-    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-panel { align-self: center; --glass-tint: var(--chapter-panel-tint); }
+    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-panel { align-self: center; }
     html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-title-text {
       font-size: clamp(3rem, 4.4vw, 4rem);
       font-size: min(clamp(3rem, min(4.4vw, 8svh), 4rem), 19cqi);
@@ -592,7 +599,7 @@
     .chapter .ch-rail-track { background: var(--border) !important; }
     .chapter .ch-head::before, .chapter .ch-head::after, .chapter .ch-sub::before,
     .chapter .ch-item::before, .chapter .ch-item::after { display: none !important; }
-    .chapter .ch-sub { color: var(--muted) !important; }
+    .chapter .ch-sub { color: var(--legend) !important; }
     .chapter .ch-index { color: var(--legend) !important; }
     .chapter .ch-link { color: var(--muted) !important; }
     .chapter .ch-tick { background: var(--border) !important; }
