@@ -77,6 +77,10 @@
     /* --legend, as the in-panel numerals: the folio stays in the pinned or sticky dial for the whole chapter, and
        the muted 12 px numeral measured 4.17–4.42:1 over the light theme's rain and jacks */
     color: var(--legend);
+    /* and the title's own halo (heading-legible, scaled to 12 px): the folio sits on the live canvases with no panel,
+       and in one run in five a jack's highlight or the fluid's dye behind it measured 3.2–4.3:1 (820 × 1180 dark,
+       1024 × 768 light, 1100 × 800 dark) */
+    text-shadow: 0 0 3px var(--background), 0 0 8px var(--background);
   }
   .ch-folio-rule {
     display: block;
@@ -696,7 +700,7 @@
       -webkit-backdrop-filter: none !important;
               backdrop-filter: none !important;
     }
-    .chapter .ch-title { text-shadow: none !important; }
+    .chapter .ch-title, .chapter .ch-folio { text-shadow: none !important; }
     .chapter .ch-item { break-inside: avoid; } /* an entry never splits across pages (UPenn's date line did) */
     .chapter .ch-readout { display: block !important; } /* the static still's range, in every mode */
     .chapter[data-mode] { height: auto !important; padding: 48px 24px !important; }

@@ -1007,7 +1007,8 @@ async function contrastRows(page, vp, theme, run = 1) {
         }
         return out;
       }, c.id);
-      await page.evaluate(() => { const s = document.createElement("style"); s.id = "vm-tx"; s.textContent = "[data-chapter] .ch-panel *, [data-chapter] .ch-folio * { color: transparent !important; -webkit-text-fill-color: transparent !important; text-shadow: none !important; text-decoration-color: transparent !important; } [data-chapter] .ch-panel img { opacity: 0 !important; }"; document.head.appendChild(s); });
+      // the text transparent, its halo KEPT (the folio's: a halo is part of the ground its glyphs are read on)
+      await page.evaluate(() => { const s = document.createElement("style"); s.id = "vm-tx"; s.textContent = "[data-chapter] .ch-panel *, [data-chapter] .ch-folio * { color: transparent !important; -webkit-text-fill-color: transparent !important; text-decoration-color: transparent !important; } [data-chapter] .ch-panel img { opacity: 0 !important; }"; document.head.appendChild(s); });
       await frames(page, 2);
       const f = path.join(OUT, `_contrast.png`);
       await page.screenshot({ path: f });
