@@ -260,8 +260,12 @@ class ChapterRuntime {
     } else if (this.mode === "flow") {
       const listTop = (g.beatTops[0] ?? g.pageTop) - s.y;
       const listBottom = g.listBottom - s.y;
-      this.engaged = line >= listTop && line <= listBottom;
-      this.side = line < listTop ? -1 : 1;
+      // engaged from the moment the first row crosses the reading line until the list's bottom leaves for the upper
+      // third — the pinned stage's release rule. A short list resting wholly above the line (Education at the top
+      // of the screen after INDEX → Education or a hard load of /#education) keeps its last crossed row marked,
+      // which is what the CSS rail shows read: a full rail always has its last row marked and its dots seated.
+      this.engaged = listTop <= line && listBottom > vh / 3;
+      this.side = listTop > line ? -1 : 1;
       if (this.engaged) {
         this.lineTarget = readingLineActive(g.beatTops.map((t) => t - s.y), line, this.lineTarget);
         target = this.lineTarget;

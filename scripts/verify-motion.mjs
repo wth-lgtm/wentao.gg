@@ -30,7 +30,8 @@
 //   findReachesEveryItem    window.find reaches every entry's name and dates line, painted inside its panel
 //   findHitsOnlyVisibleText "2024", "2022", "2021", "2017": the first hit is list text, never the wheel
 //   focusFollows / tabLeavesChapter   pinned and flow: Tab through the links, the lit entry is the focused one; Tab leaves
-//   anchorsAtPin0           a hard load of /#experience lands at the section top, pin 0, the first entry marked
+//   anchorsAtPin0           a hard load of /#experience lands at the section top, pin 0, the first entry marked;
+//                           a flow chapter (/#education) lands at its top with a mark, the CSS rail agreeing with the dots
 //   keepPlaceOnResize       1440×900 → 1440×700 → back, mid-Experience, mid-Education and below: ± 40 px
 //   liveReduceToggle        emulateMedia reduce mid-Education: static, the shown row stays on the reading line
 //   hashLoadFailsBand       a hard load of /#education where Experience fails bandFits lands on Education
@@ -613,9 +614,25 @@ async function anchorsAtPin0(vp, theme) {
     const sy = await page.evaluate(() => scrollY);
     const atTop = Math.abs(sy - Math.min(g.top, (await page.evaluate(() => document.documentElement.scrollHeight - innerHeight)))) <= 2;
     const pin0 = c.mode !== "pinned" || c.pin === 0;
-    const marked = c.mode !== "pinned" || c.shown === 0;
-    if (!atTop || !pin0 || !marked) ok = false;
-    out[id] = { mode: c.mode, scrollY: Math.round(sy), sectionTop: Math.round(g.top), pin: c.pin, shown: c.shown };
+    // pinned: item 0 marked at pin 0. Flow (the variant): a mark shows, and the CSS rail agrees with the dots — every
+    // seated dot sits on the filled rail (above the reading line) and every unseated one on the unfilled rail
+    let rail = null;
+    if (c.mode === "flow") {
+      rail = await page.evaluate((cid) => {
+        const s = document.getElementById(cid);
+        const line = 0.62 * document.documentElement.clientHeight;
+        const fg = getComputedStyle(s.querySelector(".ch-rail-track")).backgroundColor;
+        return [...s.querySelectorAll(".ch-dot")].map((d, i) => {
+          const r = d.getBoundingClientRect();
+          const seated = getComputedStyle(d).backgroundColor === fg && Math.abs(r.width - 10) < 0.6;
+          return { i, seated, filled: r.top + r.height / 2 <= line };
+        });
+      }, id);
+    }
+    const railAgrees = rail === null || rail.every((d) => d.seated === d.filled);
+    const marked = c.mode === "pinned" ? c.shown === 0 : c.mode === "flow" ? c.shown >= 0 : true;
+    if (!atTop || !pin0 || !marked || !railAgrees) ok = false;
+    out[id] = { mode: c.mode, scrollY: Math.round(sy), sectionTop: Math.round(g.top), pin: c.pin, shown: c.shown, ...(rail ? { dots: rail.map((d) => `${d.i}:${d.seated ? "seated" : "grey"}/${d.filled ? "filled" : "unfilled"}`).join(" "), railAgrees } : {}) };
     await ctx.close();
   }
   return report("anchorsAtPin0", vp.spec, theme, ok, out);
@@ -1480,7 +1497,7 @@ for (const spec of VIEWPORTS) {
     }
     await ctx.close();
     if (!REDUCE) {
-      if (want("anchorsAtPin0") && (CORE.has(spec) || spec === "1280x720")) await anchorsAtPin0(vp, theme).catch((e) => report("harnessError", spec, theme, false, { check: "anchorsAtPin0", error: String(e).slice(0, 300) }));
+      if (want("anchorsAtPin0") && (CORE.has(spec) || spec === "1280x720" || spec === "1920x1080" || spec === "2560x1440")) await anchorsAtPin0(vp, theme).catch((e) => report("harnessError", spec, theme, false, { check: "anchorsAtPin0", error: String(e).slice(0, 300) }));
       if (want("keepPlaceOnResize")) await keepPlaceOnResize(vp, theme).catch((e) => report("harnessError", spec, theme, false, { check: "keepPlaceOnResize", error: String(e).slice(0, 300) }));
       if (want("liveReduceToggle")) await liveReduceToggle(vp, theme).catch((e) => report("harnessError", spec, theme, false, { check: "liveReduceToggle", error: String(e).slice(0, 300) }));
       if (want("liveResizes")) await liveResizes(vp, theme).catch((e) => report("harnessError", spec, theme, false, { check: "liveResizes", error: String(e).slice(0, 300) }));
