@@ -32,7 +32,9 @@
 //   findHitsOnlyVisibleText "2024", "2022", "2021", "2017": the first hit is list text, never the wheel
 //   focusFollows / tabLeavesChapter   pinned and flow: Tab through the links, the lit entry is the focused one; Tab leaves
 //   anchorsAtPin0           a hard load of /#experience lands at the section top, pin 0, the first entry marked;
-//                           a flow chapter (/#education) lands at its top with a mark, the CSS rail agreeing with the dots
+//                           a flow chapter (/#education) lands at its top with ITS first entry marked (the travelling
+//                           line), the painted CSS rail agreeing with the dots
+//   indexLandsItem0         the real INDEX menu → Experience / Education, every matrix size: item 0 marked, the rail agreeing
 //   keepPlaceOnResize       1440×900 → 1440×700 → back, mid-Experience, mid-Education and below: ± 40 px; Education's
 //                           last row marked above the band (its list's bottom at 110–200 px), resized or rotated
 //   markedAfterFlip         the MARKED entry after every flip is the one before: resizes across the pin gate (and 150 /
@@ -70,7 +72,7 @@
 //   hashLoadCls             hard loads of /#experience, /#education, /#projects: non-input CLS ≤ 0.01 each, no dial shift
 //                           (every phone and tablet, three desktops; the first theme)
 //   framesMidChapter        CDP frames produced per second mid-chapter at rest (recorded)
-//   flowFillZeroJs          a flow scroll writes nothing to the rail; the fill's tip rides the reading line
+//   flowFillZeroJs          a flow scroll writes nothing to the rail; the fill's tip rides the travelling line
 //   lcpInHero / contexts    the LCP element stays in the hero (never a chapter); WebGL contexts ≤ 3 desktop / 1 phone
 // contrastRows also runs at EXTRA's desktop windows: 1440x700 (both chapters flow), 820x1180 / 1000x800 (the
 // one-column pinned stage over the jack field, fine pointer) and 1024x768 / 1100x800 (two columns, the 14-pack
@@ -161,6 +163,16 @@ async function openPage(vp, theme, { hash = "", reduce = REDUCE, extra = "", pla
     const orig = window.requestAnimationFrame.bind(window);
     window.requestAnimationFrame = (cb) => { R.calls++; return orig((ts) => { R.exec++; return cb(ts); }); };
     window.__vm = { log: [] };
+    // THE TRAVELLING LINE (chapterList.flowLine, FLOW_DIP_PX 40), restated for the checks: a flow list's reading line
+    // at scroll y for the section at page y `top` whose first row is at page y `first`
+    window.__vmBend = (u, o0, line) => { const d = line - (o0 + 40); const k = Math.abs(d) - Math.abs(u); return k > 0 ? line - Math.sign(d) * k : line; };
+    window.__vmLineOf = (cid) => {
+      const s = document.getElementById(cid);
+      const line = Math.round(0.62 * document.documentElement.clientHeight);
+      if (!s || s.dataset.mode === "pinned") return line;
+      const top = s.getBoundingClientRect().top + scrollY, first = s.querySelector("li[data-item]").getBoundingClientRect().top + scrollY;
+      return window.__vmBend(scrollY - top, first - top, line);
+    };
     // WebGL contexts created (one per canvas), for `contexts`
     const G = (window.__gl = { contexts: 0 });
     const seen = new WeakSet();
@@ -212,6 +224,8 @@ async function openPage(vp, theme, { hash = "", reduce = REDUCE, extra = "", pla
   if (args["inactive-legend"]) await page.addStyleTag({ content: args["inactive-legend"] === "all" ? `.chapter .ch-sub:not([data-active]) { color: var(--legend) !important; }` : `.light .chapter[data-mode="pinned"] .ch-sub:not([data-active]) { color: var(--legend) !important; }` });
   await page.waitForFunction(() => window.__chapters && window.__chapters.ready && window.__chapters.evaluations > 0, null, { timeout: 30000, polling: 100 });
   await page.evaluate(() => document.fonts.ready);
+  const dip = await page.evaluate(() => window.__chapters.flowDipPx);
+  if (dip !== DIP) throw new Error(`the harness restates FLOW_DIP_PX as ${DIP}, the build has ${dip}`);
   await sleep(300);
   return { ctx, page, errors };
 }
@@ -241,7 +255,8 @@ function geoOf(page, id) {
   }, id);
 }
 
-/** the scroll that puts beat k in charge: pinned → the middle of its slot; flow → its row just past the reading line */
+/** the scroll that puts beat k in charge: pinned → the middle of its slot; flow → its row 12 px past the list's
+ *  travelling line (the least such scroll: near the section's top the line is bent toward the first row) */
 async function yForBeat(page, id, beat) {
   const c = await chapter(page, id);
   const g = await geoOf(page, id);
@@ -251,7 +266,22 @@ async function yForBeat(page, id, beat) {
     return g.top + pin * (g.height - g.stageH);
   }
   const line = Math.round(0.62 * g.clientH);
-  return c.beatTops[beat] - line + 12;
+  return c.pageTop + bendFirst(c.beatTops[beat] - c.pageTop + 12, c.beatTops[0] - c.pageTop, line);
+}
+
+/** THE TRAVELLING LINE in node (chapterList.flowLine / flowScrollFor, FLOW_DIP_PX 40; openPage checks the build's
+ *  value): the least scroll u (the section's top above the viewport's) whose bent line reaches `t` px below the
+ *  section's top */
+const DIP = 40;
+const bendLine = (u, o0, line) => { const d = line - (o0 + DIP); const k = Math.abs(d) - Math.abs(u); return k > 0 ? line - Math.sign(d) * k : line; };
+function bendFirst(t, o0, line) {
+  const dip = o0 + DIP, d = line - dip, a = Math.abs(d);
+  if (a === 0) return t - line;
+  const r0 = -a + bendLine(-a, o0, line), r2 = a + bendLine(a, o0, line);
+  if (t <= r0) return t - line;
+  if (t <= dip) return d < 0 ? -a + (t - r0) / 2 : 0;
+  if (t <= r2) return d > 0 ? (t - dip) / 2 : a;
+  return t - line;
 }
 
 const shotPath = (name) => path.join(OUT, `${name}.png`);
@@ -408,7 +438,7 @@ async function activeItemMonotone(page, vp, theme) {
   for (const c of L) {
     const g = await geoOf(page, c.id);
     const from = c.mode === "pinned" ? g.top - 20 : c.beatTops[0] - Math.round(0.62 * g.clientH) - 40;
-    const to = c.mode === "pinned" ? g.top + g.height - g.stageH + 10 : c.beatTops[c.beatTops.length - 1] - Math.round(0.62 * g.clientH) + 60;
+    const to = c.mode === "pinned" ? g.top + g.height - g.stageH + 10 : (await yForBeat(page, c.id, c.beatTops.length - 1)) + 48;
     const seq = [];
     for (let y = from; y <= to; y += 30) {
       await scrollTo(page, y);
@@ -669,28 +699,60 @@ async function anchorsAtPin0(vp, theme) {
     const sy = await page.evaluate(() => scrollY);
     const atTop = Math.abs(sy - Math.min(g.top, (await page.evaluate(() => document.documentElement.scrollHeight - innerHeight)))) <= 2;
     const pin0 = c.mode !== "pinned" || c.pin === 0;
-    // pinned: item 0 marked at pin 0. Flow (the variant): a mark shows, and the CSS rail agrees with the dots — every
-    // seated dot sits on the filled rail (above the reading line) and every unseated one on the unfilled rail
-    let rail = null;
-    if (c.mode === "flow") {
-      rail = await page.evaluate((cid) => {
-        const s = document.getElementById(cid);
-        const line = 0.62 * document.documentElement.clientHeight;
-        const fg = getComputedStyle(s.querySelector(".ch-rail-track")).backgroundColor;
-        return [...s.querySelectorAll(".ch-dot")].map((d, i) => {
-          const r = d.getBoundingClientRect();
-          const seated = getComputedStyle(d).backgroundColor === fg && Math.abs(r.width - 10) < 0.6;
-          return { i, seated, filled: r.top + r.height / 2 <= line };
-        });
-      }, id);
-    }
+    // item 0 marked, pinned (at pin 0) and flow alike (§4.2.11: the flow list's line bends to its first row at its
+    // section's top). Flow: the CSS rail agrees with the dots — every seated dot sits on the PAINTED fill (above the
+    // cover's top, which rides the travelling line) and every unseated one on the unfilled rail
+    const rail = c.mode === "flow" ? await railVsDots(page, id) : null;
     const railAgrees = rail === null || rail.every((d) => d.seated === d.filled);
-    const marked = c.mode === "pinned" ? c.shown === 0 : c.mode === "flow" ? c.shown >= 0 : true;
+    const marked = c.mode === "pinned" || c.mode === "flow" ? c.shown === 0 : true;
     if (!atTop || !pin0 || !marked || !railAgrees) ok = false;
     out[id] = { mode: c.mode, scrollY: Math.round(sy), sectionTop: Math.round(g.top), pin: c.pin, shown: c.shown, ...(rail ? { dots: rail.map((d) => `${d.i}:${d.seated ? "seated" : "grey"}/${d.filled ? "filled" : "unfilled"}`).join(" "), railAgrees } : {}) };
     await ctx.close();
   }
   return report("anchorsAtPin0", vp.spec, theme, ok, out);
+}
+
+/** the flow rail against its dots: each dot seated or grey, and on the painted fill (its centre above the cover's top) */
+function railVsDots(page, id) {
+  return page.evaluate((cid) => {
+    const s = document.getElementById(cid);
+    const fg = getComputedStyle(s.querySelector(".ch-rail-track")).backgroundColor;
+    const tip = s.querySelector(".ch-rail-cover").getBoundingClientRect().top;
+    return [...s.querySelectorAll(".ch-dot")].map((d, i) => {
+      const r = d.getBoundingClientRect();
+      const seated = getComputedStyle(d).backgroundColor === fg && Math.abs(r.width - 10) < 0.6;
+      return { i, seated, filled: r.top + r.height / 2 <= tip, tip: Math.round(tip), line: Math.round(window.__vmLineOf(cid)) };
+    });
+  }, id);
+}
+
+/** THE INDEX LANDING (§4.2.11): the real INDEX menu, tapped (a click on a desktop), then "Experience" or "Education":
+ *  the browser's own smooth fragment scroll lands the section's top, and item 0 is the entry marked — pinned at pin 0,
+ *  flow on its travelling line (a phone used to light Mashey, 04 of 05, with Mercor dark) — and a flow rail agrees
+ *  with its dots. Every size of the owner's matrix, the first theme (geometry, not colour). */
+async function indexLandsItem0(vp, theme) {
+  if (REDUCE) return;
+  const out = {};
+  let ok = true;
+  for (const [id, name] of [["experience", "Experience"], ["education", "Education"]]) {
+    const { ctx, page } = await openPage(vp, theme);
+    try {
+      const press = (loc) => (vp.mobile ? loc.tap() : loc.click());
+      await press(page.getByRole("button", { name: /index|menu/i }).first());
+      await sleep(700);
+      await press(page.getByRole("dialog").getByRole("link", { name: new RegExp(`^\\s*0\\d\\s*${name}`) }).first());
+      await sleep(2200);
+      await settled(page);
+      const c = await chapter(page, id);
+      const at = await page.evaluate((cid) => Math.round(scrollY - (document.getElementById(cid).getBoundingClientRect().top + scrollY)), id);
+      const rail = c.mode === "flow" ? await railVsDots(page, id) : null;
+      const railAgrees = rail === null || rail.every((d) => d.seated === d.filled);
+      const good = c.shown === 0 && Math.abs(at) <= 2 && railAgrees;
+      if (!good) ok = false;
+      out[id] = { mode: c.mode, sectionTopOffset: at, shown: c.shown, ...(rail ? { dots: rail.map((d) => `${d.i}:${d.seated ? "seated" : "grey"}/${d.filled ? "filled" : "unfilled"}`).join(" "), tip: rail[0]?.tip, line: rail[0]?.line, railAgrees } : {}), good };
+    } finally { await ctx.close(); }
+  }
+  return report("indexLandsItem0", vp.spec, theme, ok, out);
 }
 
 /** where the reader is: the shown row's viewport top (inside a chapter) or an element's viewport top */
@@ -699,7 +761,7 @@ async function readerPlace(page, id) {
     const s = document.getElementById(cid);
     const shown = window.__chapters.list.find((x) => x.id === cid).shown;
     const li = s.querySelectorAll("li[data-item]")[Math.max(0, shown)];
-    return { shown, rowTop: li.getBoundingClientRect().top, mode: s.dataset.mode, pin: window.__chapters.list.find((x) => x.id === cid).pin, vh: innerHeight, line: Math.round(0.62 * document.documentElement.clientHeight) };
+    return { shown, rowTop: li.getBoundingClientRect().top, mode: s.dataset.mode, pin: window.__chapters.list.find((x) => x.id === cid).pin, vh: innerHeight, line: Math.round(window.__vmLineOf(cid)) };
   }, id);
 }
 
@@ -720,7 +782,7 @@ async function keepPlaceOnResize(vp, theme) {
     await page.setViewportSize({ width: 1440, height: 900 });
     await sleep(500); await settled(page);
     const c = await readerPlace(page, id);
-    // at 700 px the chapter flows: the held entry sits on the reading line (± 40); back at 900 it is marked again
+    // at 700 px the chapter flows: the held entry sits on its travelling line (± 40); back at 900 it is marked again
     const heldAt700 = b.mode === "flow" ? Math.abs(b.rowTop - b.line) <= 40 && b.shown === beat : b.shown === beat;
     const back = c.shown === beat && (c.mode !== "pinned" || Math.abs(c.rowTop - a.rowTop) <= 40);
     if (!heldAt700 || !back) ok = false;
@@ -784,7 +846,7 @@ async function liveReduceToggle(vp, theme) {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await sleep(800);
   const L = await list(page);
-  const b = await page.evaluate(() => { const s = document.getElementById("education"); const li = s.querySelectorAll("li[data-item]")[1]; return { rowTop: li.getBoundingClientRect().top, line: Math.round(0.62 * document.documentElement.clientHeight) }; });
+  const b = await page.evaluate(() => { const s = document.getElementById("education"); const li = s.querySelectorAll("li[data-item]")[1]; return { rowTop: li.getBoundingClientRect().top, line: Math.round(window.__vmLineOf("education")) }; });
   const statics = L.every((c) => c.mode === "static");
   const marks = await activeCounts(page);
   const ok = statics && marks.items === 0 && Math.abs(b.rowTop - b.line) <= 40;
@@ -1410,12 +1472,12 @@ async function restAtTopPixels() {
 // ---------------------------------------------------------------------------------------------------------------
 // fix round 1: the checks the review asked for
 
-/** the live-line row: the last entry whose top has crossed 62 % of the client height now (and the one the 24 px
- *  hysteresis may still hold) */
+/** the live-line row: the last entry whose top has crossed the list's travelling line now (62 % of the client height,
+ *  bent near the section's top), and the one the 24 px hysteresis may still hold */
 function liveLineRows(page, id) {
   return page.evaluate((cid) => {
     const s = document.getElementById(cid);
-    const line = Math.round(0.62 * document.documentElement.clientHeight);
+    const line = Math.round(window.__vmLineOf(cid)); // the list's travelling line
     const tops = [...s.querySelectorAll("li[data-item]")].map((li) => li.getBoundingClientRect().top);
     let fwd = -1, back = -1;
     tops.forEach((t, k) => { if (t <= line) fwd = k; if (t <= line + 24) back = k; });
@@ -1751,19 +1813,19 @@ async function flowFillZeroJs(page, vp, theme) {
     window.__railMo = mo;
   }, c.id);
   const g = await geoOf(page, c.id);
-  let worst = 0, samples = 0;
+  let worst = 0, samples = 0, bent = 0;
   for (let y = g.top - g.vh; y <= g.top + g.height; y += 23) {
     await scrollTo(page, y); await frames(page, 1);
     const r = await page.evaluate((cid) => {
       const rail = document.querySelector(`#${cid} .ch-rail`).getBoundingClientRect();
       const cover = document.querySelector(`#${cid} .ch-rail-cover`).getBoundingClientRect();
-      const line = 0.62 * document.documentElement.clientHeight;
-      return { inSpan: line > rail.top + 1 && line < rail.bottom - 1, off: cover.top - line };
+      const line = window.__vmLineOf(cid); // the travelling line: the fill rides it through the bend too
+      return { inSpan: line > rail.top + 1 && line < rail.bottom - 1, off: cover.top - line, bent: Math.abs(line - 0.62 * document.documentElement.clientHeight) > 1 };
     }, c.id);
-    if (r.inSpan) { worst = Math.max(worst, Math.abs(r.off)); samples++; }
+    if (r.inSpan) { worst = Math.max(worst, Math.abs(r.off)); samples++; if (r.bent) bent++; }
   }
   const mut = await page.evaluate(() => { window.__railMo.disconnect(); return window.__railMut; });
-  return report("flowFillZeroJs", vp.spec, theme, mut === 0 && worst <= 2, { chapter: c.id, railMutations: mut, samplesOnLine: samples, worstTipOffLinePx: +worst.toFixed(2) });
+  return report("flowFillZeroJs", vp.spec, theme, mut === 0 && worst <= 2, { chapter: c.id, railMutations: mut, samplesOnLine: samples, samplesInBend: bent, worstTipOffLinePx: +worst.toFixed(2) });
 }
 
 /** the LCP element stays in the hero, never a chapter (a fresh load, no input). The brief's `lcpIsH1` assumed the
@@ -1870,6 +1932,7 @@ for (const spec of VIEWPORTS) {
       if (theme === THEMES[0] && (vp.mobile || spec === "1440x900" || spec === "1280x720" || spec === "1920x1080")) await guard("hashLoadCls", () => hashLoadCls(vp, theme));
       if (spec === "1440x900") await guard("framesMidChapter", () => framesMidChapter(vp, theme));
       if (theme === THEMES[0]) await guard("slowDirectorChunk", () => slowDirectorChunk(vp, theme));
+      if (theme === THEMES[0] && MATRIX.includes(spec)) await guard("indexLandsItem0", () => indexLandsItem0(vp, theme));
       if (core) await guard("lcpInHero", () => lcpInHero(vp, theme));
       if (core) await guard("contexts", () => contexts(vp, theme));
       // text spacing and a 24 px default font: geometry, not colour — once per size, in the first theme

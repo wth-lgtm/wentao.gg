@@ -182,6 +182,65 @@ export function readingLineActive(rowTops: readonly number[], line: number, prev
   return Math.max(fwd, Math.min(prev, back));
 }
 
+/** px: at a flow list's section-top landing its reading line stands this far below the list's first row's top —
+ *  past the row's dot (its centre sits 24–32 px below the row's top: the row's padding + 14), so the rail's fill
+ *  reaches the seated dot, and short of the next row (entries are ≥ 80 px apart) */
+export const FLOW_DIP_PX = 40;
+
+/**
+ * THE TRAVELLING READING LINE (flow). The 62 % line alone marked the LAST row above it, and a flow list's section-top
+ * landing (INDEX, a hash, the hero cue) shows several rows above it on a phone: Mashey (04 of 05) lit on arrival at
+ * 430 × 932 with Mercor, the current role, dark, and Education lit its second school at every size. The brief's
+ * anchor rule is the pinned dock's: land at the section top with item 0 marked (§4.2.11). So near its section's top
+ * a flow list's line BENDS to its first row. At u = 0 (the section's top at the viewport's top) it stands
+ * FLOW_DIP_PX below the first row's top, past its dot, so entry 01 is the last row across it. It meets the page's line again
+ * |D| px of scroll either side, linearly, where D = line − (o0 + FLOW_DIP_PX). Coming down the page, the first row
+ * still lights on the 62 % line and holds while its section docks to the top, as a pinned stage holds its first
+ * row through the lead. From the top the line travels back down at twice the scroll, and the rows light in turn;
+ * nothing is skipped. Pure and stateless, so every way of arriving at a scroll position gets the same marks. Where
+ * the first row sits below the line at the section top (a landscape phone), D < 0 and the line dips DOWN to it.
+ * The flow rail's CSS fill rides the same line (app/chapter.css, a scroll-driven `top` over the same range).
+ *
+ *   u     the section's top above the viewport's top: scrollY − the section's page top
+ *   o0    the list's first row's top below the section's top (px)
+ *   line  the page's reading line (viewport px)
+ */
+export function flowLine(u: number, o0: number, line: number): number {
+  const d = line - (o0 + FLOW_DIP_PX);
+  const k = Math.abs(d) - Math.abs(u);
+  return k > 0 ? line - Math.sign(d) * k : line;
+}
+
+/** How far down its section the travelling line reaches: u + flowLine (px from the section's top). Continuous and
+ *  non-decreasing in u, so a row `o` px below the section's top is across the line exactly while reach ≥ o. */
+export function flowReach(u: number, o0: number, line: number): number {
+  return u + flowLine(u, o0, line);
+}
+
+/**
+ * The inverse of flowReach: the least u whose reach is ≥ t (`"first"`), or the greatest u whose reach is ≤ t
+ * (`"last"`). The reach is piecewise linear (slope 1 outside the bend, 0 and 2 inside it), so this is exact.
+ * Keep-your-place and the keyboard focus scroll use it to land a row as the last one across the travelling line.
+ */
+export function flowScrollFor(t: number, o0: number, line: number, side: "first" | "last"): number {
+  const dip = o0 + FLOW_DIP_PX;
+  const d = line - dip;
+  const a = Math.abs(d);
+  if (a === 0) return t - line;
+  // the four pieces: (−∞, −a] slope 1; [−a, 0] flat when d > 0, slope 2 when d < 0; [0, a] the other; [a, ∞) slope 1
+  const r0 = flowReach(-a, o0, line), r2 = flowReach(a, o0, line);
+  if (side === "first") {
+    if (t <= r0) return t - line;
+    if (t <= dip) return d < 0 ? -a + (t - r0) / 2 : 0; // d > 0: the flat piece ends at 0 with reach dip ≥ t > r0 (never)
+    if (t <= r2) return d > 0 ? (t - dip) / 2 : a;
+    return t - line;
+  }
+  if (t >= r2) return t - line;
+  if (t >= dip) return d > 0 ? (t - dip) / 2 : 0;
+  if (t >= r0) return d < 0 ? -a + (t - r0) / 2 : -a;
+  return t - line;
+}
+
 /** the reading line in px for a cached client height */
 export function readingLineFor(clientHeight: number): number {
   return Math.round(READING_LINE * clientHeight);

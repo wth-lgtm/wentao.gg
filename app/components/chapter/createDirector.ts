@@ -4,8 +4,8 @@ import { atBeat, BEAT_MS } from "../../lib/mechanism";
 import { getScroll, scrollStoreCalls, subscribeScroll, type ScrollState } from "../../lib/scrollStore";
 import { getSiteMotion, subscribeSiteMotion } from "../../lib/siteMotion";
 import {
-  PIN_CHAPTERS, PIN_QUERY, STAGE_CLEAR, TOOLBAR_PX, TWO_COLUMN_MIN,
-  activeItemAt, beatCount, beatOf, beatToActive, chapterPin, createReadingLine, decideMode, headClamp, pickOwner,
+  FLOW_DIP_PX, PIN_CHAPTERS, PIN_QUERY, STAGE_CLEAR, TOOLBAR_PX, TWO_COLUMN_MIN,
+  activeItemAt, beatCount, beatOf, beatToActive, chapterPin, createReadingLine, decideMode, flowLine, flowScrollFor, headClamp, pickOwner,
   pinAtBeat, pinSetFromFlag, railHeadAt, readingLineActive, type ChapterLayout,
 } from "../../lib/chapterList";
 import { createCommit, type Commit } from "../../lib/chapterCommit";
@@ -36,7 +36,8 @@ import { getFieldPacks, onFieldPacks } from "../../lib/fieldPresence";
 //
 //   MARKS. Each chapter's runtime subscribes to the scroll store only while it is within a viewport (an
 //   IntersectionObserver, 100 % margin). In the read phase it turns the scroll into ONE target beat — pinned:
-//   activeItemAt(raw pin over the stage's cached height); flow: the row that crossed the 62 % reading line —
+//   activeItemAt(raw pin over the stage's cached height); flow: the row that crossed the list's travelling line
+//   (the 62 % reading line, bent to the list's first row near its section's top: chapterList.flowLine) —
 //   and hands it to the commit, which steps `shown` toward it once per 100 ms boundary (the catch-up riffle).
 //   A step writes data-active on the entry and its line, and --active-item on the section, inside the beat's
 //   timeout: attribute writes only, no layout read. The pinned rail's fill (transform only) and --pin-progress
@@ -105,6 +106,8 @@ class ChapterRuntime {
   target = -1;
   /** the target row's viewport y while engaged: how near the reader's eye (the reading line) this chapter's mark is */
   focusY = Number.NaN;
+  /** flow: the list's travelling line at the last gate, viewport px (the ?chapterDebug surface) */
+  lineAt = Number.NaN;
   corridor: { top: number; bottom: number } | null = null;
   /** px: how far the deepest jack of the field reaches into this chapter's list (placeDials; null: no field) */
   fieldReach: number | null = null;
@@ -286,16 +289,20 @@ class ChapterRuntime {
     } else if (this.mode === "flow") {
       const listTop = (g.beatTops[0] ?? g.pageTop) - s.y;
       const listBottom = g.listBottom - s.y;
-      // engaged from the moment the first row crosses the reading line until the list's bottom slides under the top
-      // clear band (STAGE_CLEAR.top, the W. / INDEX marks), i.e. for as long as the CSS rail is on screen: a short
-      // list resting wholly above the line (Education at the top of the screen after INDEX → Education or a hard
-      // load of /#education) keeps its last crossed row marked, which is what the rail shows read — a full rail
-      // always has its last row marked and its dots seated. (The pinned stage's middle-third release was not
-      // enough: at 2560 × 1440 Education's list rests above vh / 3 at its own section top, rail full, dots grey.)
-      this.engaged = listTop <= line && listBottom > STAGE_CLEAR.top;
-      this.side = listTop > line ? -1 : 1;
+      // the list's own line: the page's, bent to its first row near its section's top, so a section-top landing
+      // marks entry 01 and the rows light in turn from there (chapterList.flowLine; the CSS rail rides the same line)
+      const at = flowLine(s.y - g.pageTop, (g.beatTops[0] ?? g.pageTop) - g.pageTop, line);
+      this.lineAt = at;
+      // engaged from the moment the first row crosses the line until the list's bottom slides under the top clear
+      // band (STAGE_CLEAR.top, the W. / INDEX marks), i.e. for as long as the CSS rail is on screen: a short list
+      // resting wholly above the line (Education near the top of the screen once the bend has straightened) keeps
+      // its last crossed row marked, which is what the rail shows read — a full rail always has its last row marked
+      // and its dots seated. (The pinned stage's middle-third release was not enough: at 2560 × 1440 Education's
+      // list rested above vh / 3 at its own section top, rail full, dots grey.)
+      this.engaged = listTop <= at && listBottom > STAGE_CLEAR.top;
+      this.side = listTop > at ? -1 : 1;
       if (this.engaged) {
-        this.lineTarget = readingLineActive(g.beatTops.map((t) => t - s.y), line, this.lineTarget);
+        this.lineTarget = readingLineActive(g.beatTops.map((t) => t - s.y), at, this.lineTarget);
         target = this.lineTarget;
         this.focusY = (g.beatTops[Math.max(0, target)] ?? g.pageTop) - s.y;
       } else {
@@ -367,8 +374,9 @@ class ChapterRuntime {
 
   /**
    * A keyboard focus inside the chapter (SETUP phase, after the browser's own focus scroll): scroll so the focused
-   * row is the one marked — pinned, to the middle of its beat's slot; flow, its row just past the reading line
-   * (`line`), so the entry that lights is the one the focus ring is in. Smooth within three beats, instant beyond.
+   * row is the one marked — pinned, to the middle of its beat's slot; flow, its row 12 px past the list's travelling
+   * line (`line` bent near the section's top), so the entry that lights is the one the focus ring is in. Smooth
+   * within three beats, instant beyond.
    */
   focusBeat(target: HTMLElement, line: number): void {
     if (this.mode !== "pinned" && this.mode !== "flow") return;
@@ -384,16 +392,41 @@ class ChapterRuntime {
       const top = g.beatTops[beat];
       if (top === undefined) return;
       const maxY = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
-      y = Math.min(maxY, Math.max(0, top - line + 12));
+      const o0 = (g.beatTops[0] ?? g.pageTop) - g.pageTop;
+      y = Math.min(maxY, Math.max(0, g.pageTop + flowScrollFor(top - g.pageTop + 12, o0, line, "first")));
     }
     const far = this.commit.shown < 0 || Math.abs(beat - this.commit.shown) > 3;
     window.scrollTo({ top: Math.round(y), behavior: far ? "instant" : "smooth" });
+  }
+
+  /** a keep-your-place correction lands the kept row as the last one across the line: the reading line's hysteresis
+   *  must not hold a row from the layout before it (a rotation left Meta held 7 px below the line, and Meta lit) */
+  resetLine(): void {
+    this.lineTarget = -1;
+  }
+
+  /** The flow rail's fill rides the travelling line (app/chapter.css: a scroll-driven `top` over the bend's scroll
+   *  range, no callback while scrolling). Written on evaluations only, from the cached geometry and the page's line. */
+  placeLine(line: number): void {
+    const g = this.geom;
+    const o0 = (g.beatTops[0] ?? g.pageTop) - g.pageTop;
+    const a = Math.abs(line - (o0 + FLOW_DIP_PX));
+    if (this.currentMode() !== "flow" || g.beatTops.length === 0 || !(a >= 1)) {
+      this.el.removeAttribute("data-line-bend");
+      return;
+    }
+    this.el.style.setProperty("--ch-bend-from", `${g.pageTop - a}px`);
+    this.el.style.setProperty("--ch-bend-to", `${g.pageTop + a}px`);
+    this.el.style.setProperty("--ch-bend-line", `${o0 + FLOW_DIP_PX}px`);
+    this.el.setAttribute("data-line-bend", "");
   }
 
   dispose(): void {
     this.stopWatching();
     delete this.el.dataset.mode;
     this.el.removeAttribute("data-over-field");
+    this.el.removeAttribute("data-line-bend");
+    for (const v of ["--ch-bend-from", "--ch-bend-to", "--ch-bend-line"]) this.el.style.removeProperty(v);
   }
 }
 
@@ -407,6 +440,8 @@ interface DirectorDebug {
   readonly callbacks: number;
   readonly callbackBreakdown: Record<string, number>;
   evaluate(): void;
+  /** chapterList.FLOW_DIP_PX, so the harness's restatement of the travelling line can check itself */
+  readonly flowDipPx: number;
   readonly restPlace: Place | null;
   readonly restStale: boolean;
   readonly liveY: number | null;
@@ -711,6 +746,7 @@ export function createDirector(opts: DirectorOptions = {}): () => void {
       lineY = lineNow();
       measureAll();
       placeDials();
+      for (const rt of runtimes) rt.placeLine(lineY);
       kick();
       return;
     }
@@ -731,6 +767,7 @@ export function createDirector(opts: DirectorOptions = {}): () => void {
     runtimes.forEach((rt, i) => rt.setMode(next[i]));
     measureAll();
     placeDials();
+    for (const rt of runtimes) rt.placeLine(lineY);
     if (changed || resized) {
       const pageTopOf = (key: string): number | null => (key === "element" && held.el && held.el.isConnected ? held.el.getBoundingClientRect().top + window.scrollY : null);
       const correct = () => {
@@ -741,6 +778,7 @@ export function createDirector(opts: DirectorOptions = {}): () => void {
         }
         if (y !== null && Math.abs(window.scrollY - y) >= 1) scrollOwn(y);
         else if (unsubscribe) liveY = window.scrollY;
+        for (const rt of runtimes) rt.resetLine();
       };
       readerScrolled = false;
       correct();
@@ -750,6 +788,7 @@ export function createDirector(opts: DirectorOptions = {}): () => void {
         // a second look after the next layout (late images, fonts), then anchoring comes back and the rest place
         // is taken afresh from the corrected layout
         measureAll();
+        for (const rt of runtimes) rt.placeLine(lineY);
         correct();
         anchorRelease = requestAnimationFrame(() => {
           if (REVIEW) calls.correction++;
@@ -870,11 +909,12 @@ export function createDirector(opts: DirectorOptions = {}): () => void {
           held: rt.commit.held, subscribed: rt.subscribed, pin: rt.pin, callbacks: rt.stats.callbacks, steps: rt.stats.steps,
           panelH: rt.panel.offsetHeight, stageH: rt.geom.stageH, height: rt.geom.height, pageTop: rt.geom.pageTop,
           rowYs: rt.geom.rowYs, railLen: rt.geom.railLen, beatTops: rt.geom.beatTops, corridor: rt.corridor, layout: rt.layout, dialRowH: rt.dialRowH,
-          fieldReach: rt.fieldReach, overField: rt.el.hasAttribute("data-over-field"),
+          fieldReach: rt.fieldReach, overField: rt.el.hasAttribute("data-over-field"), lineAt: rt.lineAt,
           owner: rt === owner,
         }));
       },
       evaluate: () => evaluate(),
+      flowDipPx: FLOW_DIP_PX,
       get restPlace() { return restPlace ? restPlace.place : null; },
       get restStale() { return restStale; },
       get liveY() { return liveY; },

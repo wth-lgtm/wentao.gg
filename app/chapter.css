@@ -3,8 +3,9 @@
    data-mode by the one ChapterDirector after hydration:
      pinned  a tall section (--chapter-vh svh) holding a sticky 100svh stage: the dial (folio, display title,
              year wheel) left, the glass panel right; the entries light one at a time as the page scrolls.
-     flow    the same list in normal flow; entries light as they cross the 62 % reading line; the rail's fill
-             is CSS sticky (zero callbacks); the dial sticks beside the list at ≥ 1024 px.
+     flow    the same list in normal flow; entries light as they cross the 62 % reading line, bent to the first
+             row near the section's top (entry 01 lit at a section-top landing); the rail's fill is CSS sticky and
+             scroll-driven (zero callbacks); the dial sticks beside the list at ≥ 1024 px.
      static  reduced motion, forced colours, print, JS off: a plain legible list, no marks, the rail drawn full
              in --border, no accent, the readout printing its full range.
    CSS owns only the FIRST PAINT (the pinned layout for a pin-set chapter, inside @media PIN_QUERY, before any
@@ -14,7 +15,8 @@
    Marks are ADDITIVE ONLY: nothing dims, inactive rows keep their full tokens at opacity 1, and secondary text
    never sits on a tint. Accent-derived colour appears only inside the active entry (its bar and its tint; in
    a two-beat chapter its head tint, its line's tint and tick): the accent is spent once per viewport. Only transform and opacity animate
-   (ESCAPEMENT: no animated background-color or box-shadow, no filter, no backdrop-filter on rows), and
+   (ESCAPEMENT: no animated background-color or box-shadow, no filter, no backdrop-filter on rows; the flow rail's
+   cover rides the scroll itself, a scroll-driven `top` near a section's top, never a timed animation), and
    nothing on the sticky stage or any .glass ancestor carries a transform, opacity, filter, clip-path or
    will-change (D-0058: a backdrop root blanks the glass).
 
@@ -255,6 +257,26 @@
     top: 62svh; /* READING_LINE (chapterList.ts) */
     height: 50%;
     background: var(--chapter-rail);
+  }
+  /* THE TRAVELLING LINE (chapterList.flowLine): near a flow list's section top its reading line bends to the list's
+     first row, FLOW_DIP_PX below it at the section-top landing, so entry 01 is the one marked there. The fill's tip
+     rides the same line: its sticky top runs 62svh → the first row + FLOW_DIP_PX → 62svh, linearly over the bend's
+     scroll range (the director writes --ch-bend-from / -to / -line on its evaluations, never while scrolling), on the
+     root's scroll timeline, so nothing runs per scroll here either. Without scroll-driven animations the fill keeps to
+     the 62 % line; the marks still bend (the rail is decoration: aria-hidden, inert). */
+  @supports (animation-timeline: scroll()) {
+    .chapter[data-mode="flow"][data-line-bend] .ch-rail-cover {
+      animation-name: ch-line-bend;
+      animation-duration: auto;
+      animation-timing-function: linear;
+      animation-fill-mode: both;
+      animation-timeline: scroll(root block);
+      animation-range: var(--ch-bend-from) var(--ch-bend-to);
+    }
+  }
+  @keyframes ch-line-bend {
+    0%, 100% { top: 62svh; }
+    50% { top: var(--ch-bend-line); }
   }
 
   /* An entry: its dot on the rail, its head row, its line(s).

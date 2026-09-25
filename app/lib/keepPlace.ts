@@ -15,7 +15,9 @@
 //
 // THE MARKED ENTRY IS THE PLACE. Wherever a row lands, it lands as the LAST row across the line in the new layout —
 // at least LAND_PX above the line and more than LAND_PX above the next row's top — so the flow gate (a row is
-// across when its top ≤ the line) marks the same entry after the flip as before it. A row landed exactly on the
+// across when its top ≤ the line) marks the same entry after the flip as before it. "The line" is a flow list's
+// TRAVELLING line (chapterList.flowLine: the page's line, bent to the list's first row near its section's top), so
+// the landing is solved in scroll space through flowScrollFor, where the bend is exact. A row landed exactly on the
 // line with fractional tops ended a fraction of a pixel below it once the scroll was rounded, and the previous entry
 // lit (Cherre → Meta on a 1440 → 960 resize, CMU → UPenn over a Reduce Motion round trip); a rotation kept a px
 // offset taller than the entry's new height and lit the next one. Flow and static are both normal flow, so a switch
@@ -23,7 +25,7 @@
 //   outside every chapter                              the element at the viewport centre keeps its viewport top
 //   above every chapter that changed                   nothing moves (that element's page top did not change)
 
-import { STAGE_CLEAR, pinAtBeat, readingLineActive, type ChapterLayout } from "./chapterList";
+import { STAGE_CLEAR, flowLine, flowScrollFor, pinAtBeat, readingLineActive, type ChapterLayout } from "./chapterList";
 
 /** px: a kept row lands at least this far past the reading line, and this far clear of the next row's top */
 export const LAND_PX = 2;
@@ -59,11 +61,17 @@ export interface PlaceInput {
 }
 
 export type Place =
-  /** `marked`: the beat is the one on screen (shown), not the row the reading line stands in with; `viewTop`: the
-   *  row's viewport top when the place was taken */
-  | { kind: "chapter"; id: string; beat: number; mode: ChapterMode; pin: number | null; rowOffset: number; marked: boolean; viewTop: number }
+  /** `marked`: the beat is the one on screen (shown), not the row the reading line stands in with; `across`: the row
+   *  was marked or across its list's travelling line; `viewTop`: the row's viewport top when the place was taken;
+   *  `rowOffset`: that top less the page's reading line; `lineOffset`: less the list's travelling line */
+  | { kind: "chapter"; id: string; beat: number; mode: ChapterMode; pin: number | null; rowOffset: number; lineOffset: number; marked: boolean; across: boolean; viewTop: number }
   | { kind: "element"; key: string; viewportTop: number }
   | { kind: "none" };
+
+/** a flow (or static) chapter's travelling reading line at `scrollY`, viewport px (chapterList.flowLine) */
+export function flowLineOf(ch: ChapterBox, scrollY: number, line: number): number {
+  return flowLine(scrollY - ch.top, (ch.beatTops[0] ?? ch.top) - ch.top, line);
+}
 
 function pinOf(ch: ChapterBox, scrollY: number): number {
   const travel = ch.height - ch.stageHeight;
@@ -84,12 +92,14 @@ export function snapshotPlace(input: PlaceInput): Place {
   // nothing marked in a static or flow chapter (the static still marks nothing; a flow list may be disengaged): the
   // entry being read is the row on the reading line, from the cached row tops — so leaving static mid-chapter
   // (Reduce Motion or forced colours turned off) keeps the entry the reader was on, not the chapter's first
+  // (the travelling line: the row the flow gate would mark here, in a static still too)
+  const lineHere = c && c.mode !== "pinned" && c.beatTops.length > 0 ? flowLineOf(c, input.scrollY, input.readingLine) : input.readingLine;
   if (c && beat < 0 && (c.mode === "static" || c.mode === "flow") && c.beatTops.length > 0) {
-    beat = Math.max(0, readingLineActive(c.beatTops.map((t) => t - input.scrollY), input.readingLine, -1));
+    beat = Math.max(0, readingLineActive(c.beatTops.map((t) => t - input.scrollY), lineHere, -1));
   }
   if (c && beat >= 0) {
     const rowTop = (c.beatTops[beat] ?? c.top) - input.scrollY;
-    return { kind: "chapter", id: c.id, beat, mode: c.mode, pin: c.mode === "pinned" ? pinOf(c, input.scrollY) : null, rowOffset: rowTop - input.readingLine, marked, viewTop: rowTop };
+    return { kind: "chapter", id: c.id, beat, mode: c.mode, pin: c.mode === "pinned" ? pinOf(c, input.scrollY) : null, rowOffset: rowTop - input.readingLine, lineOffset: rowTop - lineHere, marked, across: marked || rowTop <= lineHere, viewTop: rowTop };
   }
   if (input.centre) return { kind: "element", key: input.centre.key, viewportTop: input.centre.pageTop - input.scrollY };
   return { kind: "none" };
@@ -120,26 +130,66 @@ export function correctPlace(place: Place, after: AfterInput): number | null {
     const same = place.mode !== "pinned";
     const line = after.readingLine;
     // across the line: the marked row (a row held by the reading line's hysteresis may sit up to 24 px below it),
-    // a row at or above the line, or a pinned chapter's shown row
-    const across = place.marked || place.rowOffset <= 0 || !same;
+    // a row at or above the travelling line, or a pinned chapter's shown row
+    const across = place.across || !same;
     // and the list's bottom stays below the top clear band, so a flow list still marks the kept row
     const keepOn = ch.listBottom === undefined ? -Infinity : STAGE_CLEAR.top + LAND_PX - (ch.listBottom - rowTop);
-    const view = landRow(line + (same ? place.rowOffset : 0), line, across, ch.beatTops[place.beat + 1], rowTop, same ? place.viewTop : undefined, keepOn);
+    // the wanted scroll: from normal flow, the row at its old offset from the travelling line (on the bend's flat
+    // piece, where every scroll keeps that offset, the one nearest its old offset from the page's line); from pinned,
+    // the row onto the line
+    const top = ch.top, o0 = (ch.beatTops[0] ?? top) - top, ok = rowTop - top;
+    let uWant = flowScrollFor(ok, o0, line, "first");
+    if (same) {
+      const t = ok - place.lineOffset;
+      uWant = Math.min(flowScrollFor(t, o0, line, "last"), Math.max(flowScrollFor(t, o0, line, "first"), ok - (line + place.rowOffset)));
+    }
+    const view = landRow({
+      uWant, line, across,
+      top, firstTop: top + o0, rowTop, nextTop: ch.beatTops[place.beat + 1],
+      was: same ? place.viewTop : undefined, keepOn,
+    });
     return Math.max(0, rowTop - view);
   }
   const top = after.pageTopOf(place.key);
   return top === null ? null : Math.max(0, top - place.viewportTop);
 }
 
+/** landRow's input: the wanted scroll and the page geometry of the kept row's chapter */
+export interface RowLanding {
+  /** the wanted scroll, as u: the section's top above the viewport's top */
+  uWant: number;
+  /** the page's reading line, viewport px */
+  line: number;
+  across: boolean;
+  /** page y of the section's top, the list's first row, the kept row and the next row (none for the last) */
+  top: number;
+  firstTop: number;
+  rowTop: number;
+  nextTop?: number;
+  /** the row's viewport top before the flip (normal flow → normal flow), for the floor */
+  was?: number;
+  /** the least viewport top that keeps the list's bottom below the top clear band */
+  keepOn?: number;
+}
+
 /**
  * The kept row's viewport top in the new layout. A row that was across the line (`across`: marked, or the row a
- * static still or an unmarked flow list reads at the line) stays the LAST row across it: at least LAND_PX above the line, and its next row's top at least
- * LAND_PX below the line (a px offset larger than the entry's new height is clamped). A row that was
- * still below the line stays at least LAND_PX below it, so nothing lights that was not lit.
+ * static still or an unmarked flow list reads at the line) stays the LAST row across it: LAND_PX of scroll past the
+ * point it crosses the line, and LAND_PX of scroll short of the point its next row does (a px offset larger than
+ * the entry's new height is clamped). A row that was still below the line stays LAND_PX of scroll short of it, so
+ * nothing lights that was not lit. The line is the list's travelling line, so each bound is a scroll
+ * (flowScrollFor) — margins in scroll, not in px against the line: inside the bend the line moves at twice the
+ * scroll, and a 2 px margin there was one px of scroll, which the rounded scrollTo and one px of wheel ate. The
+ * answer is the scroll nearest the wanted one that meets the bounds, ranked as they always were: across first, then
+ * the floor and the next row.
  */
-export function landRow(view: number, line: number, across: boolean, nextTop: number | undefined, rowTop: number, was?: number, keepOn = -Infinity): number {
-  if (!across) return Math.max(view, line + LAND_PX);
-  const hi = line - LAND_PX;
+export function landRow(r: RowLanding): number {
+  const o0 = r.firstTop - r.top, ok = r.rowTop - r.top;
+  // u: the section's top above the viewport's top; the row's viewport top is ok − u
+  const uWant = r.uWant;
+  if (!r.across) return ok - Math.min(uWant, flowScrollFor(ok, o0, r.line, "last") - LAND_PX);
+  const uAcross = flowScrollFor(ok, o0, r.line, "first") + LAND_PX;
+  const uNext = r.nextTop === undefined ? Infinity : flowScrollFor(r.nextTop - r.top, o0, r.line, "last") - LAND_PX;
   // THE FLOOR. The kept row never lands higher than the reader had it. A phone reader with JST 408 px above a portrait
   // line kept that offset against the landscape line (242 px), and JST landed at −166: its list had gone under the
   // top clear band (the W. / INDEX marks, STAGE_CLEAR.top) and nothing was marked. So a row the reader had in view
@@ -148,7 +198,8 @@ export function landRow(view: number, line: number, across: boolean, nextTop: nu
   // Projects) is floored where it was, not pulled down to the band. Pulling it down moved Projects' heading 38 to
   // 169 px on a window drag, a height-only resize or a rotation. `keepOn` keeps the list's bottom below the band,
   // so the kept row is still marked. `was` is undefined when the row is new to normal flow (from pinned): the band.
-  const floor = was === undefined ? STAGE_CLEAR.top : Math.max(keepOn, Math.min(STAGE_CLEAR.top, was));
-  const lo = Math.max(floor, nextTop === undefined ? -Infinity : line - (nextTop - rowTop) + LAND_PX);
-  return Math.min(hi, Math.max(view, Math.min(lo, hi)));
+  const keepOn = r.keepOn ?? -Infinity;
+  const floor = r.was === undefined ? STAGE_CLEAR.top : Math.max(keepOn, Math.min(STAGE_CLEAR.top, r.was));
+  const uLow = Math.min(ok - floor, uNext);
+  return ok - Math.max(uAcross, Math.min(uWant, Math.max(uLow, uAcross)));
 }
