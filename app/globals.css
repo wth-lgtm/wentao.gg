@@ -56,6 +56,12 @@
      declines, this line becomes var(--glass-tint) and the failing flow rows are recorded (DESIGN §10's fallback).
      The blur stays either way: it reads as glass. */
   --chapter-flow-tint: color-mix(in oklab, var(--card) 40%, transparent);
+  /* OC-T at 700–1023 px (chapter.css): there the pinned stage is one column, the panel spans the window and the
+     jack field's 14-pack sits under its lower rows, and on the site's 24 % the stack and dates lines measured
+     3.48–3.64:1 (820 × 1180, 1000 × 800, fine pointer). The smallest fill that passed every run: 45 % failed two
+     runs of three (worst 4.19), 50 % passed five of five (worst line 4.51, numeral 4.79). A flow panel at these
+     widths takes it too (Education measured 4.41 on 40 %): part of the flow extension put to the owner. */
+  --chapter-narrow-tint: color-mix(in oklab, var(--card) 50%, transparent);
 
   /* Split-flap board (dark) — opaque plastic flaps so the animated bg doesn't bleed. */
   --flap-bg: #202024;
@@ -112,6 +118,9 @@
      runs of four); with --legend lines the site's own 40 % passes, pinned and flow, sixteen runs of sixteen (worst
      line 5.82, numeral 4.67), so the light panels keep the site's liquid glass. */
   --chapter-flow-tint: var(--glass-tint);
+  /* OC-T at 700–1023 px, light: on the site's 40 % the lower rows over the 14-pack measured 3.86–4.09:1 (and a flow
+     panel 3.90); 55 % failed a run (4.44), 60 % passed six of six (worst line 4.53, numeral 5.96). */
+  --chapter-narrow-tint: color-mix(in oklab, var(--card) 60%, transparent);
 
   /* Split-flap board (light). */
   --flap-bg: #e7e7ea;

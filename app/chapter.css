@@ -175,6 +175,15 @@
   @media not screen and (prefers-reduced-motion: no-preference) and (forced-colors: none) and (min-width: 700px) and (min-height: 720px) {
     html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-panel { --glass-tint: var(--chapter-flow-tint); }
   }
+  /* 700–1023 px (OC-T, raised only as far as the pixel check requires): the one-column pinned panel spans the window
+     over the jack field's 14-pack and takes --chapter-narrow-tint (globals.css: 50 % dark, 60 % light), first paint
+     included; a flow panel at these widths takes it too, through --chapter-flow-tint (the flow extension). Under
+     769 px the phone glass is near-opaque and sets its own background. */
+  @media (max-width: 1023.98px) {
+    .chapter { --chapter-flow-tint: var(--chapter-narrow-tint); }
+    .chapter[data-mode="pinned"] .ch-panel,
+    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-panel { --glass-tint: var(--chapter-narrow-tint); }
+  }
   @media (min-width: 640px) {
     .ch-panel { padding: clamp(24px, 1.25vw, 32px); } /* 24 px up to a 1920 px window, 32 px at 2560 */
   }

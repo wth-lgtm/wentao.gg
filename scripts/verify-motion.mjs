@@ -60,7 +60,8 @@
 //   framesMidChapter        CDP frames produced per second mid-chapter at rest (recorded)
 //   flowFillZeroJs          a flow scroll writes nothing to the rail; the fill's tip rides the reading line
 //   lcpInHero / contexts    the LCP element stays in the hero (never a chapter); WebGL contexts ≤ 3 desktop / 1 phone
-// contrastRows also runs at 1440x700 (EXTRA): both chapters flow in the site's glass at a desktop size.
+// contrastRows also runs at EXTRA's desktop windows: 1440x700 (both chapters flow) and 820x1180 / 1000x800 (the
+// one-column pinned stage over the jack field, fine pointer).
 
 import fs from "node:fs";
 import path from "node:path";
@@ -84,9 +85,11 @@ const MATRIX = [
 ];
 // the heavier checks run where the brief's screenshots and budgets are taken; the rest run everywhere
 const CORE = new Set(["1440x900", "390x844m"]);
-// beyond the owner's matrix: a desktop window too short to pin (both chapters flow in the site's own glass),
-// where contrastRows proves the FLOW panels over the live canvases as well as the pinned one
-const EXTRA = ["1440x700"];
+// beyond the owner's matrix: a desktop window too short to pin (both chapters flow), where contrastRows proves the
+// FLOW panels over the live canvases as well as the pinned one; and two fine-pointer desktop windows 700–1023 px
+// wide, where the pinned stage is one column, the panel spans the full width and the jack field's 14-pack sits
+// under its lower rows (the matrix's tablet sizes run as touch iPads, where the field is never mounted)
+const EXTRA = ["1440x700", "820x1180", "1000x800"];
 const CONTRAST = new Set([...CORE, ...EXTRA]);
 
 const args = Object.fromEntries(process.argv.slice(2).map((a) => { const [k, ...v] = a.replace(/^--/, "").split("="); return [k, v.length ? v.join("=") : true]; }));
