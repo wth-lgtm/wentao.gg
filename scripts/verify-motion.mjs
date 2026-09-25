@@ -1531,13 +1531,18 @@ async function resizeMidScroll(vp, theme) {
       const r = document.getElementById("education").getBoundingClientRect();
       return where === "eduMid" ? r.top + scrollY + r.height * 0.55 - innerHeight / 2 : document.getElementById("projects").getBoundingClientRect().top + scrollY - 100;
     }, k.where);
-    // 140 px every 16 ms, then the resize at once
+    // 140 px every 16 ms, then the resize one frame later (the director's read phase has seen the last step; the
+    // velocity is still far from zeroed, so the commit still holds the marks)
     const fling = await page.evaluate((t) => new Promise((res) => {
       const y0 = scrollY, t0 = performance.now();
       const id = setInterval(() => {
         const y = Math.min(t, scrollY + 140);
         window.scrollTo({ top: y, behavior: "instant" });
-        if (y >= t) { clearInterval(id); res({ pxPerS: Math.round(((y - y0) / (performance.now() - t0)) * 1000), held: window.__chapters.list.some((c) => c.held || c.pending) }); }
+        if (y >= t) {
+          clearInterval(id);
+          const pxPerS = Math.round(((y - y0) / (performance.now() - t0)) * 1000);
+          requestAnimationFrame(() => res({ pxPerS, held: window.__chapters.list.some((c) => c.held || c.pending) }));
+        }
       }, 16);
     }), target);
     const before = await markCentre(page);
@@ -1550,7 +1555,7 @@ async function resizeMidScroll(vp, theme) {
     const t = await anchorTop(page);
     // a kept row inside a flow chapter follows the reading line, so the line's own shift is allowed on top of ± 40
     const allowed = 40 + Math.abs((await lineOf()) - lineA);
-    const good = fling.pxPerS >= 5000 && before && t !== null && Math.abs(t - before.top) <= allowed;
+    const good = fling.pxPerS >= 5000 && fling.held && before && t !== null && Math.abs(t - before.top) <= allowed;
     if (!good) ok = false;
     const corr = await page.evaluate(() => window.__chapters.corrections.slice(-1));
     rows.push({ case: k.name, fling, resizeMs, before, after: { top: t }, moved: t === null || !before ? null : Math.round(t - before.top), allowed, good, lastCorrection: corr.map((c) => ({ place: c.place.kind === "chapter" ? `${c.place.id}:${c.place.beat}` : c.place.kind, y: c.y === null ? null : Math.round(c.y), from: Math.round(c.from) })) });
