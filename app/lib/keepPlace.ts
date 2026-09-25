@@ -11,10 +11,11 @@
 //   inside chapter C, which just became pinned         pinAtBeat(shown) in C
 //   inside chapter C, which just flowed or went static C's shown row on the reading line
 //   inside chapter C, still in flow / static           C's shown row at the same offset from the reading line
+//   (nothing marked in a static or flow C)             the row on the reading line stands in for the shown row
 //   outside every chapter                              the element at the viewport centre keeps its viewport top
 //   above every chapter that changed                   nothing moves (that element's page top did not change)
 
-import { pinAtBeat, type ChapterLayout } from "./chapterList";
+import { pinAtBeat, readingLineActive, type ChapterLayout } from "./chapterList";
 
 export type ChapterMode = "pinned" | "flow" | "static";
 
@@ -57,7 +58,13 @@ function pinOf(ch: ChapterBox, scrollY: number): number {
 export function snapshotPlace(input: PlaceInput): Place {
   const centreY = input.scrollY + input.viewportH / 2;
   const c = input.chapters.find((ch) => centreY >= ch.top && centreY < ch.top + ch.height);
-  const beat = c ? input.shown[c.id] ?? -1 : -1;
+  let beat = c ? input.shown[c.id] ?? -1 : -1;
+  // nothing marked in a static or flow chapter (the static still marks nothing; a flow list may be disengaged): the
+  // entry being read is the row on the reading line, from the cached row tops — so leaving static mid-chapter
+  // (Reduce Motion or forced colours turned off) keeps the entry the reader was on, not the chapter's first
+  if (c && beat < 0 && (c.mode === "static" || c.mode === "flow") && c.beatTops.length > 0) {
+    beat = Math.max(0, readingLineActive(c.beatTops.map((t) => t - input.scrollY), input.readingLine, -1));
+  }
   if (c && beat >= 0) {
     const rowTop = (c.beatTops[beat] ?? c.top) - input.scrollY;
     return { kind: "chapter", id: c.id, beat, mode: c.mode, pin: c.mode === "pinned" ? pinOf(c, input.scrollY) : null, rowOffset: rowTop - input.readingLine };

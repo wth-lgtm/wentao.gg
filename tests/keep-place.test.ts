@@ -68,3 +68,24 @@ test("a live Reduce Motion toggle mid-Education (flow → static, Experience pin
   const y = correctPlace(place, { chapters: [exStatic, edStatic], pageTopOf: () => null, readingLine: 558 });
   assert.equal(y, 1880 - 558);
 });
+
+test("leaving static mid-chapter (forced colours or Reduce Motion off → pinned): the entry on the reading line, not the chapter's first", () => {
+  // static Experience at 1440 × 900 (nothing marked): the reader has JST's row (beat 4) just above the reading line
+  const exStatic: ChapterBox = { ...exFlow, mode: "static", top: 900, height: 900, stageHeight: 900, beatTops: [1060, 1210, 1360, 1510, 1660] };
+  const scrollY = 1660 - 558 + 15; // row 4 is 15 px above the line
+  const place = snap(scrollY, 900, [exStatic, edFlow], { experience: -1, education: -1 });
+  assert.equal(place.kind, "chapter");
+  assert.equal(place.kind === "chapter" ? place.beat : -1, 4);
+  const y = correctPlace(place, { chapters: [exPinned, edFlow], pageTopOf: () => null, readingLine: 558 });
+  assert.equal(y, 900 + pinAtBeat(4, EXPERIENCE_LAYOUT) * 720, "pinned at JST's beat, not at the section top (pin 0, Mercor)");
+});
+
+test("nothing marked in a flow chapter whose rows are all still below the line: the first row stands in, at its own offset", () => {
+  // the viewport centre (2525) is inside Education; its rows sit at 565 and 665, below the 558 line
+  const place = snap(2075, 900, [exPinned, edFlow], { experience: -1, education: -1 }, { key: "x", pageTop: 2520 });
+  assert.equal(place.kind, "chapter");
+  assert.equal(place.kind === "chapter" ? place.beat : -1, 0);
+  assert.equal(place.kind === "chapter" ? place.rowOffset : null, 2640 - 2075 - 558);
+  // the same flow mode after the trigger: the row keeps that offset (nothing moves that did not move)
+  assert.equal(correctPlace(place, { chapters: [exPinned, edFlow], pageTopOf: () => null, readingLine: 558 }), 2075);
+});
