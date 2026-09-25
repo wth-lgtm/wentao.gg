@@ -42,6 +42,12 @@
      BUTTON can have a hover without reaching for a palette step. */
   --loss-hover: #ef4444;
 
+  /* The reading chapters' marks (chapter.css): the active line's tint and the active item's head-row
+     tint. Accent-derived, so they appear only inside the active item (the accent is spent once per
+     viewport); never under muted text (muted over a 12 % tint is 4.56:1 dark, 4.23:1 light). */
+  --chapter-tint: color-mix(in oklab, var(--accent) 12%, transparent);
+  --chapter-tint-soft: color-mix(in oklab, var(--accent) 6%, transparent);
+
   /* Split-flap board (dark) — opaque plastic flaps so the animated bg doesn't bleed. */
   --flap-bg: #202024;
   --flap-fg: #e8e8e2;
@@ -90,6 +96,10 @@
   --loss: #b91c1c;
   --loss-hover: #991b1b;
 
+  /* The reading chapters' marks (light): a touch less accent over the light glass. */
+  --chapter-tint: color-mix(in oklab, var(--accent) 9%, transparent);
+  --chapter-tint-soft: color-mix(in oklab, var(--accent) 5%, transparent);
+
   /* Split-flap board (light). */
   --flap-bg: #e7e7ea;
   --flap-fg: #18181b;
@@ -100,10 +110,15 @@
   --flap-specular: rgba(0, 0, 0, 0.12);
 }
 
-/* Motion system — one easing + duration vocabulary so effects feel composed */
+/* Motion system — one easing + duration vocabulary so effects feel composed.
+   ESCAPEMENT (D-0020): discrete changes land on N × --beat; continuous travel runs free and only starts and
+   ends on a beat. app/lib/mechanism.ts mirrors --beat and the three curves, and tests/mechanism.test.ts
+   holds the two equal. New code writes calc(var(--beat) * n), never an ad-hoc duration. */
 :root {
+  --beat: 100ms; /* one flap of the Solari board (FLAP_MS) */
   --ease-entrance: cubic-bezier(0.16, 1, 0.3, 1); /* expo-out: one-shot reveals + interactions */
   --ease-ambient: cubic-bezier(0.42, 0, 0.58, 1); /* symmetric: infinite loops */
+  --ease-stop: cubic-bezier(0.2, 1.4, 0.4, 1); /* the hard stop, promoted from sfDrop: +5.3 % at x 0.485 */
   --dur-fast: 0.18s;
   --dur-base: 0.3s;
   --dur-slow: 0.6s;
@@ -626,7 +641,7 @@ input:focus {
   --sf-cell-h: clamp(1.6rem, 7.2vw, 2.9rem);
   --sf-gap: clamp(2px, 0.5vw, 4px);
   --sf-emoji: clamp(1.35rem, 5.4vw, 2rem);
-  --sf-flap: 50ms; /* one leaf phase; a full flap = fold (50) + drop (50) = 100ms (matches FLAP_MS) */
+  --sf-flap: calc(var(--beat) / 2); /* one leaf phase (50ms); a full flap = fold + drop = one beat (FLAP_MS) */
 }
 
 .sf-board {

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useReducedMotion } from "framer-motion";
+import { FLAP_MS, HOLD_MS } from "../lib/mechanism";
 
 // A lifelike Solari / airport split-flap board that cycles roles. The leading EMOJI is a
 // flap too — it spins through the role emojis and lands on the correct one at the SAME
@@ -38,8 +39,8 @@ const EMOJI_POOL = [
   "⚡", "🔥", "📸", "💪", "🏔️", "🎨", "🔬", "📊", "🧩", "🎮", "🌐", "💡", "🎸",
 ];
 
-const HOLD_MS = 4000; // dwell on a finished word before flipping to the next
-const FLAP_MS = 100; // one physical flap — legible but a touch quicker to settle
+// HOLD_MS (4000, the dwell on a finished word) and FLAP_MS (100, one physical flap) come from
+// app/lib/mechanism.ts: FLAP_MS IS the site's beat, and HOLD_MS is forty of them. Values unchanged.
 
 // `settle` marks the single step on which this cell reaches its target letter — the
 // CSS rake holds the light longer on that flap, so a letter arriving and a letter
