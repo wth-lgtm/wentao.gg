@@ -74,3 +74,14 @@ test("print is the static still on light paper: light tokens, no halo, whole ent
     assert.ok(p.includes(want), `print block lacks ${want}`);
   }
 });
+
+test("print on paper: the chapters on white under their dark inks (background graphics on), and the fixed chrome not printed", () => {
+  const p = css.slice(css.indexOf("@media print {"));
+  assert.ok(p.includes(".chapter { background: #fff !important; }"), "a dark visitor's printout was black on black");
+  assert.match(p, /\.chapter \.ch-panel \{\s*background: transparent !important;\s*-webkit-backdrop-filter: none !important;\s*backdrop-filter: none !important;/);
+  const globals = fs.readFileSync(path.join(root, "app/globals.css"), "utf8");
+  assert.match(globals, /@media print \{\s*\.skip-link, \[data-print="hide"\] \{ display: none !important; \}/);
+  for (const f of ["app/components/Navigation.tsx", "app/components/ScrollProgress.tsx"]) {
+    assert.match(fs.readFileSync(path.join(root, f), "utf8"), /data-print="hide"/, `${f}'s fixed box is hidden in print`);
+  }
+});
