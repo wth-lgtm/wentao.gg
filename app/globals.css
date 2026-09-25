@@ -354,6 +354,13 @@ button:active, .btn:active {
   transform: translateY(0);
 }
 
+/* Print: the fixed chrome is not the page. A fixed box repeats on every printed page, so the W. / clock / INDEX
+   marks, the progress bar and the skip link overprinted whatever sat at each page's top (the Experience folio and
+   title, Education's first degree line) and bottom. */
+@media print {
+  .skip-link, [data-print="hide"] { display: none !important; }
+}
+
 /* Don't paint a focus ring when focus lands on <main> via the skip link */
 main:focus {
   outline: none;

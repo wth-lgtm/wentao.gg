@@ -136,7 +136,7 @@ export default function Navigation() {
     <>
       {/* Persistent split-corner marks — no bar, no plate. Wrapper is click-through so the
           fluid still gets cursor events between the two marks; the marks themselves are not. */}
-      <div className="fixed top-0 left-0 right-0 z-50 pointer-events-none">
+      <div className="fixed top-0 left-0 right-0 z-50 pointer-events-none" data-print="hide">
         <div className="max-w-6xl mx-auto px-6 py-5 flex items-center justify-between">
           <a
             href="#"

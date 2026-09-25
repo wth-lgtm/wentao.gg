@@ -689,6 +689,15 @@
     /* paper is light whatever the screen's theme: a dark visitor's printout kept the dark tokens (company names
        #e8e8e2, paler than the secondary lines) and the titles' dark halo smudged their light glyphs */
     .chapter { --foreground: #0a0a0b; --legend: #52525b; --muted: #626c7a; --border: #dcdce0; }
+    /* and with "Background graphics" on, the page's dark ground and the dark glass printed too, under those dark
+       inks: a dark visitor's titles, companies and job titles vanished, black on black. The chapters print on white,
+       the panel as a plain box (its hairline stays). */
+    .chapter { background: #fff !important; }
+    .chapter .ch-panel {
+      background: transparent !important;
+      -webkit-backdrop-filter: none !important;
+              backdrop-filter: none !important;
+    }
     .chapter .ch-title { text-shadow: none !important; }
     .chapter .ch-item { break-inside: avoid; } /* an entry never splits across pages (UPenn's date line did) */
     .chapter .ch-readout { display: block !important; } /* the static still's range, in every mode */
