@@ -310,6 +310,13 @@
      overlapping — WCAG 2.5.8's 24 px, stated as that, not as 44. (At z-index −1 the line's own blocks were hit
      first and the real target was the 18 px text.) */
   .ch-sub .ch-text-link::after { inset: -3px -4px; z-index: 1; }
+  /* a date-and-place link reaches only 1 px up, so the degree link above it keeps its 3 px (the two lines sit 2 px
+     apart, and the later box would win the overlap) */
+  .ch-degree > .ch-line:last-child .ch-text-link::after { top: -1px; }
+  /* inline-block: a link that wraps (a degree's field on a phone) is one box, so its hit box covers both lines —
+     an inline link split across lines gave its ::after a negative width (the second fragment ends left of where the
+     first begins) and the target shrank to the 19 px text */
+  .ch-sub .ch-text-link { display: inline-block; max-width: 100%; }
   /* a school's name in the head row has room above and to its line below (which, later in the tree, still wins
      where the two meet) */
   .ch-name .ch-text-link::after { inset: -11px -4px; z-index: 1; }
