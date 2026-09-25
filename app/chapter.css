@@ -512,8 +512,12 @@
       margin-top: max(0px, calc(var(--ch-dial-top, 96px) - 96px));
     }
   }
-  /* 700–1023 px: one column — a compact dial row on top ("02 Experience · 2026"), DIAL_ROW_PX tall */
+  /* 700–1023 px: one column — a compact dial row on top ("02 Experience · 2026"), DIAL_ROW_PX tall. The row and
+     the panel are centred in the stage TOGETHER (a centred panel under a top-pinned row left the title ≈ 200 px
+     from its list on a portrait iPad); the band arithmetic is unchanged, the row still comes off it. */
   @media (max-width: 1023.98px) {
+    .chapter[data-mode="pinned"] .ch-grid { grid-template-rows: auto auto; align-content: center; }
+    .chapter[data-mode="pinned"] .ch-panel { align-self: start; }
     .chapter[data-mode="pinned"] .ch-dial {
       display: flex;
       align-items: center;
@@ -563,6 +567,8 @@
     html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-dial { align-self: start; }
   }
   @media screen and (prefers-reduced-motion: no-preference) and (forced-colors: none) and (min-width: 700px) and (max-width: 1023.98px) and (min-height: 720px) {
+    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-grid { grid-template-rows: auto auto; align-content: center; }
+    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-panel { align-self: start; }
     html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-dial { display: flex; align-items: center; gap: 16px; min-height: 72px; }
     html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-folio { margin: 0; }
     html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-title-text {
