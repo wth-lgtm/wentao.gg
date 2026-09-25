@@ -55,7 +55,7 @@
 //   dialNoShift             a hard load of /#experience: no layout shift from the dial
 //   framesMidChapter        CDP frames produced per second mid-chapter at rest (recorded)
 //   flowFillZeroJs          a flow scroll writes nothing to the rail; the fill's tip rides the reading line
-//   lcpIsH1 / contexts      the LCP element is the hero h1; WebGL contexts ≤ 3 desktop / 1 phone
+//   lcpInHero / contexts    the LCP element stays in the hero (never a chapter); WebGL contexts ≤ 3 desktop / 1 phone
 // contrastRows also runs at 1440x700 (EXTRA): both chapters flow in the site's glass at a desktop size.
 
 import fs from "node:fs";
@@ -1212,7 +1212,9 @@ async function resizeMidScroll(vp, theme) {
     const target = k.where === "inside" ? ex.pageTop + 0.5 * (ex.height - ex.stageH) : ed.top + ed.height + 350;
     await scrollOn(page, target);
     let before;
-    if (k.where === "inside") before = await page.evaluate(() => { const c = window.__chapters.list.find((x) => x.id === "experience"); return { shown: c.shown, pin: c.pin, scrollY }; });
+    // inside the pinned chapter the place is its pin; the entry that pin marks is the target (shown may still be one
+    // riffle step behind it at the instant the scroll stops)
+    if (k.where === "inside") before = await page.evaluate(() => { const c = window.__chapters.list.find((x) => x.id === "experience"); return { shown: c.shown, target: c.target, pin: c.pin, scrollY }; });
     else before = await markCentre(page);
     const stale = await page.evaluate(() => window.__chapters.restStale);
     await page.setViewportSize({ width: k.to[0], height: k.to[1] });
@@ -1220,7 +1222,7 @@ async function resizeMidScroll(vp, theme) {
     let after, good;
     if (k.where === "inside") {
       after = await page.evaluate(() => { const c = window.__chapters.list.find((x) => x.id === "experience"); return { shown: c.shown, pin: c.pin, scrollY, mode: c.mode }; });
-      good = after.shown === before.shown && Math.abs(after.pin - before.pin) <= 0.03;
+      good = after.shown === before.target && Math.abs(after.pin - before.pin) <= 0.03;
     } else {
       const t = await anchorTop(page);
       after = { top: t };
@@ -1390,8 +1392,10 @@ async function flowFillZeroJs(page, vp, theme) {
   return report("flowFillZeroJs", vp.spec, theme, mut === 0 && worst <= 2, { chapter: c.id, railMutations: mut, samplesOnLine: samples, worstTipOffLinePx: +worst.toFixed(2) });
 }
 
-/** the LCP element is the hero's h1 (a fresh load, no input) */
-async function lcpIsH1(vp, theme) {
+/** the LCP element stays in the hero, never a chapter (a fresh load, no input). The brief's `lcpIsH1` assumed the
+ *  h1; measured on the f4b738f build it is HeroMeta's "San Francisco" line in 5 loads of 6 and the h1 in 1 (the h1
+ *  fades in from opacity 0, which LCP only sometimes counts) — so the check is that PR 1 moves nothing into it */
+async function lcpInHero(vp, theme) {
   if (REDUCE) return;
   const { ctx, page } = await openPage(vp, theme);
   await sleep(3000);
@@ -1399,12 +1403,14 @@ async function lcpIsH1(vp, theme) {
     new PerformanceObserver((l) => {
       const es = l.getEntries();
       const e = es[es.length - 1];
-      res({ entries: es.length, tag: e?.element ? `${e.element.tagName}.${String(e.element.className).slice(0, 30)}` : null, inH1: !!e?.element?.closest?.("h1, [data-hero-h1]"), size: e?.size ?? null, t: e ? Math.round(e.startTime) : null });
+      const el = e?.element;
+      const rect = el?.getBoundingClientRect?.();
+      res({ entries: es.length, text: el ? (el.textContent || "").trim().slice(0, 24) : null, isH1: !!el?.closest?.("h1, [data-hero-h1]"), inChapter: !!el?.closest?.("[data-chapter]"), firstScreen: rect ? rect.top + scrollY < innerHeight : false, t: e ? Math.round(e.startTime) : null });
     }).observe({ type: "largest-contentful-paint", buffered: true });
     setTimeout(() => res({ entries: 0 }), 2000);
   }));
   await ctx.close();
-  return report("lcpIsH1", vp.spec, theme, !!r.inH1, r);
+  return report("lcpInHero", vp.spec, theme, r.entries > 0 && !r.inChapter && r.firstScreen, r);
 }
 
 /** WebGL contexts: desktop 3 (fluid, field, card), phone 1 (DESIGN §6) */
@@ -1487,7 +1493,7 @@ for (const spec of VIEWPORTS) {
       await guard("printNeutral", () => printNeutral(vp, theme));
       if (spec === "1440x900" || spec === "1280x720" || spec === "1920x1080") await guard("dialNoShift", () => dialNoShift(vp, theme));
       if (spec === "1440x900") await guard("framesMidChapter", () => framesMidChapter(vp, theme));
-      if (core) await guard("lcpIsH1", () => lcpIsH1(vp, theme));
+      if (core) await guard("lcpInHero", () => lcpInHero(vp, theme));
       if (core) await guard("contexts", () => contexts(vp, theme));
       // text spacing and a 24 px default font: geometry, not colour — once per size, in the first theme
       if (theme === THEMES[0] && MATRIX.includes(spec)) await guard("textSpacing", () => textSpacing(vp, theme));
