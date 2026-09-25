@@ -11,7 +11,7 @@ import {
 import { createCommit, type Commit } from "../../lib/chapterCommit";
 import { emitChapterStep } from "../../lib/chapterBus";
 import { correctPlace, snapshotPlace, type ChapterBox, type ChapterMode, type Place } from "../../lib/keepPlace";
-import { packCorridor } from "../../lib/packCorridor";
+import { FIELD_UNDER_PX, discReach, packCorridor, packDiscs } from "../../lib/packCorridor";
 import type { Rect } from "../../lib/fieldLayout";
 import { getFieldPacks, onFieldPacks } from "../../lib/fieldPresence";
 
@@ -89,6 +89,7 @@ class ChapterRuntime {
   readonly beats: number;
   readonly stage: HTMLElement;
   readonly panel: HTMLElement;
+  readonly list: HTMLElement;
   readonly dial: HTMLElement;
   readonly rail: HTMLElement;
   readonly fill: HTMLElement;
@@ -105,6 +106,8 @@ class ChapterRuntime {
   /** the target row's viewport y while engaged: how near the reader's eye (the reading line) this chapter's mark is */
   focusY = Number.NaN;
   corridor: { top: number; bottom: number } | null = null;
+  /** px: how far the deepest jack of the field reaches into this chapter's list (placeDials; null: no field) */
+  fieldReach: number | null = null;
   /** the compact dial row's CONTENT height (its tallest child: folio, title, readout) as last laid out pinned at
    *  700–1023 px — the row's own box is its grid track, which squeezes when text spacing grows the content; 0
    *  before it ever was, and reset by a width change (the type scales with the window). decideMode reads it in
@@ -129,6 +132,7 @@ class ChapterRuntime {
     this.beats = beatCount(this.layout);
     this.stage = el.querySelector<HTMLElement>(".ch-stage")!;
     this.panel = el.querySelector<HTMLElement>(".ch-panel")!;
+    this.list = el.querySelector<HTMLElement>(".ch-list")!;
     this.dial = el.querySelector<HTMLElement>(".ch-dial")!;
     this.rail = el.querySelector<HTMLElement>(".ch-rail")!;
     this.fill = el.querySelector<HTMLElement>(".ch-rail-fill")!;
@@ -389,6 +393,7 @@ class ChapterRuntime {
   dispose(): void {
     this.stopWatching();
     delete this.el.dataset.mode;
+    this.el.removeAttribute("data-over-field");
   }
 }
 
@@ -624,6 +629,9 @@ export function createDirector(): () => void {
     if (unsubscribe) liveY = window.scrollY;
   };
 
+  /** Where the jack field sits, from the scene's own solve (packCorridor.ts): each dial in the corridor between the
+   *  packs (--ch-dial-top), and data-over-field on each chapter whose list has a jack under its text, whose panel
+   *  then takes the raised fill (app/chapter.css). Layout reads only; runs on evaluations, never while scrolling. */
   const placeDials = () => {
     const packs = getFieldPacks();
     const w = html.clientWidth, h = html.clientHeight;
@@ -632,8 +640,22 @@ export function createDirector(): () => void {
     const card = layoutRect(document.querySelector("[data-hero-card]"));
     const span = document.querySelector<HTMLElement>("[data-hero-h1] span");
     const font = span ? parseFloat(getComputedStyle(span).fontSize) : null;
+    const discs = packs ? packDiscs({ width: w, height: h, h1FontPx: font, hero: { h1, card }, packs }) : null;
     for (const rt of runtimes) {
       const mode = rt.currentMode();
+      // the field under the list: a pinned list where its stage docks (the stage's top at the viewport's top), a
+      // flow list anywhere in its column between the clear bands (it passes over the whole field)
+      if (discs && mode !== "static") {
+        const l = rt.list.getBoundingClientRect();
+        const st = rt.stage.getBoundingClientRect();
+        const rect = mode === "pinned"
+          ? { left: l.left, right: l.right, top: l.top - st.top, bottom: l.bottom - st.top }
+          : { left: l.left, right: l.right, top: STAGE_CLEAR.top, bottom: h - STAGE_CLEAR.bottom };
+        rt.fieldReach = Math.round(discReach(discs, rect));
+      } else {
+        rt.fieldReach = null;
+      }
+      rt.el.toggleAttribute("data-over-field", rt.fieldReach !== null && rt.fieldReach >= FIELD_UNDER_PX);
       if (!packs || mode === "static" || window.innerWidth < TWO_COLUMN_MIN) {
         rt.corridor = null;
         rt.el.style.removeProperty("--ch-dial-top");
@@ -830,6 +852,7 @@ export function createDirector(): () => void {
           held: rt.commit.held, subscribed: rt.subscribed, pin: rt.pin, callbacks: rt.stats.callbacks, steps: rt.stats.steps,
           panelH: rt.panel.offsetHeight, stageH: rt.geom.stageH, height: rt.geom.height, pageTop: rt.geom.pageTop,
           rowYs: rt.geom.rowYs, railLen: rt.geom.railLen, beatTops: rt.geom.beatTops, corridor: rt.corridor, layout: rt.layout, dialRowH: rt.dialRowH,
+          fieldReach: rt.fieldReach, overField: rt.el.hasAttribute("data-over-field"),
           owner: rt === owner,
         }));
       },

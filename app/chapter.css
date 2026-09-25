@@ -175,15 +175,13 @@
   @media not screen and (prefers-reduced-motion: no-preference) and (forced-colors: none) and (min-width: 700px) and (min-height: 720px) {
     html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-panel { --glass-tint: var(--chapter-flow-tint); }
   }
-  /* 700–1023 px (OC-T, raised only as far as the pixel check requires): the one-column pinned panel spans the window
-     over the jack field's 14-pack and takes --chapter-narrow-tint (globals.css: 50 % dark, 60 % light), first paint
-     included; a flow panel at these widths takes it too, through --chapter-flow-tint (the flow extension). Under
-     769 px the phone glass is near-opaque and sets its own background. */
-  @media (max-width: 1023.98px) {
-    .chapter { --chapter-flow-tint: var(--chapter-narrow-tint); }
-    .chapter[data-mode="pinned"] .ch-panel,
-    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-panel { --glass-tint: var(--chapter-narrow-tint); }
-  }
+  /* OC-T keyed on its cause, not on a width: where the scene's solve puts a jack under the list's text
+     (data-over-field, written by the ChapterDirector from packCorridor.ts: a pinned list where its stage docks, a
+     flow list anywhere in its column), the panel takes --chapter-field-tint (globals.css), raised only as far as the
+     pixel check requires; everywhere else it keeps the fill above. So a touch iPad (no field) keeps the site's glass,
+     and a 1024–1366 px two-column window, where the 14-pack reaches under the index numerals, gets the raise a width
+     breakpoint missed. Under 769 px the phone glass is near-opaque and sets its own background. */
+  .chapter[data-over-field]:is([data-mode="pinned"], [data-mode="flow"]) .ch-panel { --glass-tint: var(--chapter-field-tint); }
   @media (min-width: 640px) {
     .ch-panel { padding: clamp(24px, 1.25vw, 32px); } /* 24 px up to a 1920 px window, 32 px at 2560 */
   }

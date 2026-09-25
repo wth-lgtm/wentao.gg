@@ -45,8 +45,11 @@ export interface Corridor {
   boxes: Rect[];
 }
 
-/** each pack's on-screen box, padded, from the scene's solve */
-export function packBoxes(input: Omit<CorridorInput, "x" | "clear">): Rect[] {
+/** a solved target on screen: its centre and radius in viewport px, and the pack it belongs to */
+export interface Disc { cx: number; cy: number; r: number; pack: number }
+
+/** every solved target as a disc on screen (the scene's solve), its radius the body's plus `padU` world units */
+export function packDiscs(input: Omit<CorridorInput, "x" | "clear">, padU = 0): Disc[] {
   const { width: w, height: h, packs } = input;
   const fit = fieldCamera(w, h, input.h1FontPx);
   const scales = fieldScales(packCount(packs), SEED_FIELD);
@@ -55,16 +58,48 @@ export function packBoxes(input: Omit<CorridorInput, "x" | "clear">): Rect[] {
   if (input.hero.card && onScreen(input.hero.card, w, h)) avoid.push(keepOutFor(input.hero.card, fit, CARD_STRENGTH));
   const { targets } = solveTargets(fit, packTargets(fit, packs, SEED_FIELD), scales, avoid);
   const owners = packOf(packs);
-  const boxes: Rect[] = packs.map(() => ({ left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity }));
-  targets.forEach((t, i) => {
+  return targets.map((t, i) => {
     const ppu = h / 2 / ((fit.z - t.z) * TAN);
-    const cx = w / 2 + t.x * ppu, cy = h / 2 - t.y * ppu;
-    const r = (DYN.BODY_R * (scales[i] ?? 1) + CORRIDOR_PAD_U) * ppu;
-    const b = boxes[owners[i]];
-    b.left = Math.min(b.left, cx - r); b.right = Math.max(b.right, cx + r);
-    b.top = Math.min(b.top, cy - r); b.bottom = Math.max(b.bottom, cy + r);
+    return { cx: w / 2 + t.x * ppu, cy: h / 2 - t.y * ppu, r: (DYN.BODY_R * (scales[i] ?? 1) + padU) * ppu, pack: owners[i] };
   });
+}
+
+/** each pack's on-screen box, padded, from the scene's solve */
+export function packBoxes(input: Omit<CorridorInput, "x" | "clear">): Rect[] {
+  const boxes: Rect[] = input.packs.map(() => ({ left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity }));
+  for (const d of packDiscs(input, CORRIDOR_PAD_U)) {
+    const b = boxes[d.pack];
+    b.left = Math.min(b.left, d.cx - d.r); b.right = Math.max(b.right, d.cx + d.r);
+    b.top = Math.min(b.top, d.cy - d.r); b.bottom = Math.max(b.bottom, d.cy + d.r);
+  }
   return boxes.filter((b) => Number.isFinite(b.top));
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// THE FIELD UNDER A PANEL (OC-T, keyed on what causes it). The chapter panels are glass over the fixed jack field;
+// where a pack sits under a list's text, a jack's glossy black (light theme) or its highlights (dark) come through
+// the blur behind the numerals and lines, and the site's 24 % / 40 % fill measured below 4.5:1 there (1024–1280 px
+// two-column, 820 × 1180 and 1000 × 800 one-column). A width breakpoint also raised the fill on touch iPads, where
+// the field never mounts. So the ChapterDirector asks the scene's own solve: does a solved jack's own disc (the
+// body's radius, no drift pad) reach FIELD_UNDER_PX into the list's box — a pinned list where its stage docks, a
+// flow list anywhere in its column (it passes over the whole field) — and writes data-over-field; app/chapter.css
+// raises that panel's fill (--chapter-field-tint). The reach tracks the light theme's worst numeral on the site's
+// glass: 25 px at 1100 × 800 → 3.75, 17–18 px at 1024 × 768 and 1280 × 720 → 3.8–4.6, 10 px at 1366 × 768 →
+// 4.77 (raised: a thin margin), −4 px at 1440 × 789 → 5.17 and −18 px at 1440 × 900 → 6.37 (the site's glass).
+
+/** px: a solved jack disc reaching this far into a list's box puts the field under its text */
+export const FIELD_UNDER_PX = 1;
+
+/** px: how far the deepest disc reaches into `rect` (its radius less the centre's signed distance to the box; ≤ 0: clear) */
+export function discReach(discs: readonly Disc[], rect: Rect): number {
+  let best = -Infinity;
+  for (const d of discs) {
+    const dx = Math.max(rect.left - d.cx, 0, d.cx - rect.right), dy = Math.max(rect.top - d.cy, 0, d.cy - rect.bottom);
+    // inside the box the centre's distance is negative: to its nearest edge
+    const dist = dx > 0 || dy > 0 ? Math.hypot(dx, dy) : -Math.min(d.cx - rect.left, rect.right - d.cx, d.cy - rect.top, rect.bottom - d.cy);
+    best = Math.max(best, d.r - dist);
+  }
+  return best;
 }
 
 /** The tallest vertical gap between the packs inside the dial's x-range, or null when none is ≥ CORRIDOR_MIN_PX. */
