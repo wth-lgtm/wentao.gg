@@ -683,6 +683,9 @@ export function createDirector(opts: DirectorOptions = {}): () => void {
         packs, x: [d.left, d.right], clear: STAGE_CLEAR,
       });
       rt.corridor = c ? { top: c.top, bottom: c.bottom } : null;
+      // a FLOW dial rests where the CSS puts it and its panel beside a jack field (FLOW_DIAL_TOP, app/chapter.css): a
+      // position read from the solve would move the panel, and the page under the reader, whenever the field re-solved
+      if (mode === "flow") { rt.el.style.removeProperty("--ch-dial-top"); continue; }
       if (!c || c.bottom - c.top < d.height) { rt.el.style.removeProperty("--ch-dial-top"); continue; }
       const top = Math.round(Math.min(c.bottom - d.height, Math.max(c.top, c.top + (c.bottom - c.top - d.height) / 2)));
       rt.el.style.setProperty("--ch-dial-top", `${top}px`);
@@ -699,7 +702,7 @@ export function createDirector(opts: DirectorOptions = {}): () => void {
     const resized = resizePending;
     resizePending = false;
     const motion = getSiteMotion().allowed;
-    const stageH = probe.offsetHeight || window.innerHeight;
+    const stageH = probe.getBoundingClientRect().height || window.innerHeight; // 100svh, unrounded: CSS's own 33svh
     const narrow = window.innerWidth < TWO_COLUMN_MIN;
     const next = runtimes.map((rt) => decide(rt, motion, stageH, narrow));
     const firstTime = runtimes.some((rt) => rt.mode === null);

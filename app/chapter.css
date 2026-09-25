@@ -538,7 +538,7 @@
   /* ---------------------------------------------------------------------------------------------------------
      Flow */
   @media (min-width: 1024px) {
-    /* the dial sticks beside the list, in the pack corridor when there is one (--ch-dial-top, the director) */
+    /* the dial sticks beside the list: at the stage's top, or in the pack corridor beside a jack field (below) */
     .chapter[data-mode="flow"] .ch-dial {
       position: sticky;
       top: var(--ch-dial-top, 96px);
@@ -547,20 +547,34 @@
     /* in flow the list's marks are the one moving layer: the dial carries the title only */
     .chapter[data-mode="flow"] .ch-readout { display: none; }
   }
-  /* THE FLOW DIAL'S REACH (OC-H: the title between the jack packs). A sticky box never leaves its grid cell, and a
-     flow cell is only as tall as its panel: Education's two schools are ≈ 300 px, so at a section-top landing (INDEX,
-     a hash, the cue) its 98 px dial could sit no lower than 96 + 300 − 98 px — above the corridor from 1512 px up,
-     on the 7-pack (the title −3 px and its rule −12 px from the nearest jack at 1728 × 1117, the folio −17 px at
-     2560 × 1440). So beside a jack field the cell is reserved tall enough for the dial to reach the corridor's top
-     with the section at the top of the screen: 33svh + 8 px (the corridor's top measured 0.28–0.32 of the height at
-     every desktop of the owner's matrix; less the 96 px clear band, plus the 98 px dial and a margin). At most a
-     third of the window of extra room under a short panel (Education +5 px at 1440 × 900, +124 px at 2560 × 1440);
-     a taller panel is untouched. Written from the first paint, in the jack field's own gate, so hydration moves
-     nothing. The dial still leaves with its list: once the panel's bottom passes the dial's, sticky lets it go. */
+  /* THE FLOW DIAL AND ITS LIST, TOGETHER (OC-H with O3: the title between the jack packs). A sticky box never leaves
+     its grid cell, and a flow cell is only as tall as its panel. So beside a jack field (the field's own gate) a flow
+     dial rests at FLOW_DIAL_TOP, 33svh + 8 px, inside the corridor between the packs at every desktop of the owner's
+     matrix (the corridor's top measured 0.28–0.32 of the height; packCorridor.ts FLOW_DIAL_TOP and its test), and
+     its PANEL starts there too. At a section-top landing (INDEX, a hash, the cue) the title and the first entry sit
+     in the gap together, and on the way in the title reaches its slot before entry 01 lights. (The cell used to be
+     reserved tall enough for the dial alone. Education's two schools then stayed at the top of the screen, and its
+     title rested level with or below the end of its own list: a caption, not a heading, 59 px below it at
+     2560 × 1440. On the way in the title crossed the lower pack as entry 01 lit.) CSS alone, from the first paint:
+     the offset depends on the window's height only, so hydration moves nothing, and nothing but a resize (which
+     keeps the reader's place) ever changes it. The dial still leaves with its list: once the panel's bottom passes
+     the dial's, sticky lets it go. */
   @media screen and (prefers-reduced-motion: no-preference) and (forced-colors: none) and (min-width: 1024px) and (hover: hover) and (pointer: fine) {
-    html[data-site-motion="on"] .chapter:not([data-mode="static"]):not([data-mode="pinned"]) .ch-grid {
-      min-height: calc(33vh + 8px);
-      min-height: calc(33svh + 8px);
+    html[data-site-motion="on"] .chapter[data-mode="flow"] .ch-dial {
+      top: calc(33vh + 8px);
+      top: calc(33svh + 8px);
+    }
+    html[data-site-motion="on"] .chapter[data-mode="flow"] .ch-panel,
+    html[data-site-motion="on"] .chapter:not([data-mode]):not([data-pin-default]) .ch-panel {
+      margin-top: max(0px, calc(33vh + 8px - 96px));
+      margin-top: max(0px, calc(33svh + 8px - 96px));
+    }
+  }
+  /* ... and the first paint of a pin-set chapter that will flow there: a window under PIN_MIN's 720 px */
+  @media screen and (prefers-reduced-motion: no-preference) and (forced-colors: none) and (min-width: 1024px) and (hover: hover) and (pointer: fine) and (max-height: 719.98px) {
+    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-panel {
+      margin-top: max(0px, calc(33vh + 8px - 96px));
+      margin-top: max(0px, calc(33svh + 8px - 96px));
     }
   }
   /* under 1024 px the list flows full width beneath the title: the marks are the moving layer, no readout */

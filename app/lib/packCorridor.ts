@@ -102,6 +102,12 @@ export function discReach(discs: readonly Disc[], rect: Rect): number {
   return best;
 }
 
+/** A FLOW dial's top beside a jack field, and its panel's (app/chapter.css, CSS alone): svh % of the stage plus px.
+ *  `33svh + 8px` lies inside the corridor at every desktop of the owner's matrix (its top measured 0.28–0.32 of the
+ *  height); tests/pack-corridor.test.ts holds it inside the corridor at the fixture viewports, and
+ *  tests/pin-query.test.ts holds the CSS twin. */
+export const FLOW_DIAL_TOP = { svh: 33, px: 8 } as const;
+
 /** The tallest vertical gap between the packs inside the dial's x-range, or null when none is ≥ CORRIDOR_MIN_PX. */
 export function packCorridor(input: CorridorInput): Corridor | null {
   const boxes = packBoxes(input);

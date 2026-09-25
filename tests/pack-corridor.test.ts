@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { CORRIDOR_MIN_PX, packBoxes, packCorridor } from "../app/lib/packCorridor";
+import { CORRIDOR_MIN_PX, FLOW_DIAL_TOP, packBoxes, packCorridor } from "../app/lib/packCorridor";
 import { SEED_FIELD, fieldCamera, fieldScales, keepOutFor, placeWorld, repivot, solveTargets, type Rect } from "../app/lib/fieldLayout";
 import { fieldPacks, packCentroids, packCount, packOf, packTargets } from "../app/lib/fieldPacks";
 import { DYN, createWorld, setKeepOut, stepWorld } from "../app/lib/jackDynamics";
@@ -90,4 +90,16 @@ test("at 1440 × 900 the corridor is the gap between the seven above the name an
 test("no gap of CORRIDOR_MIN_PX, no corridor (the dial then sits at the stage's top)", () => {
   const huge = [{ cx: -0.45, cy: 0, n: 14, r: 2.0, swirlGain: 1 }, { cx: -0.45, cy: 0.66, n: 7, r: 0.9, swirlGain: 3 }, { cx: -0.45, cy: -0.66, n: 7, r: 0.9, swirlGain: 3 }];
   assert.equal(packCorridor({ width: 1440, height: 900, h1FontPx: 112, hero: { h1: null, card: null }, packs: huge, x: dialX(1440), clear: STAGE_CLEAR }), null);
+});
+
+// THE FLOW DIAL AND ITS PANEL (final review): a flow dial beside a jack field rests at FLOW_DIAL_TOP (33svh + 8 px,
+// CSS alone), its panel beside it; the title sits between the packs only if that lies inside the corridor.
+test("FLOW_DIAL_TOP lies inside the corridor at every fixture viewport, for Education's 98 px flow dial", () => {
+  for (const [key, rects] of Object.entries(FIXTURES)) {
+    const [w, h] = key.split("x").map(Number);
+    const c = packCorridor({ width: w, height: h, h1FontPx: Math.min(112, 0.09 * w), hero: rects, packs: fieldPacks(w, h), x: dialX(w), clear: STAGE_CLEAR });
+    const top = (h * FLOW_DIAL_TOP.svh) / 100 + FLOW_DIAL_TOP.px;
+    assert.ok(c, `a corridor at ${key}`);
+    assert.ok(top >= c!.top && top + 98 <= c!.bottom, `${key}: ${top}–${top + 98} inside ${c!.top}–${c!.bottom}`);
+  }
 });

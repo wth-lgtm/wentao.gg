@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { DIAL_ROW_PX, PIN_MIN, PIN_QUERY, READING_LINE, STAGE_CLEAR, TWO_COLUMN_MIN } from "../app/lib/chapterList";
+import { FLOW_DIAL_TOP } from "../app/lib/packCorridor";
 
 const css = fs.readFileSync(path.join(import.meta.dirname, "..", "app/chapter.css"), "utf8");
 
@@ -40,8 +41,16 @@ const VARIANTS: Record<string, string> = {
   "not PIN_QUERY (a pin-set chapter that will flow)": `not ${PIN_QUERY}`,
   "PIN_QUERY at two columns": PIN_QUERY.replace(MIN_W, TWO),
   "PIN_QUERY at one column (700–1023)": PIN_QUERY.replace(MIN_W, `${MIN_W} and ${ONE}`),
-  "the jack field's gate at two columns (the corridor: dials held unseen, the flow reservation)": PIN_QUERY.replace(`${MIN_W} and ${MIN_H}`, `${TWO} and (hover: hover) and (pointer: fine)`),
+  "the jack field's gate at two columns (the corridor: dials held unseen, the flow panel beside its dial)": PIN_QUERY.replace(`${MIN_W} and ${MIN_H}`, `${TWO} and (hover: hover) and (pointer: fine)`),
+  "the jack field's gate under PIN_MIN's height (a pin-set chapter's flow first paint beside its dial)": PIN_QUERY.replace(`${MIN_W} and ${MIN_H}`, `${TWO} and (hover: hover) and (pointer: fine) and (max-height: ${PIN_MIN.height - 0.02}px)`),
 };
+
+test("the CSS twin of FLOW_DIAL_TOP: the flow dial beside a jack field and its panel's offset are one estimate", () => {
+  const est = `${FLOW_DIAL_TOP.svh}svh + ${FLOW_DIAL_TOP.px}px`;
+  assert.ok(css.includes(`top: calc(${est});`), "the flow dial's sticky top");
+  const panel = css.split(`margin-top: max(0px, calc(${est} - ${STAGE_CLEAR.top}px));`).length - 1;
+  assert.equal(panel, 2, "the flow panel's offset and the pin-set chapter's flow first paint");
+});
 
 test("every @media prelude that gates on motion is PIN_QUERY or a variant built from PIN_MIN and TWO_COLUMN_MIN", () => {
   const preludes = [...css.matchAll(/@media ([^{]+)\{/g)].map((m) => m[1].trim()).filter((p) => p.includes("prefers-reduced-motion: no-preference"));
