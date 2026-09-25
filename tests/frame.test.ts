@@ -123,12 +123,13 @@ function framerLike() {
 test("under framer's render-step semantics a raw throw stalls its step for good, and onFrame's wrapper prevents it", () => {
   // the failure mode, unwrapped: one throw in render, and render never runs again
   const raw = framerLike();
-  const ran: string[] = [];
+  const rawRan: string[] = [];
   raw.schedule("render", () => { throw new Error("boom"); });
   raw.frame();
-  raw.schedule("render", () => ran.push("next"));
+  raw.schedule("render", () => rawRan.push("next"));
   raw.frame(); raw.frame();
-  assert.deepEqual(ran, [], "the raw step is stuck with isProcessing left true");
+  assert.equal(rawRan.length, 0, "the raw step is stuck with isProcessing left true");
+  const ran: string[] = [];
 
   // through onFrame: the same throw, and the step keeps running frame after frame
   const s = framerLike();
