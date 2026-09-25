@@ -67,6 +67,7 @@
 //   textSpacing             WCAG 1.4.12 CSS and a 24 px root at every size: layoutSane (title glyphs included) holds
 //   touchTargets            every row link by elementFromPoint: its centre hits it, vertical reach ≥ 24 px
 //   printNeutral            print emulation changes no mode or mark, prints the marks neutral; the round trip moves nothing
+//                           (mid-Experience, mid-Education and at Projects' top)
 //   slowDirectorChunk       the director's chunk held back 1500 ms: a wheel on a /#education hard load before it arrives
 //                           is not snapped back to the section top by the landing; held back 2500 ms, Education's flow
 //                           title is visible in place before the director and does not move after it (1440×900)
@@ -1704,8 +1705,11 @@ async function printNeutral(vp, theme) {
   const { ctx, page } = await openPage(vp, theme);
   const rows = [];
   let ok = true;
-  for (const [id, beat] of [["experience", 2], ["education", 1]]) {
-    await scrollTo(page, await yForBeat(page, id, beat)); await settled(page); await sleep(300);
+  // and past both chapters (Projects' top): the paper layout is far shorter, and the way back used to re-anchor on a
+  // node it had moved, throwing the reader 1000–1400 px down the page (from Education's top on)
+  for (const [id, beat] of [["experience", 2], ["education", 1], ["projects", -1]]) {
+    const y = id === "projects" ? await page.evaluate(() => document.getElementById("projects").getBoundingClientRect().top + scrollY - 100) : await yForBeat(page, id, beat);
+    await scrollTo(page, y); await settled(page); await sleep(300);
     const before = await page.evaluate(() => ({ y: Math.round(scrollY), modes: window.__chapters.list.map((c) => `${c.id}:${c.mode}:${c.shown}`).join(" "), corrections: window.__chapters.corrections.length, evaluations: window.__chapters.evaluations }));
     await page.emulateMedia({ media: "print" });
     await sleep(600);
@@ -1722,7 +1726,7 @@ async function printNeutral(vp, theme) {
     const after = await page.evaluate(() => ({ y: Math.round(scrollY), modes: window.__chapters.list.map((c) => `${c.id}:${c.mode}:${c.shown}`).join(" "), corrections: window.__chapters.corrections.length }));
     const good = inPrint.modes === before.modes && (inPrint.activeLineColour === null || inPrint.activeLineColour === inPrint.legend) && inPrint.tint !== "block" && inPrint.wheelsShowRange && Math.abs(after.y - before.y) <= 2 && after.modes === before.modes && after.corrections === before.corrections;
     if (!good) ok = false;
-    rows.push({ from: `${id} beat ${beat}`, before, inPrint, after, good });
+    rows.push({ from: id === "projects" ? "Projects' top − 100" : `${id} beat ${beat}`, before, inPrint, after, good });
   }
   await ctx.close();
   return report("printNeutral", vp.spec, theme, ok, { rows });

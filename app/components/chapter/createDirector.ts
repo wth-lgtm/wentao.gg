@@ -499,10 +499,14 @@ export function createDirector(opts: DirectorOptions = {}): () => void {
   // reader's place (a print round trip moved a reader from mid-Experience to Education). While printing
   // (beforeprint/afterprint, or print media emulated) nothing evaluates, relights or takes a rest place; the
   // print CSS neutralises whatever marks were on screen, and afterwards one evaluation runs with no correction
-  // unless the window itself changed.
+  // unless the window itself changed. The scroll is put back where the reader had it: the paper layout is far
+  // shorter (the pinned chapters print at their content's height), and on the way back the browser's scroll
+  // anchoring kept a node that print had moved, so a reader at or past Education's top was thrown 1000–1400 px down
+  // the page (the same on e0fa376; the harness reached it once the travelling line moved its Education position).
   const printMq = matchMedia("print");
   let printEvent = false;
   let printDeferred = false;
+  let printY: number | null = null;
   const printing = () => printEvent || printMq.matches;
   // THE reading line, one for the page: the flow gates, keep-your-place and the focus scroll all read it, and it
   // is re-measured on every evaluation (every resize the director accepts), so a height-only resize on a desktop
@@ -863,14 +867,30 @@ export function createDirector(opts: DirectorOptions = {}): () => void {
   if (main) ro.observe(main);
   for (const rt of runtimes) { ro.observe(rt.el); ro.observe(rt.panel); ro.observe(rt.dial); }
 
+  /** entering print (beforeprint, or print media emulated): the reader's scroll, taken once before paper moves it,
+   *  and scroll anchoring held off, so the way back cannot re-anchor on a node the paper layout moved */
+  let printRelease = 0;
+  const enterPrint = () => {
+    if (printY !== null) return;
+    printY = window.scrollY;
+    cancelAnimationFrame(printRelease);
+    html.style.setProperty("overflow-anchor", "none");
+  };
   const resumeFromPrint = () => {
-    if (printing()) return;
+    if (printing()) { enterPrint(); return; }
     const deferred = printDeferred;
     printDeferred = false;
+    const y = printY;
+    printY = null;
+    if (y !== null) {
+      // the screen layout again (scrollTo lays it out), the reader where they were, anchoring back two frames on
+      if (Math.abs(window.scrollY - y) >= 2) scrollOwn(y);
+      printRelease = requestAnimationFrame(() => { printRelease = requestAnimationFrame(() => html.style.removeProperty("overflow-anchor")); });
+    }
     if (window.innerWidth !== lastW || window.innerHeight !== lastH) onResize();
     else if (deferred) request();
   };
-  const onBeforePrint = () => { printEvent = true; };
+  const onBeforePrint = () => { enterPrint(); printEvent = true; };
   const onAfterPrint = () => { printEvent = false; resumeFromPrint(); };
   window.addEventListener("beforeprint", onBeforePrint);
   window.addEventListener("afterprint", onAfterPrint);
@@ -926,6 +946,7 @@ export function createDirector(opts: DirectorOptions = {}): () => void {
   return () => {
     disposed = true;
     cancelAnimationFrame(anchorRelease);
+    cancelAnimationFrame(printRelease);
     clearTimeout(restTimer);
     window.removeEventListener("beforeprint", onBeforePrint);
     window.removeEventListener("afterprint", onAfterPrint);
