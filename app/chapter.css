@@ -657,3 +657,8 @@
   outline-offset: -2px;
   border-radius: 6px;
 }
+
+/* Unlayered on purpose, for the same reason: the globals' unlayered `button, a { font-weight: 500 }` beat the
+   layered rules above, so a school's name (h3 > a) rendered at 500 beside the companies' 600, and a linked place
+   inside a dates line at 500 beside its 400 date. A text link takes its line's weight. */
+.ch-panel .ch-text-link { font-weight: inherit; }
