@@ -146,11 +146,16 @@
     overflow: clip;
     padding: 20px 18px 20px 16px;
   }
-  /* OC-T: the chapter panels' glass fill (--chapter-panel-tint, globals.css: dark 40 %, light the site's own 40 %),
-     pinned and flow, and before hydration wherever motion is on; the static still keeps the site's glass. The blur
-     stays. (≤ 768 px the site's near-opaque phone glass sets its own background and wins.) */
-  html[data-site-motion="on"] .chapter:not([data-mode]) .ch-panel,
-  .chapter:is([data-mode="pinned"], [data-mode="flow"]) .ch-panel { --glass-tint: var(--chapter-panel-tint); }
+  /* The glass fill. The two-column pinned panel keeps the site's glass (OC-T: it passes the pixel check at 24 % dark
+     and 40 % light with its lines in --legend). The FLOW panel takes --chapter-flow-tint (globals.css: dark 40 %, an
+     extension beyond OC-T put to the owner as its own call; light the site's 40 %), and so does the first paint of
+     a chapter that will flow (out of the pin set, or wherever PIN_QUERY fails). The static still keeps the site's
+     glass. The blur stays. (≤ 768 px the site's near-opaque phone glass sets its own background and wins.) */
+  .chapter[data-mode="flow"] .ch-panel,
+  html[data-site-motion="on"] .chapter:not([data-mode]):not([data-pin-default]) .ch-panel { --glass-tint: var(--chapter-flow-tint); }
+  @media not screen and (prefers-reduced-motion: no-preference) and (forced-colors: none) and (min-width: 700px) and (min-height: 720px) {
+    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-panel { --glass-tint: var(--chapter-flow-tint); }
+  }
   @media (min-width: 640px) {
     .ch-panel { padding: clamp(24px, 1.25vw, 32px); } /* 24 px up to a 1920 px window, 32 px at 2560 */
   }

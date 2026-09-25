@@ -47,13 +47,15 @@
      viewport); never under muted text (muted over a 12 % tint is 4.56:1 dark, 4.23:1 light). */
   --chapter-tint: color-mix(in oklab, var(--accent) 12%, transparent);
   --chapter-tint-soft: color-mix(in oklab, var(--accent) 8%, transparent);
-  /* OC-T (the owner: "raise only as far as the pixel contrast check requires"): the chapter panels' glass fill,
-     pinned and flow (chapter.css). The inactive lines are --legend, not --muted, so the check needs far less fill
-     than it did (65 % pinned with muted lines): with legend lines the pinned panel passes at the site's own 24 %,
-     but a flow panel on a short desktop window (1440 × 700, the index column over the fluid's dye) failed its
-     numerals in three runs of five at 24 % and a line at 4.42 at 32 %; at 40 % sixteen runs of sixteen passed
-     across both (worst line 4.73, numeral 4.90). The blur stays: it reads as glass. */
-  --chapter-panel-tint: color-mix(in oklab, var(--card) 40%, transparent);
+  /* OC-T (the owner: "raise only as far as the pixel contrast check requires", for the PINNED panel). With the
+     inactive lines in --legend the two-column pinned panel passes at the site's own 24 %, so it keeps the site's
+     glass (no variable here). --chapter-flow-tint is the FLOW panel's fill (chapter.css), and it is NOT covered by
+     OC-T: it is an extension put to the owner as its own call. At 24 % a flow panel on a short desktop window
+     (1440 × 700, the index column over the fluid's dye) failed its numerals in three runs of five and a line
+     measured 4.42 at 32 %; at 40 % sixteen runs of sixteen passed (worst line 4.73, numeral 4.90). If the owner
+     declines, this line becomes var(--glass-tint) and the failing flow rows are recorded (DESIGN §10's fallback).
+     The blur stays either way: it reads as glass. */
+  --chapter-flow-tint: color-mix(in oklab, var(--card) 40%, transparent);
 
   /* Split-flap board (dark) — opaque plastic flaps so the animated bg doesn't bleed. */
   --flap-bg: #202024;
@@ -106,10 +108,10 @@
   /* The reading chapters' marks (light): a touch less accent over the light glass. */
   --chapter-tint: color-mix(in oklab, var(--accent) 10%, transparent);
   --chapter-tint-soft: color-mix(in oklab, var(--accent) 7%, transparent);
-  /* OC-T, light: NO raise. With muted lines the pinned panel needed 90 % (70–80 % failed one or two runs of four);
-     with --legend lines the site's own 40 % passes, pinned and flow, sixteen runs of sixteen (worst line 5.82,
-     numeral 4.67), so the light panels keep the site's liquid glass. */
-  --chapter-panel-tint: var(--glass-tint);
+  /* OC-T, light: NO raise at two columns. With muted lines the pinned panel needed 90 % (70–80 % failed one or two
+     runs of four); with --legend lines the site's own 40 % passes, pinned and flow, sixteen runs of sixteen (worst
+     line 5.82, numeral 4.67), so the light panels keep the site's liquid glass. */
+  --chapter-flow-tint: var(--glass-tint);
 
   /* Split-flap board (light). */
   --flap-bg: #e7e7ea;
