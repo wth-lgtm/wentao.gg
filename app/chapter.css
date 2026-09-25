@@ -128,6 +128,10 @@
   }
   .yw-cell { display: block; height: 1em; line-height: 1; }
   .yw-cell::before, .yw-range::before { content: attr(data-y); }
+  /* the digits carry their own metrics: a text-spacing override (`* { line-height: 1.5 !important }`) reaches the
+     cells but cannot match a pseudo-element, so a year never drops a quarter-em and shows half of two years */
+  .yw-cell::before { display: block; height: 1em; line-height: 1; }
+  .yw-range::before { line-height: 1; }
   .yw-range { display: none; }
   /* the static still (and the pre-hydration paint of a flow chapter): the full range, no wheel */
   .chapter:not([data-mode="pinned"]):not([data-mode="flow"]) .yw-window { display: none; }
