@@ -227,8 +227,10 @@ function CategorySection({ category, isExpanded, onToggle }: {
         />
       </button>
 
-      {/* Projects Grid - Expandable */}
-      <AnimatePresence>
+      {/* Projects Grid - Expandable. initial={false}: the grids that start open render open on the server, with no
+          height-0 entrance at hydration — that entrance pushed every section below Projects down by ~420 px while a
+          hard load of /#projects was already reading it (CLS ≈ 0.2). Toggling a category still animates. */}
+      <AnimatePresence initial={false}>
         {isExpanded && (
           <motion.div
             initial={{ opacity: 0, height: 0 }}
