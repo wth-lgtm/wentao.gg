@@ -370,9 +370,10 @@
      left of where the first begins). The link stays inline, so find-in-page still matches a phrase across it
      ("Science in Robotics"), which an inline-block broke. A date-and-place link reaches only 1 px up, so the
      degree link above it keeps its 3 px (the two lines sit 2 px apart, and the later box wins the overlap), and
-     5 px down, into the entry's padding or the 8 px before the next degree. */
+     7 px down, into the entry's padding or the 8 px before the next degree: at 5 px "Philadelphia, PA" and the
+     second "Pittsburgh, PA" hit-tested 23.75 px tall in Chrome at desktop sizes, just under WCAG 2.5.8's 24. */
   .ch-sub .ch-text-link { padding-block: 3px; }
-  .ch-degree > .ch-line:last-child .ch-text-link { padding-top: 1px; padding-bottom: 5px; }
+  .ch-degree > .ch-line:last-child .ch-text-link { padding-top: 1px; padding-bottom: 7px; }
   /* a school's name in the head row has room above and to its line below (which, later in the tree, still wins
      where the two meet) */
   .ch-name .ch-text-link::after { inset: -11px -4px; z-index: 1; }
