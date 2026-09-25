@@ -81,7 +81,7 @@ test("print on paper: the chapters on white under their dark inks (background gr
   assert.match(p, /\.chapter \.ch-panel \{\s*background: transparent !important;\s*-webkit-backdrop-filter: none !important;\s*backdrop-filter: none !important;/);
   const globals = fs.readFileSync(path.join(root, "app/globals.css"), "utf8");
   assert.match(globals, /@media print \{\s*\.skip-link, \[data-print="hide"\] \{ display: none !important; \}/);
-  for (const f of ["app/components/Navigation.tsx", "app/components/ScrollProgress.tsx"]) {
+  for (const f of ["app/components/Navigation.tsx", "app/components/ScrollProgress.tsx", "app/components/HeroMeta.tsx"]) {
     assert.match(fs.readFileSync(path.join(root, f), "utf8"), /data-print="hide"/, `${f}'s fixed box is hidden in print`);
   }
 });
