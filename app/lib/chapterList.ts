@@ -1,0 +1,333 @@
+// THE READING CHAPTERS' engine (DESIGN §4.2.1): the owner's highlighted list — "the scrolling animation could be
+// added to the experience, education as well as projects section so it has a highlighted bullet point list
+// animation like you implemented on augnition's website". Augnition's pinned facts panel
+// (sequence-timeline.ts: activeFactAt over a raw chapterPin) rebuilt in ESCAPEMENT for this site's glass.
+// Pure; imports nothing; every rule runs in node (tests/chapter-list.test.ts, reading-line, riffle).
+//
+// ONE SOURCE, ONE DISPLAYED STATE. The target beat is `activeItemAt(raw pin)` (pinned) or
+// `readingLineActive(cached row tops)` (flow) — never a damped value. What every display shows is `shown`,
+// the committed beat (chapterCommit.ts), which follows the target one beat per 100 ms lattice tick (the
+// catch-up riffle), so no two displays disagree in any frame and no row is skipped. Only the rail's fill runs
+// free, and never past the next row that has not committed (`headClamp`).
+//
+// Entries, not bullets (owner, 2026-09-24): "for the bullet points we can keep them empty for now. We just need
+// to list the individual experiences and job titles". Experience and Education light ENTRY BY ENTRY — each
+// entry is one beat (its layout is all ones, derived from the data in app/lib/content/*). The engine keeps
+// the general item/sub shape because Projects (PR 2) lights two rows per project.
+
+/** Scroll per beat, in viewport heights: ≥ Augnition's FACT_BEAT_VH 9 (a test holds ≥ 9), so one wheel notch or a flick never lands past a row unseen. */
+export const ITEM_BEAT_VH = 10;
+/** extra dwell on the first row while the stage docks */
+export const LEAD_VH = 15;
+/** extra dwell on the last row before the stage releases */
+export const TAIL_VH = 15;
+/** Augnition's proven pin gate (the LC graft; 600 refused) */
+export const PIN_MIN = { width: 700, height: 720 } as const;
+/** THE one media text for "may pin"; tests/pin-query.test.ts holds it equal to app/chapter.css */
+export const PIN_QUERY =
+  "screen and (prefers-reduced-motion: no-preference) and (forced-colors: none) and (min-width: 700px) and (min-height: 720px)";
+/** px: the stage's padding — under the W. / INDEX marks, and above the fold */
+export const STAGE_CLEAR = { top: 96, bottom: 40 } as const;
+/** 700–1023 px wide, the pinned stage is one column: a compact dial row (72 px, app/chapter.css) and a 16 px gap come off the band */
+export const DIAL_ROW_PX = 72 + 16;
+/** the width from which the pinned stage has two columns (the dial beside the panel) */
+export const TWO_COLUMN_MIN = 1024;
+/** pin only with ≥ 16 px spare in the band; unpin at > 0 px overflow (hysteresis, E1) */
+export const PIN_SLACK_PX = 16;
+/** flow mode: the reading line, as a fraction of the cached client height (the small viewport on iOS) */
+export const READING_LINE = 0.62;
+export const HYSTERESIS_PX = 24;
+/** px/s; above it the riffle holds and resumes once the reader slows (§3.3) */
+export const COMMIT_MAX_V = 3000;
+/**
+ * More than this many beats between `shown` and the target and a step jumps to one short of the target, then
+ * steps the last one (an anchor jump from far away). 4, recomputed for the entry-by-entry chapters: the longest
+ * move inside Experience (five entries) is 4 beats, so once a chapter has docked nothing inside it is ever
+ * skipped — a PageDown through the whole list riffles every entry in turn. (The brief's 3 assumed ten-beat
+ * chapters.) Docking itself (nothing shown yet) lands on the target directly.
+ */
+export const RIFFLE_JUMP = 4;
+
+/** Subs (beats) per item, derived from content data, never typed by hand (tests/content.test.ts holds this). */
+export type ChapterLayout = readonly number[];
+/** beat = the global index 0..beats − 1; item/sub locate it */
+export interface Active { item: number; sub: number; beat: number }
+
+/** Which chapters pin (OC-P, the owner's call at its recommended default: Experience + Projects pinned, Education in flow). */
+export const PIN_CHAPTERS: Readonly<Record<string, boolean>> = { experience: true, education: false, projects: true };
+
+const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
+const subsOf = (n: number) => Math.max(1, Math.floor(Number.isFinite(n) ? n : 1));
+
+export function beatCount(layout: ChapterLayout): number {
+  let n = 0;
+  for (const s of layout) n += subsOf(s);
+  return n;
+}
+
+/** the scroll the pinned stage holds, in vh: lead + beats + tail */
+export function heldVh(layout: ChapterLayout): number {
+  return LEAD_VH + TAIL_VH + beatCount(layout) * ITEM_BEAT_VH;
+}
+
+/** The pinned section's height in svh: 100 (the stage) + the held scroll. The server writes it inline, so the first paint never shifts. */
+export function chapterVh(layout: ChapterLayout): number {
+  return 100 + heldVh(layout);
+}
+
+/**
+ * Augnition's pinProgress, over the STAGE's cached clientHeight (100svh), not innerHeight (E7): 0 when the
+ * section's top meets the viewport top, 1 when its bottom meets the stage's bottom.
+ */
+export function chapterPin(sectionTop: number, sectionHeight: number, stageHeight: number): number {
+  const travel = sectionHeight - stageHeight;
+  if (!(travel > 0)) return sectionTop <= 0 ? 1 : 0;
+  const p = -sectionTop / travel;
+  return p <= 0 ? 0 : p >= 1 ? 1 : p;
+}
+
+/** item and sub of a global beat (clamped into the layout) */
+export function beatToActive(beat: number, layout: ChapterLayout): Active {
+  const total = beatCount(layout);
+  if (total === 0) return { item: -1, sub: -1, beat: -1 };
+  let b = Math.min(total - 1, Math.max(0, Math.floor(beat)));
+  const out = b;
+  for (let item = 0; item < layout.length; item++) {
+    const n = subsOf(layout[item]);
+    if (b < n) return { item, sub: b, beat: out };
+    b -= n;
+  }
+  return { item: layout.length - 1, sub: subsOf(layout[layout.length - 1]) - 1, beat: total - 1 };
+}
+
+/** the global beat of (item, sub) */
+export function beatOf(item: number, sub: number, layout: ChapterLayout): number {
+  let b = 0;
+  for (let i = 0; i < item && i < layout.length; i++) b += subsOf(layout[i]);
+  return b + Math.max(0, Math.min(subsOf(layout[item] ?? 1) - 1, sub));
+}
+
+/** the pin at which beat k's scroll slot begins (beat 0's nominal slot begins after the lead) */
+export function beatStart(beat: number, layout: ChapterLayout): number {
+  return (LEAD_VH + beat * ITEM_BEAT_VH) / heldVh(layout);
+}
+
+/**
+ * THE one source. Pinned mode: beat 0 through the lead and its own slot, then one beat per ITEM_BEAT_VH, the
+ * last beat through its slot and the tail — so pin 0 marks the first row, pin 1 the last, and it is never −1.
+ */
+export function activeItemAt(pin: number, layout: ChapterLayout): Active {
+  const total = beatCount(layout);
+  if (total === 0) return { item: -1, sub: -1, beat: -1 };
+  const p = Number.isFinite(pin) ? clamp01(pin) : 0;
+  const into = p * heldVh(layout) - LEAD_VH;
+  const beat = Math.min(total - 1, Math.max(0, Math.floor(into / ITEM_BEAT_VH + 1e-9)));
+  return beatToActive(beat, layout);
+}
+
+/** Inverse: the pin at the MIDDLE of beat k's slot (keyboard focus, keep-your-place, anchors, tests). */
+export function pinAtBeat(beat: number, layout: ChapterLayout): number {
+  const total = beatCount(layout);
+  const b = Math.min(Math.max(0, Math.floor(beat)), Math.max(0, total - 1));
+  return clamp01((LEAD_VH + (b + 0.5) * ITEM_BEAT_VH) / heldVh(layout));
+}
+
+/**
+ * The raw rail head in px from the rail's top: piecewise-linear through (0, 0), (beatStart(k), rowYs[k]) for
+ * every beat, and (1, railLength) — continuous in pin, meeting row k exactly as beat k's slot begins.
+ */
+export function railHeadAt(pin: number, layout: ChapterLayout, rowYs: readonly number[], railLength: number): number {
+  const total = Math.min(beatCount(layout), rowYs.length);
+  const p = Number.isFinite(pin) ? clamp01(pin) : 0;
+  let x0 = 0, y0 = 0;
+  for (let k = 0; k <= total; k++) {
+    const x1 = k < total ? beatStart(k, layout) : 1;
+    const y1 = k < total ? rowYs[k] : railLength;
+    if (p <= x1) return x1 > x0 ? y0 + ((y1 - y0) * (p - x0)) / (x1 - x0) : y1;
+    x0 = x1; y0 = y1;
+  }
+  return railLength;
+}
+
+/** The displayed head: never past the next row that has not committed (E2). `shown` −1 (nothing marked) holds it above the first row. */
+export function headClamp(rawHead: number, rowYs: readonly number[], shown: number): number {
+  const next = shown + 1;
+  return next >= 0 && next < rowYs.length ? Math.min(rawHead, rowYs[next]) : rawHead;
+}
+
+/**
+ * The next displayed beat on a lattice tick: dock straight onto the target when nothing is shown yet, otherwise
+ * one step toward it — or, more than RIFFLE_JUMP away, to one short of it (the last row still steps).
+ */
+export function riffleStep(shown: number, target: number): number {
+  if (target < 0) return -1;
+  if (shown < 0 || shown === target) return target;
+  const d = target - shown;
+  if (Math.abs(d) > RIFFLE_JUMP) return target - Math.sign(d);
+  return shown + Math.sign(d);
+}
+
+/**
+ * Flow mode: the last row whose top has crossed `line` (viewport px). Forward immediately; backward only once
+ * the held row's top has moved HYSTERESIS_PX below the line, so a row resting on the line never flickers.
+ * −1 above the first row.
+ */
+export function readingLineActive(rowTops: readonly number[], line: number, prev: number): number {
+  let fwd = -1, back = -1;
+  for (let k = 0; k < rowTops.length; k++) {
+    if (rowTops[k] <= line) fwd = k;
+    if (rowTops[k] <= line + HYSTERESIS_PX) back = k;
+  }
+  if (prev < 0 || fwd >= prev) return fwd;
+  return Math.max(fwd, Math.min(prev, back));
+}
+
+/** px: at a flow list's section-top landing its reading line stands this far below the list's first row's top —
+ *  past the row's dot (its centre sits 24–32 px below the row's top: the row's padding + 14), so the rail's fill
+ *  reaches the seated dot, and short of the next row (entries are ≥ 80 px apart) */
+export const FLOW_DIP_PX = 40;
+
+/**
+ * THE TRAVELLING READING LINE (flow). The 62 % line alone marked the LAST row above it, and a flow list's section-top
+ * landing (INDEX, a hash, the hero cue) shows several rows above it on a phone: Mashey (04 of 05) lit on arrival at
+ * 430 × 932 with Mercor, the current role, dark, and Education lit its second school at every size. The brief's
+ * anchor rule is the pinned dock's: land at the section top with item 0 marked (§4.2.11). So near its section's top
+ * a flow list's line BENDS to its first row. At u = 0 (the section's top at the viewport's top) it stands
+ * FLOW_DIP_PX below the first row's top, past its dot, so entry 01 is the last row across it. It meets the page's line again
+ * |D| px of scroll either side, linearly, where D = line − (o0 + FLOW_DIP_PX). Coming down the page, the first row
+ * still lights on the 62 % line and holds while its section docks to the top, as a pinned stage holds its first
+ * row through the lead. From the top the line travels back down at twice the scroll, and the rows light in turn;
+ * nothing is skipped. Pure and stateless, so every way of arriving at a scroll position gets the same marks. Where
+ * the first row sits below the line at the section top (a landscape phone), D < 0 and the line dips DOWN to it.
+ * The flow rail's CSS fill rides the same line (app/chapter.css, a scroll-driven `top` over the same range).
+ *
+ *   u     the section's top above the viewport's top: scrollY − the section's page top
+ *   o0    the list's first row's top below the section's top (px)
+ *   line  the page's reading line (viewport px)
+ */
+export function flowLine(u: number, o0: number, line: number): number {
+  const d = line - (o0 + FLOW_DIP_PX);
+  const k = Math.abs(d) - Math.abs(u);
+  return k > 0 ? line - Math.sign(d) * k : line;
+}
+
+/** How far down its section the travelling line reaches: u + flowLine (px from the section's top). Continuous and
+ *  non-decreasing in u, so a row `o` px below the section's top is across the line exactly while reach ≥ o. */
+export function flowReach(u: number, o0: number, line: number): number {
+  return u + flowLine(u, o0, line);
+}
+
+/**
+ * The inverse of flowReach: the least u whose reach is ≥ t (`"first"`), or the greatest u whose reach is ≤ t
+ * (`"last"`). The reach is piecewise linear (slope 1 outside the bend, 0 and 2 inside it), so this is exact.
+ * Keep-your-place and the keyboard focus scroll use it to land a row as the last one across the travelling line.
+ */
+export function flowScrollFor(t: number, o0: number, line: number, side: "first" | "last"): number {
+  const dip = o0 + FLOW_DIP_PX;
+  const d = line - dip;
+  const a = Math.abs(d);
+  if (a === 0) return t - line;
+  // the four pieces: (−∞, −a] slope 1; [−a, 0] flat when d > 0, slope 2 when d < 0; [0, a] the other; [a, ∞) slope 1
+  const r0 = flowReach(-a, o0, line), r2 = flowReach(a, o0, line);
+  if (side === "first") {
+    if (t <= r0) return t - line;
+    if (t <= dip) return d < 0 ? -a + (t - r0) / 2 : 0; // d > 0: the flat piece ends at 0 with reach dip ≥ t > r0 (never)
+    if (t <= r2) return d > 0 ? (t - dip) / 2 : a;
+    return t - line;
+  }
+  if (t >= r2) return t - line;
+  if (t >= dip) return d > 0 ? (t - dip) / 2 : 0;
+  if (t >= r0) return d < 0 ? -a + (t - r0) / 2 : -a;
+  return t - line;
+}
+
+/** the reading line in px for a cached client height */
+export function readingLineFor(clientHeight: number): number {
+  return Math.round(READING_LINE * clientHeight);
+}
+
+/** px: on a coarse pointer, a height-only change smaller than this is the browser's toolbars, not a new window */
+export const TOOLBAR_PX = 120;
+
+/**
+ * THE reading line (one per page: the ChapterDirector's gates, keep-your-place and the focus scroll all read this
+ * one, and the flow rail's CSS fill sits on 62svh). It follows the window: a width change, or any height change
+ * on a fine pointer (a dragged window edge, DevTools docked at the bottom, macOS tiling), re-measures it. Only on
+ * a coarse pointer does a height-only change under TOOLBAR_PX leave it where it was: iOS's toolbars change
+ * innerHeight by 50–80 px as they collapse, and a line that moved with them would flip still rows (E7, O17).
+ */
+export function createReadingLine(): { at(width: number, clientHeight: number, coarse: boolean): number } {
+  let width = Number.NaN;
+  let height = Number.NaN;
+  let line = 0;
+  return {
+    at(w, h, coarse) {
+      const heightMoved = h !== height && (!coarse || !(Math.abs(h - height) < TOOLBAR_PX));
+      if (w !== width || heightMoved) { width = w; height = h; line = readingLineFor(h); }
+      return line;
+    },
+  };
+}
+
+/**
+ * Band fit with hysteresis (E1). band = stage − 96 − 40 − `extra` (the compact dial row at 700–1023 px). A chapter
+ * that is pinned stays pinned while its list fits the band; one that is not pins only with PIN_SLACK_PX to spare.
+ */
+export function bandFits(listHeight: number, stageHeight: number, pinnedNow: boolean, extra = 0): boolean {
+  const band = stageHeight - STAGE_CLEAR.top - STAGE_CLEAR.bottom - extra;
+  return pinnedNow ? listHeight <= band : listHeight <= band - PIN_SLACK_PX;
+}
+
+/**
+ * A chapter's mode from the live window (the ChapterDirector's decision, pure): static when motion is not allowed;
+ * flow when the window fails PIN_QUERY or the chapter is out of the pin set; otherwise pinned exactly while its
+ * panel fits the band (bandFits: PIN_SLACK_PX of slack to pin, none to stay). 700–1023 px wide (`narrow`) the
+ * compact dial row comes off the band too: DIAL_ROW_PX, or the row's CONTENT (`dialH`, the tallest of its folio,
+ * title and readout as last laid out pinned, + its 16 px gap) when text spacing or a large default font has grown
+ * it. The same allowance in both directions, so PIN_SLACK_PX is the only asymmetry and feeding the result back as
+ * `pinnedNow` returns it again (a fixed point): an allowance read only while pinned made the pin and unpin
+ * thresholds cross whenever the grown row passed DIAL_ROW_PX, a 2-cycle only the row's squeezed track hid.
+ */
+export function decideMode(i: {
+  motion: boolean;
+  pinQuery: boolean;
+  inPinSet: boolean;
+  panelH: number;
+  stageH: number;
+  pinnedNow: boolean;
+  narrow: boolean;
+  /** the compact dial row's content height, as last laid out pinned (0 before it ever was); read only when narrow */
+  dialH: number;
+}): "pinned" | "flow" | "static" {
+  if (!i.motion) return "static";
+  if (!i.pinQuery || !i.inPinSet) return "flow";
+  const dialRow = i.narrow ? Math.max(DIAL_ROW_PX, i.dialH + 16) : 0;
+  return bandFits(i.panelH, i.stageH, i.pinnedNow, dialRow) ? "pinned" : "flow";
+}
+
+/** What pickOwner reads of a chapter: its gate this frame and its target row's viewport y. */
+export interface OwnerCandidate { engaged: boolean; focusY: number }
+
+/**
+ * The ONE chapter that owns the marks this frame (the accent is spent once per viewport), among the chapters near
+ * the screen: of those engaged, the one whose target row is nearest the reading line (the reader's eye). The
+ * current owner keeps the marks unless another is nearer by more than HYSTERESIS_PX, so two chapters engaged at
+ * once (a released pinned stage still in the middle third while the next list's first row reaches the line)
+ * never trade the marks back and forth.
+ */
+export function pickOwner<T extends OwnerCandidate>(candidates: readonly T[], line: number, prev: T | null): T | null {
+  const dist = (c: T) => Math.abs(c.focusY - line);
+  let best: T | null = null;
+  for (const c of candidates) if (c.engaged && (!best || dist(c) < dist(best))) best = c;
+  if (prev && best && prev !== best && prev.engaged && candidates.includes(prev) && dist(prev) - dist(best) <= HYSTERESIS_PX) return prev;
+  return best;
+}
+
+/** Review builds only (NEXT_PUBLIC_REVIEW_FLAGS=1): ?pin=exp,edu,proj (or ?pin=none) overrides the pin set. */
+export function pinSetFromFlag(search: string): Readonly<Record<string, boolean>> | null {
+  const v = new URLSearchParams(search).get("pin");
+  if (v === null) return null;
+  const ids = v.split(",").map((s) => s.trim().toLowerCase());
+  const has = (short: string, long: string) => ids.includes(short) || ids.includes(long);
+  return { experience: has("exp", "experience"), education: has("edu", "education"), projects: has("proj", "projects") };
+}

@@ -14,6 +14,9 @@
 // one glass program, ranked back to front — checked in both themes, and cropped at DPR 2 after
 // the entrance and after a flick (the wake ribbon over glass) by `card`.
 //
+//   node scripts/verify-field.mjs [--angle=swiftshader|metal] [port] [config]
+//                                                         --angle: SwiftShader (default: sim-time asserts) or the real GPU
+//                                                         (Metal: cadence; the idle/full ratio is asserted only when fullRate2s > 2·idleHz)
 //   node scripts/verify-field.mjs [port] [config]         config: 1440x900-dark | 1440x900-light | 1024x768-dark | 1440x900-dark-quads (informational)
 //   node scripts/verify-field.mjs [port] sweep            the light-theme env-intensity sweep
 //   node scripts/verify-field.mjs [port] zoom             only the DPR-2 frames (1440 × 900, WIDE and QUADS, both themes): full, the lower pack, the largest jack
@@ -24,11 +27,17 @@ import fs from "node:fs";
 import path from "node:path";
 const PW = process.env.PLAYWRIGHT ?? "/Users/wentaohe/.npm/_npx/520e866687cefe78/node_modules/playwright/index.mjs";
 const { chromium } = await import(PW);
-const port = process.argv[2] ?? "3301";
-const only = process.argv[3];
-const OUT = process.env.OUT ?? "/tmp/hero/v5";
+// flags (--angle=…) and positionals ([port] [config]) in any order
+const flags = Object.fromEntries(process.argv.slice(2).filter((a) => a.startsWith("--")).map((a) => { const [k, ...v] = a.slice(2).split("="); return [k, v.join("=") || true]; }));
+const positional = process.argv.slice(2).filter((a) => !a.startsWith("--"));
+const port = positional[0] ?? "3301";
+const only = positional[1];
+const ANGLE = flags.angle === "metal" ? "metal" : "swiftshader";
+const OUT = process.env.OUT ?? `/tmp/hero/v5${ANGLE === "metal" ? "-metal" : ""}`;
 fs.mkdirSync(OUT, { recursive: true });
-const ARGS = ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"];
+const ARGS = ANGLE === "metal"
+  ? ["--use-angle=metal", "--enable-gpu", "--ignore-gpu-blocklist"]
+  : ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"];
 const KNOWN = /_vercel\/(speed-)?insights|Failed to load resource: the server responded with a status of 404/;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const TAN = Math.tan((12.5 * Math.PI) / 180);
@@ -519,17 +528,18 @@ async function run(width, height, theme, opts = {}) {
   await page.mouse.move(width - 3, height - 3);
   await page.evaluate(() => { const j = window.__field; for (let i = 0; i < 60 * 9; i++) j.step(1 / 60); });
   await waitRest(page, 120000).catch(() => out.notes.push("did not come to rest after the click"));
-  // FULL SCROLL: 2000 px down — nothing under the headline. The homes stand, the layout does not re-solve, the
-  // envelope stays 0 and the frames tick on at no more than the idle cadence (the drift moves the bodies ≈ 0.1 u,
-  // so the body delta is bounded by the drift's reach, not by 1e-3)
+  // FULL SCROLL: to Education's top + 40 — nothing under the headline. The homes stand, the layout does not
+  // re-solve, the envelope stays 0 and the frames tick on at no more than the idle cadence (the drift moves the
+  // bodies ≈ 0.1 u, so the body delta is bounded by the drift's reach, not by 1e-3). The target is a SECTION
+  // anchor read from the DOM (the reading chapters changed the page's length: Experience pins at 180 svh) and
+  // ROUNDED, because the wait below compares the hook's integer scrollY and a fractional target never matches (E15).
   const before = await page.evaluate(() => ({ bodies: window.__field.bodies().map((b) => [b.x, b.y, b.z]), homes: window.__field.homes, E: window.__field.E }));
-  await page.evaluate(() => window.scrollTo(0, 2000));
-  // The page scrolls SMOOTHLY (globals.css), so the h1's box travels up the viewport for a few frames before it
-  // leaves; a box that moves > MOVED_U restarts its ramp, `settled` is false for that frame and the loop schedules
-  // one full-rate frame — the band following the rect, not a wake (measured: exactly 1 busy frame across the
-  // animation). The window therefore starts at scroll-end — the hook reports the final scrollY once the frame or
-  // the scroll-end handler has measured it — and asks whether anything ran at full rate AFTER that.
-  await page.waitForFunction(() => window.__field.scrollY === 2000, null, { timeout: 10000, polling: 50 });
+  const farY = await page.evaluate(() => { const el = document.getElementById("education"); return Math.round(el.getBoundingClientRect().top + window.scrollY + 40); });
+  // An instant scroll (a probe scrolls by scrollTo + re-measure, never a smooth scroll that might not land,
+  // D-0074): the h1's box leaves in one step; the window starts at scroll-end — once the frame or the scroll-end
+  // handler has measured the final scrollY — and asks whether anything ran at full rate AFTER that.
+  await page.evaluate((y) => window.scrollTo({ top: y, behavior: "instant" }), farY);
+  await page.waitForFunction((y) => window.__field.scrollY === y, farY, { timeout: 10000, polling: 50 });
   const pre = await page.evaluate(() => ({ frames: window.__field.frames, layouts: window.__field.layouts, busy: window.__field.busyFrames }));
   await sleep(1500);
   const afterScroll = await page.evaluate(() => ({ frames: window.__field.frames, layouts: window.__field.layouts, busy: window.__field.busyFrames, scrollY: window.scrollY, bodies: window.__field.bodies().map((b) => [b.x, b.y, b.z]), homes: window.__field.homes, E: window.__field.E, idle: window.__field.idle, idleHz: window.__field.idleHz, keepOuts: window.__field.keepOuts.length }));

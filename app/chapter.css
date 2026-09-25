@@ -1,0 +1,798 @@
+/* ===== THE READING CHAPTERS (DESIGN §4.2; the owner's highlighted list) =====
+   One server-rendered DOM per chapter (app/components/chapter/Chapter.tsx) in three modes, written as
+   data-mode by the one ChapterDirector after hydration:
+     pinned  a tall section (--chapter-vh svh) holding a sticky 100svh stage: the dial (folio, display title,
+             year wheel) left, the glass panel right; the entries light one at a time as the page scrolls.
+     flow    the same list in normal flow; entries light as they cross the 62 % reading line, bent to the first
+             row near the section's top (entry 01 lit at a section-top landing); the rail's fill is CSS sticky and
+             scroll-driven (zero callbacks); the dial sticks beside the list at ≥ 1024 px.
+     static  reduced motion, forced colours, print, JS off: a plain legible list, no marks, the rail drawn full
+             in --border, no accent, the readout printing its full range.
+   CSS owns only the FIRST PAINT (the pinned layout for a pin-set chapter, inside @media PIN_QUERY, before any
+   data-mode exists); every later decision keys on [data-mode] alone, so the director always reads the old
+   layout before it flips.
+
+   Marks are ADDITIVE ONLY: nothing dims, inactive rows keep their full tokens at opacity 1, and secondary text
+   never sits on a tint. Accent-derived colour appears only inside the active entry (its bar and its tint; in
+   a two-beat chapter its head tint, its line's tint and tick): the accent is spent once per viewport. Only transform and opacity animate
+   (ESCAPEMENT: no animated background-color or box-shadow, no filter, no backdrop-filter on rows; the flow rail's
+   cover rides the scroll itself, a scroll-driven `top` near a section's top, never a timed animation), and
+   nothing on the sticky stage or any .glass ancestor carries a transform, opacity, filter, clip-path or
+   will-change (D-0058: a backdrop root blanks the glass).
+
+   In @layer components, like .glass, so it never beats a Tailwind utility (E17). The globals' UNLAYERED base
+   rules (h2/h3 weight and tracking, p line-height, a's weight, *:focus-visible) beat any layered rule, so text
+   that needs its own metrics sits in a span or a div here, and the two focus rules at the bottom are
+   unlayered on purpose. */
+
+@layer components {
+  /* Nothing in a chapter transitions unless a rule below says which property. The globals' reduced-motion block
+     forces `transition-duration: 0.01ms !important` on every element, and with the initial `transition-property:
+     all` that turned a mode flip's padding and font-size into 0.01 ms transitions — for a frame the layout still
+     reported the OLD box, and keep-your-place measured it (a live Reduce Motion toggle landed 56 px off). */
+  .chapter, .chapter * { transition-property: none; }
+
+  /* ---------------------------------------------------------------------------------------------------------
+     Base = flow / static layout (and the first paint of a chapter that is not in the pin set) */
+  .chapter {
+    position: relative;
+    z-index: 20;
+    pointer-events: none; /* the fluid keeps the pointer (D-0077); only the panel and links opt back in */
+    padding: 80px 24px;
+  }
+  @media (min-width: 768px) {
+    .chapter { padding-block: 96px; }
+  }
+
+  .ch-stage {
+    position: relative;
+    max-width: 1152px;
+    margin-inline: auto;
+  }
+
+  .ch-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 32px;
+  }
+  @media (min-width: 1024px) {
+    .ch-grid {
+      grid-template-columns: minmax(0, 4fr) minmax(0, 8fr);
+      column-gap: 48px;
+      align-items: start;
+    }
+  }
+
+  /* The dial: folio, the display title (OC-H), the readout. The dial is a size container, so the title is sized
+     to the column it sits in (cqi), not only to the window: a title sized from the viewport alone ran past its
+     368 px dial and under the panel as soon as anything grew it — WCAG 1.4.12 text spacing, a 24 px default font,
+     a 1,024 px window in flow. */
+  .ch-dial { container-type: inline-size; }
+  .ch-folio {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 0 0 12px;
+    font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
+    font-size: 0.75rem;
+    letter-spacing: 0.25em;
+    /* --legend, as the in-panel numerals: the folio stays in the pinned or sticky dial for the whole chapter, and
+       the muted 12 px numeral measured 4.17–4.42:1 over the light theme's rain and jacks */
+    color: var(--legend);
+    /* and a halo: the folio sits on the live canvases with no panel, and in one run in five a jack's highlight or the
+       fluid's dye behind it measured 3.2–4.3:1 (820 × 1180 dark, 1024 × 768 light, 1100 × 800 dark). The title's
+       own three layers (heading-legible: 4 + 10 + 20 px) and a tight fourth under the strokes: two layers
+       (3 + 8 px) still let a jack the pointer had pushed into the corridor through, 2.56:1 at 1024 × 768 light. */
+    text-shadow: 0 0 1px var(--background), 0 0 4px var(--background), 0 0 10px var(--background), 0 0 20px var(--background);
+  }
+  /* ... and under the numeral a soft plate of the page's ground (80 %), invisible on the bare page: at 1728 × 1117 and
+     1920 × 1080 the upper pack, pulled down by the pointer, sat behind "02", and a halo of any weight left the box at
+     2.8–4.3:1 in the light theme (its strokes read 5.5–6.6). With the plate, five runs of five pass in both themes
+     (box 5.68–6.65, strokes 7.3–7.6). The negative margin keeps the layout the plate's padding would move. */
+  .ch-folio > span:first-child {
+    padding: 2px 3px 2px 5px;
+    margin: -2px -3px -2px -5px;
+    border-radius: 4px;
+    background: color-mix(in oklab, var(--background) 80%, transparent);
+  }
+  .ch-folio-rule {
+    display: block;
+    width: 48px;
+    height: 1px;
+    background: var(--border);
+  }
+  .ch-title { margin: 0; }
+  /* ONE TITLE SCALE PER WINDOW, whatever each chapter's mode (OC-H): Experience pinned and Education in flow sit
+     next to each other on every desktop and tablet, and three clamps (pinned, the compact dial row, flow) gave the
+     lesser chapter the bigger title (1.8× at 768 × 1024). So the size depends on the window only:
+       ≥ 1024 px   the pinned display size, clamp(3rem, 4.4vw, 4rem), capped by the height (8svh)
+       700–1023    one size for the compact dial row and the flow title (48 px at 1023, meeting the ≥ 1024 size)
+       < 700 px, and landscape phones (< 500 px tall)   clamp(2.5rem, 9vw, 4.5rem), capped by the height (11svh)
+     Every size is also capped by its column: 19cqi is "Experience" (5.03 em wide) in its dial with ≈ 4 % to
+     spare. If it still cannot fit (text-spacing overrides), the one word wraps, hyphenated where the dictionary
+     allows — a last resort, never an overlap. */
+  .ch-title-text {
+    display: block;
+    font-size: clamp(2.5rem, 9vw, 4.5rem);
+    font-size: min(clamp(2.5rem, min(9vw, 11svh), 4.5rem), 19cqi);
+    overflow-wrap: anywhere;
+    hyphens: auto;
+    line-height: 1.02;
+    font-weight: 700;
+    letter-spacing: -0.035em;
+    color: var(--foreground);
+  }
+  @media (min-width: 700px) and (min-height: 500px) {
+    .ch-title-text {
+      font-size: clamp(2.25rem, 5vw, 3rem);
+      font-size: min(clamp(2.25rem, 5vw, 3rem), 19cqi);
+    }
+  }
+  @media (min-width: 1024px) and (min-height: 500px) {
+    .ch-title-text {
+      font-size: clamp(3rem, 4.4vw, 4rem);
+      font-size: min(clamp(3rem, min(4.4vw, 8svh), 4rem), 19cqi);
+    }
+  }
+  .ch-readout {
+    display: block;
+    margin-top: 16px;
+    font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
+    font-size: clamp(2.5rem, 4vw, 3.5rem);
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+    color: var(--foreground);
+  }
+
+  /* The year wheel (YearWheel.tsx): a one-cell window over a strip of years, rolled by the section's
+     --active-item on the beat (two beats, --ease-stop). Every digit is generated content from data-y, so
+     find-in-page never lands on it; the wheel is aria-hidden and inert. */
+  .yw { display: inline-block; line-height: 1; }
+  .yw-window {
+    display: inline-block;
+    height: 1em;
+    overflow: hidden;
+    overflow: clip;
+    vertical-align: top;
+  }
+  .yw-strip {
+    display: flex;
+    flex-direction: column;
+    transform: translateY(calc(var(--active-item, 0) * -1em));
+    transition: transform calc(var(--beat) * 2) var(--ease-stop);
+  }
+  .yw-cell { display: block; height: 1em; line-height: 1; }
+  .yw-cell::before, .yw-range::before { content: attr(data-y); }
+  /* the digits carry their own metrics: a text-spacing override (`* { line-height: 1.5 !important }`) reaches the
+     cells but cannot match a pseudo-element, so a year never drops a quarter-em and shows half of two years */
+  .yw-cell::before { display: block; height: 1em; line-height: 1; }
+  .yw-range::before { line-height: 1; }
+  .yw-range { display: none; }
+  /* the static still (and the pre-hydration paint of a flow chapter): the full range, no wheel */
+  .chapter:not([data-mode="pinned"]):not([data-mode="flow"]) .yw-window { display: none; }
+  .chapter:not([data-mode="pinned"]):not([data-mode="flow"]) .yw-range { display: inline; }
+
+  /* The panel: the site's glass (.glass supplies the tint, blur, hairline and radius), no card-lift hover
+     (a lift on a pinned stage is wrong, E6). overflow: clip, not .glass's hidden — clip clips the same box
+     but is not a scroll container, so the flow-mode rail fill can stick to the viewport (E7). */
+  .ch-panel {
+    pointer-events: auto;
+    overflow: hidden;
+    overflow: clip;
+    padding: 20px 18px 20px 16px;
+  }
+  /* The glass fill. The two-column pinned panel keeps the site's glass (OC-T: it passes the pixel check at 24 % dark
+     and 40 % light with its lines in --legend). The FLOW panel takes --chapter-flow-tint (globals.css: dark 40 %, an
+     extension beyond OC-T put to the owner as its own call; light the site's 40 %), and so does the first paint of
+     a chapter that will flow (out of the pin set, or wherever PIN_QUERY fails). The static still keeps the site's
+     glass. The blur stays. (≤ 768 px the site's near-opaque phone glass sets its own background and wins.) */
+  .chapter[data-mode="flow"] .ch-panel,
+  html[data-site-motion="on"] .chapter:not([data-mode]):not([data-pin-default]) .ch-panel { --glass-tint: var(--chapter-flow-tint); }
+  @media not screen and (prefers-reduced-motion: no-preference) and (forced-colors: none) and (min-width: 700px) and (min-height: 720px) {
+    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-panel { --glass-tint: var(--chapter-flow-tint); }
+  }
+  /* OC-T keyed on its cause, not on a width: where the scene's solve puts a jack under the list's text
+     (data-over-field, written by the ChapterDirector from packCorridor.ts: a pinned list where its stage docks, a
+     flow list anywhere in its column), the panel takes --chapter-field-tint (globals.css), raised only as far as the
+     pixel check requires; everywhere else it keeps the fill above. So a touch iPad (no field) keeps the site's glass,
+     and a 1024–1366 px two-column window, where the 14-pack reaches under the index numerals, gets the raise a width
+     breakpoint missed. Under 769 px the phone glass is near-opaque and sets its own background. */
+  .chapter[data-over-field]:is([data-mode="pinned"], [data-mode="flow"]) .ch-panel { --glass-tint: var(--chapter-field-tint); }
+  @media (min-width: 640px) {
+    .ch-panel { padding: clamp(24px, 1.25vw, 32px); } /* 24 px up to a 1920 px window, 32 px at 2560 */
+  }
+  /* Forced colours: the panel is the system's opaque Canvas. A forced background keeps the author colour's alpha, so
+     the 24/40 % glass let blurred shapes show through behind the text, leaving legibility to the UA's backplates. */
+  @media (forced-colors: active) {
+    html .chapter .ch-panel {
+      background: Canvas;
+      -webkit-backdrop-filter: none;
+              backdrop-filter: none;
+    }
+  }
+
+  .ch-body {
+    position: relative;
+    padding-left: 30px; /* the rail's 16 px column + a 14 px gap before the text (the bar and the fill never share a column, O8) */
+  }
+  .ch-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  /* The rail (aria-hidden, inert): a 2 px track in the 16 px column (--chapter-rail: the hairline in dark, a light
+     ink in light); pinned mode scales a fill down it
+     (transform only, written in the render phase); flow mode keeps a sticky cover's top on the reading line. */
+  .ch-rail {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 16px;
+    overflow: hidden;
+    overflow: clip;
+  }
+  .ch-rail-track, .ch-rail-fill, .ch-rail-cover {
+    position: absolute;
+    left: 7px;
+    width: 2px;
+  }
+  .ch-rail-track { top: 0; bottom: 0; background: var(--chapter-rail); }
+  .ch-rail-fill {
+    display: none;
+    top: 0;
+    height: 100%;
+    background: var(--foreground);
+    transform: scaleY(0);
+    transform-origin: top;
+  }
+  .ch-rail-sticky {
+    display: none;
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 200%; /* room for the cover to travel one rail-height down, clipped by the rail */
+  }
+  .ch-rail-cover {
+    display: block; /* a span: sticky does not blockify it */
+    position: sticky;
+    left: auto; /* a sticky box's left is a sticking inset, not an offset: place it by margin */
+    margin-left: 7px;
+    top: 62vh;
+    top: 62svh; /* READING_LINE (chapterList.ts) */
+    height: 50%;
+    background: var(--chapter-rail);
+  }
+  /* THE TRAVELLING LINE (chapterList.flowLine): near a flow list's section top its reading line bends to the list's
+     first row, FLOW_DIP_PX below it at the section-top landing, so entry 01 is the one marked there. The fill's tip
+     rides the same line: its sticky top runs 62svh → the first row + FLOW_DIP_PX → 62svh, linearly over the bend's
+     scroll range (the director writes --ch-bend-from / -to / -line on its evaluations, never while scrolling), on the
+     root's scroll timeline, so nothing runs per scroll here either. Without scroll-driven animations the fill keeps to
+     the 62 % line; the marks still bend (the rail is decoration: aria-hidden, inert). */
+  @supports (animation-timeline: scroll()) {
+    .chapter[data-mode="flow"][data-line-bend] .ch-rail-cover {
+      animation-name: ch-line-bend;
+      animation-duration: auto;
+      animation-timing-function: linear;
+      animation-fill-mode: both;
+      animation-timeline: scroll(root block);
+      animation-range: var(--ch-bend-from) var(--ch-bend-to);
+    }
+  }
+  @keyframes ch-line-bend {
+    0%, 100% { top: 62svh; }
+    50% { top: var(--ch-bend-line); }
+  }
+
+  /* An entry: its dot on the rail, its head row, its line(s).
+     THE LIST'S TYPE is in rem, so a visitor's larger default font size reaches it (the base's rem utilities did;
+     bandFits re-measures and flows a list that no longer fits), and it grows with the window, capped: every size
+     below holds its old value up to a ≈ 1,620 px window and reaches its cap near 1,900–2,000 px, so a 2560 × 1440
+     screen gets a panel that fills more of its stage instead of an island of 13 px text. Row spacing follows the
+     window's height the same way (unchanged at ≤ 909 px tall). */
+  .ch-item {
+    position: relative;
+    padding-block: clamp(10px, 1.1svh, 18px);
+  }
+  .ch-head {
+    position: relative;
+    isolation: isolate;
+    display: flex;
+    align-items: flex-start; /* a head that wraps (phones) keeps its numeral, logo and link on the first line */
+    gap: 10px;
+    min-height: 28px;
+  }
+  .ch-dot {
+    position: absolute;
+    left: -27px; /* centred in the rail's column: −30 + (16 − 10) / 2 */
+    top: 9px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--chapter-rail);
+    transform: scale(0.6);
+  }
+  .ch-index {
+    flex: none;
+    width: 1.6rem;
+    font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
+    font-size: clamp(0.75rem, 0.74vw, 0.875rem);
+    letter-spacing: 0.08em;
+    font-variant-numeric: tabular-nums;
+    line-height: 28px; /* centred on the logo's 28 px */
+    /* --legend, the site's measured token for small mono labels (--muted is too light to clear AA at 12 px on a
+       card): over the live glass the muted numeral measured 3.0–4.4:1 in the light theme */
+    color: var(--legend);
+  }
+  .ch-logo {
+    flex: none;
+    width: 28px;
+    height: 28px;
+    border-radius: 9px;
+    overflow: hidden;
+    background: #ffffff;
+  }
+  .ch-logo img { display: block; width: 100%; height: 100%; object-fit: contain; }
+  .ch-head-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: 10px;
+    row-gap: 0;
+    padding-top: 4px; /* the name's first line centred on the logo */
+  }
+  .ch-name {
+    margin: 0;
+    font-size: clamp(1.0625rem, 1.05vw, 1.3125rem);
+    color: var(--foreground);
+    overflow-wrap: anywhere;
+  }
+  .ch-role {
+    font-size: clamp(0.9375rem, 0.925vw, 1.125rem);
+    color: var(--foreground); /* was the accent (OC-F): the accent is spent once per viewport */
+  }
+  .ch-link {
+    position: relative;
+    flex: none;
+    display: inline-grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    color: var(--muted);
+  }
+  .ch-link:hover { color: var(--accent); }
+  /* Hit boxes from a ::after that changes no height (E18). The icon link: 44 px, less where the entry's line
+     below covers its bottom edge (≈ 39 px, blocked by the line's own box). */
+  .ch-link::after, .ch-text-link::after {
+    content: "";
+    position: absolute;
+    inset: -8px;
+  }
+  /* A text link is findable without hovering (WCAG 1.4.1): a quiet underline in its own colour at 40 %, which the
+     accent takes over on hover. Experience marks its one link with the ↗ icon; Education's school, field and place
+     links sit mid-phrase ("Master of Science in Robotics …") and read as plain text without it. */
+  .ch-text-link {
+    position: relative;
+    /* 3 px of room each side for the inset focus ring (the rule at the bottom), taken back by the margin so no line
+       moves: the ring cut through the first and last glyphs ("U…a" of "University of Pennsylvania", "P…A" of
+       "Philadelphia, PA") in both themes */
+    padding-inline: 3px;
+    margin-inline: -3px;
+    color: inherit;
+    text-decoration-line: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+    text-decoration-color: color-mix(in oklab, currentColor 40%, transparent);
+  }
+  /* Stacked text links (a degree's field, then its date and location) sit ≈ 22 px apart, so 44 px is not
+     possible without one link's box stealing the other's clicks. Each box reaches half-way to its neighbour
+     and sits ABOVE its line's other boxes (z-index 1 in the line's isolated context): ≈ 24 px, abutting, never
+     overlapping — WCAG 2.5.8's 24 px, stated as that, not as 44. (At z-index −1 the line's own blocks were hit
+     first and the real target was the 18 px text.) */
+  .ch-sub .ch-text-link::after { inset: 0 -4px; z-index: 1; }
+  /* The vertical reach is the link's own inline padding, which every line fragment gets and which moves no line
+     (inline padding never changes a line box): a link that wraps (a degree's field on a phone) keeps its reach on
+     both lines, where the ::after of an inline split across lines gets a negative width (its second fragment ends
+     left of where the first begins). The link stays inline, so find-in-page still matches a phrase across it
+     ("Science in Robotics"), which an inline-block broke. A date-and-place link reaches only 1 px up, so the
+     degree link above it keeps its 3 px (the two lines sit 2 px apart, and the later box wins the overlap), and
+     7 px down, into the entry's padding or the 8 px before the next degree: at 5 px "Philadelphia, PA" and the
+     second "Pittsburgh, PA" hit-tested 23.75 px tall in Chrome at desktop sizes, just under WCAG 2.5.8's 24. */
+  .ch-sub .ch-text-link { padding-block: 3px; }
+  .ch-degree > .ch-line:last-child .ch-text-link { padding-top: 1px; padding-bottom: 7px; }
+  /* a school's name in the head row has room above and to its line below (which, later in the tree, still wins
+     where the two meet) */
+  .ch-name .ch-text-link::after { inset: -11px -4px; z-index: 1; }
+  .ch-text-link:hover { color: var(--accent); text-decoration-color: currentColor; }
+  /* Focus not obscured (WCAG 2.4.11): the browser's own focus scroll keeps a chapter link clear of the fixed W. /
+     INDEX marks and the progress bar (STAGE_CLEAR, 96 px top, 40 px bottom) in every mode. The director re-scrolls
+     only when the focused entry is not the marked one; a Shift+Tab onto the marked entry's link in flow left it at
+     the viewport's top edge, under the 74 px marks band, its ring touching the progress bar. */
+  .chapter a { scroll-margin-block: 96px 40px; }
+
+  /* the entry's line(s): dates · location, a degree. In --legend, the site's measured token for small
+     secondary text, not --muted: over the live canvases (the fluid's dye under the glass) muted lines measured
+     3.4:1 dark and 3.8:1 light in a flow panel, and needed a 90 % light fill pinned; legend lines pass on the
+     site's own glass (OC-T, globals.css). Still additive: the active line flips to --foreground on its tint. */
+  .ch-sub {
+    position: relative;
+    isolation: isolate;
+    margin-top: 6px;
+    padding-left: 16px;
+    color: var(--legend);
+  }
+  .ch-tick {
+    position: absolute;
+    left: 2px;
+    top: 7px;
+    width: 6px;
+    height: 6px;
+    background: var(--border);
+  }
+  .ch-line {
+    display: block;
+    font-size: clamp(0.8125rem, 0.8vw, 0.9375rem);
+    line-height: 1.5;
+  }
+  .ch-line + .ch-line { margin-top: 2px; }
+  /* a date, a place: never split (the line breaks at its " · ", which carries a no-break space before the dot) */
+  .ch-nowrap { white-space: nowrap; }
+  .ch-line-strong { color: var(--foreground); font-size: clamp(0.875rem, 0.86vw, 1rem); font-weight: 500; }
+  .ch-degree + .ch-degree { margin-top: 8px; }
+
+  /* ---------------------------------------------------------------------------------------------------------
+     Flow and pinned: the marks (static never gets them — the director never writes data-active there) */
+  .chapter[data-mode="flow"] .ch-rail-sticky { display: block; }
+  .chapter[data-mode="flow"] .ch-rail-track { background: var(--foreground); }
+  .chapter[data-mode="pinned"] .ch-rail-fill { display: block; }
+
+  /* Every mark below is decoration: pointer-events none, so a mark painted over a link's enlarged hit box never
+     takes its click (the head tint sat above the school name's hit box, and taps landed on the row). */
+  .chapter .ch-head::before, .chapter .ch-head::after, .chapter .ch-sub::before { pointer-events: none; }
+
+  /* the accent bar: the head row's ::before, 2 px, inset 6 px top and bottom, in the gap left of the text */
+  .chapter:is([data-mode="pinned"], [data-mode="flow"]) .ch-head::before {
+    content: "";
+    position: absolute;
+    left: -8px;
+    top: 6px;
+    bottom: 6px;
+    width: 2px;
+    background: var(--accent);
+    transform: scaleY(0);
+    transform-origin: bottom;
+    transition: transform var(--beat) var(--ease-stop);
+  }
+  /* the head row's soft tint (pre-painted, faded by opacity only) */
+  .chapter:is([data-mode="pinned"], [data-mode="flow"]) .ch-head::after {
+    content: "";
+    position: absolute;
+    inset: -4px -8px -4px -8px;
+    z-index: -1;
+    border-radius: 8px;
+    background: var(--chapter-tint-soft);
+    opacity: 0;
+    transition: opacity calc(var(--beat) * 2) var(--ease-entrance);
+  }
+  /* the active line's tint */
+  .chapter:is([data-mode="pinned"], [data-mode="flow"]) .ch-sub::before {
+    content: "";
+    position: absolute;
+    inset: -3px -8px -3px -8px;
+    z-index: -1;
+    border-radius: 6px;
+    background: var(--chapter-tint);
+    opacity: 0;
+    transition: opacity calc(var(--beat) * 2) var(--ease-entrance);
+  }
+  .chapter:is([data-mode="pinned"], [data-mode="flow"]) .ch-dot { transition: transform calc(var(--beat) * 2) var(--ease-stop); }
+
+  /* an entry lights: the bar hands over (in over 2 beats from the top, the old one out over 1 from the
+     bottom), the head tint and the line tint fade in over 2 beats, the numeral, the text and the tick flip
+     on the beat (colours never transition), the dot seats */
+  .chapter:is([data-mode="pinned"], [data-mode="flow"]) .ch-item[data-active] .ch-head::before {
+    transform: scaleY(1);
+    transform-origin: top;
+    transition-duration: calc(var(--beat) * 2);
+  }
+  .chapter:is([data-mode="pinned"], [data-mode="flow"]) .ch-item[data-active] .ch-head::after { opacity: 1; }
+  .chapter:is([data-mode="pinned"], [data-mode="flow"]) .ch-item[data-active] .ch-index { color: var(--foreground); }
+  .chapter:is([data-mode="pinned"], [data-mode="flow"]) .ch-item[data-active] .ch-link { color: var(--foreground); }
+  .chapter:is([data-mode="pinned"], [data-mode="flow"]) .ch-sub[data-active] { color: var(--foreground); }
+  .chapter:is([data-mode="pinned"], [data-mode="flow"]) .ch-sub[data-active]::before { opacity: 1; }
+  .chapter:is([data-mode="pinned"], [data-mode="flow"]) .ch-sub[data-active] .ch-tick { background: var(--accent); }
+  .chapter:is([data-mode="pinned"], [data-mode="flow"]) .ch-item[data-active] .ch-dot,
+  .chapter:is([data-mode="pinned"], [data-mode="flow"]) .ch-item:has(~ .ch-item[data-active]) .ch-dot {
+    transform: scale(1);
+    background: var(--foreground);
+  }
+
+  /* ---------------------------------------------------------------------------------------------------------
+     ONE MARK PER ENTRY (data-grain="entry", written by Chapter.tsx when every entry is one beat: Experience and
+     Education since the owner's no-bullets call). There the entry IS the beat, so entry-level and line-level marks
+     would say the same thing twice — two stacked tints with a seam, a bar beside the head only, a blue tick, and a
+     grey tick square on every inactive row that read as a bullet. Augnition's facts panel lights ONE row: one
+     tint, one full-height edge, the index in the tone. So here: one rounded tint around the head and its line
+     (li::before, faded by opacity only, under the text in the li's isolated context), one 2 px bar the entry's
+     full height at the tint's left edge (li::after, scaleY on --ease-stop, handing over like the head bar), the
+     numeral and the line flipping to the foreground on the beat. No tick. The line sits under the name, in the
+     head's text column (under the logo on phones). Projects (PR 2, two beats a project) keeps the
+     head-plus-line marks above. */
+  .chapter[data-grain="entry"] .ch-item { isolation: isolate; }
+  .chapter[data-grain="entry"] .ch-tick { display: none; }
+  .chapter[data-grain="entry"] .ch-sub { padding-left: calc(1.6rem + 10px); } /* the index column + its gap: under the logo */
+  @media (min-width: 640px) {
+    .chapter[data-grain="entry"] .ch-sub { padding-left: calc(1.6rem + 48px); } /* + the 28 px logo + its gap: under the name */
+  }
+  .chapter[data-grain="entry"][data-mode] .ch-head::before,
+  .chapter[data-grain="entry"][data-mode] .ch-head::after,
+  .chapter[data-grain="entry"][data-mode] .ch-sub::before { content: none; }
+  .chapter[data-grain="entry"]:is([data-mode="pinned"], [data-mode="flow"]) .ch-item::before {
+    content: "";
+    position: absolute;
+    inset: 2px -12px 2px -10px;
+    z-index: -1;
+    border-radius: 8px;
+    background: var(--chapter-tint);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity calc(var(--beat) * 2) var(--ease-entrance);
+  }
+  .chapter[data-grain="entry"]:is([data-mode="pinned"], [data-mode="flow"]) .ch-item::after {
+    content: "";
+    position: absolute;
+    left: -10px;
+    top: 8px; /* 6 px inside the tint's top and bottom */
+    bottom: 8px;
+    width: 2px;
+    border-radius: 1px;
+    background: var(--accent);
+    transform: scaleY(0);
+    transform-origin: bottom;
+    pointer-events: none;
+    transition: transform var(--beat) var(--ease-stop);
+  }
+  .chapter[data-grain="entry"]:is([data-mode="pinned"], [data-mode="flow"]) .ch-item[data-active]::before { opacity: 1; }
+  .chapter[data-grain="entry"]:is([data-mode="pinned"], [data-mode="flow"]) .ch-item[data-active]::after {
+    transform: scaleY(1);
+    transform-origin: top;
+    transition-duration: calc(var(--beat) * 2);
+  }
+
+  /* ---------------------------------------------------------------------------------------------------------
+     Flow */
+  @media (min-width: 1024px) {
+    /* the dial sticks beside the list: at the stage's top, or in the pack corridor beside a jack field (below) */
+    .chapter[data-mode="flow"] .ch-dial {
+      position: sticky;
+      top: var(--ch-dial-top, 96px);
+      align-self: start;
+    }
+    /* in flow the list's marks are the one moving layer: the dial carries the title only */
+    .chapter[data-mode="flow"] .ch-readout { display: none; }
+  }
+  /* THE FLOW DIAL AND ITS LIST, TOGETHER (OC-H with O3: the title between the jack packs). A sticky box never leaves
+     its grid cell, and a flow cell is only as tall as its panel. So beside a jack field (the field's own gate) a flow
+     dial rests at FLOW_DIAL_TOP, 33svh + 8 px, inside the corridor between the packs at every desktop of the owner's
+     matrix (the corridor's top measured 0.28–0.32 of the height; packCorridor.ts FLOW_DIAL_TOP and its test), and
+     its PANEL starts there too. At a section-top landing (INDEX, a hash, the cue) the title and the first entry sit
+     in the gap together, and on the way in the title reaches its slot before entry 01 lights. (The cell used to be
+     reserved tall enough for the dial alone. Education's two schools then stayed at the top of the screen, and its
+     title rested level with or below the end of its own list: a caption, not a heading, 59 px below it at
+     2560 × 1440. On the way in the title crossed the lower pack as entry 01 lit.) CSS alone, from the first paint:
+     the offset depends on the window's height only, so hydration moves nothing, and nothing but a resize (which
+     keeps the reader's place) ever changes it. The dial still leaves with its list: once the panel's bottom passes
+     the dial's, sticky lets it go. */
+  @media screen and (prefers-reduced-motion: no-preference) and (forced-colors: none) and (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+    html[data-site-motion="on"] .chapter[data-mode="flow"] .ch-dial {
+      top: calc(33vh + 8px);
+      top: calc(33svh + 8px);
+    }
+    html[data-site-motion="on"] .chapter[data-mode="flow"] .ch-panel,
+    html[data-site-motion="on"] .chapter:not([data-mode]):not([data-pin-default]) .ch-panel {
+      margin-top: max(0px, calc(33vh + 8px - 96px));
+      margin-top: max(0px, calc(33svh + 8px - 96px));
+    }
+  }
+  /* ... and the first paint of a pin-set chapter that will flow there: a window under PIN_MIN's 720 px */
+  @media screen and (prefers-reduced-motion: no-preference) and (forced-colors: none) and (min-width: 1024px) and (hover: hover) and (pointer: fine) and (max-height: 719.98px) {
+    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-panel {
+      margin-top: max(0px, calc(33vh + 8px - 96px));
+      margin-top: max(0px, calc(33svh + 8px - 96px));
+    }
+  }
+  /* under 1024 px the list flows full width beneath the title: the marks are the moving layer, no readout */
+  @media (max-width: 1023.98px) {
+    .chapter[data-mode="flow"] .ch-readout { display: none; }
+  }
+  /* FIRST PAINT of a chapter that will flow (motion on, no data-mode yet): no readout either, so the first paint is
+     the flow layout and hydration moves nothing. Under 1024 px the static readout ("2026–2020", 56 px and its 16 px
+     margin) sat in the column above the list until the director wrote flow and hid it: every flow chapter shrank by
+     ≈ 57 px on its first evaluation and everything below moved (0.137 CLS on a phone's hard load of /#education).
+     A chapter out of the pin set always flows; a pin-set chapter flows wherever PIN_QUERY fails. The static
+     readout is left to JS off, reduced motion and forced colours, where the director also chooses static. */
+  html[data-site-motion="on"] .chapter:not([data-mode]):not([data-pin-default]) .ch-readout { display: none; }
+  @media not screen and (prefers-reduced-motion: no-preference) and (forced-colors: none) and (min-width: 700px) and (min-height: 720px) {
+    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-readout { display: none; }
+  }
+
+  /* ---------------------------------------------------------------------------------------------------------
+     Pinned (after hydration). The first-paint twin of every rule here is in the @media PIN_QUERY block below. */
+  .chapter[data-mode="pinned"] {
+    height: calc(var(--chapter-vh) * 1vh);
+    height: calc(var(--chapter-vh) * 1svh);
+    padding: 0 24px;
+  }
+  .chapter[data-mode="pinned"] .ch-stage {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    height: 100svh;
+    padding: 96px 0 40px; /* STAGE_CLEAR */
+  }
+  .chapter[data-mode="pinned"] .ch-grid {
+    height: 100%;
+    grid-template-rows: auto minmax(0, 1fr);
+    row-gap: 16px;
+  }
+  .chapter[data-mode="pinned"] .ch-panel { align-self: center; }
+  @media (min-width: 1024px) {
+    .chapter[data-mode="pinned"] .ch-grid { grid-template-rows: minmax(0, 1fr); align-items: center; }
+    .chapter[data-mode="pinned"] .ch-dial {
+      align-self: start;
+      margin-top: max(0px, calc(var(--ch-dial-top, 96px) - 96px));
+    }
+  }
+  /* 700–1023 px: one column — a compact dial row on top ("02 Experience · 2026"), DIAL_ROW_PX tall. The row and
+     the panel are centred in the stage TOGETHER (a centred panel under a top-pinned row left the title ≈ 200 px
+     from its list on a portrait iPad); the band arithmetic is unchanged, the row still comes off it. */
+  @media (max-width: 1023.98px) {
+    .chapter[data-mode="pinned"] .ch-grid { grid-template-rows: auto auto; align-content: center; }
+    .chapter[data-mode="pinned"] .ch-panel { align-self: start; }
+    .chapter[data-mode="pinned"] .ch-dial {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      min-height: 72px; /* DIAL_ROW_PX; the director measures the row when text spacing grows it */
+    }
+    .chapter[data-mode="pinned"] .ch-folio { margin: 0; }
+    .chapter[data-mode="pinned"] .ch-readout { margin: 0 0 0 auto; font-size: clamp(1.75rem, 4vw, 2.25rem); }
+  }
+
+  /* ---------------------------------------------------------------------------------------------------------
+     FIRST PAINT: a pin-set chapter on a window that may pin, motion allowed, before the director has written
+     any data-mode — the same pinned layout as above, so hydration never shifts the page. PIN_QUERY
+     (chapterList.ts) is the media text; tests/pin-query.test.ts holds the two equal. */
+  @media screen and (prefers-reduced-motion: no-preference) and (forced-colors: none) and (min-width: 700px) and (min-height: 720px) {
+    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) {
+      height: calc(var(--chapter-vh) * 1vh);
+      height: calc(var(--chapter-vh) * 1svh);
+      padding: 0 24px;
+    }
+    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-stage {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      height: 100svh;
+      padding: 96px 0 40px;
+    }
+    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-grid {
+      height: 100%;
+      grid-template-rows: auto minmax(0, 1fr);
+      row-gap: 16px;
+    }
+    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-panel { align-self: center; }
+    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .yw-window { display: inline-block; }
+    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .yw-range { display: none; }
+  }
+  @media screen and (prefers-reduced-motion: no-preference) and (forced-colors: none) and (min-width: 1024px) and (min-height: 720px) {
+    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-grid { grid-template-rows: minmax(0, 1fr); align-items: center; }
+    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-dial { align-self: start; }
+  }
+  /* Where the director will place a dial in the corridor between the jack packs (two columns, a fine pointer: the
+     field's gate), the first paint cannot know where that is — the corridor depends on the window and the field's
+     composition. So every pinned dial there waits unseen until the director's first evaluation writes
+     data-mode and --ch-dial-top in one task, and appears in place: a hard load of /#experience no longer shows the
+     title at the stage's top and then moves it (a layout shift, 0.0167). If the director never runs, it appears
+     after 1.5 s where it is. */
+  @media screen and (prefers-reduced-motion: no-preference) and (forced-colors: none) and (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+    html[data-site-motion="on"] .chapter:not([data-mode]) .ch-dial {
+      visibility: hidden;
+      animation: ch-dial-unhide 0s linear 1.5s forwards;
+    }
+  }
+  @keyframes ch-dial-unhide { to { visibility: visible; } }
+  /* ... except a dial that will FLOW: its place there is CSS alone (FLOW_DIAL_TOP, above), so its first paint is
+     already its hydrated place, sticky, and visible. A late director (a slow connection) then never moves
+     Education's title: it used to show at 96 px from the 1.5 s fallback and then jump into the corridor. */
+  @media screen and (prefers-reduced-motion: no-preference) and (forced-colors: none) and (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+    html[data-site-motion="on"] .chapter:not([data-mode]):not([data-pin-default]) .ch-dial {
+      position: sticky;
+      top: calc(33vh + 8px);
+      top: calc(33svh + 8px);
+      align-self: start;
+      visibility: visible;
+      animation: none;
+    }
+  }
+  @media screen and (prefers-reduced-motion: no-preference) and (forced-colors: none) and (min-width: 1024px) and (hover: hover) and (pointer: fine) and (max-height: 719.98px) {
+    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-dial {
+      position: sticky;
+      top: calc(33vh + 8px);
+      top: calc(33svh + 8px);
+      align-self: start;
+      visibility: visible;
+      animation: none;
+    }
+  }
+  @media screen and (prefers-reduced-motion: no-preference) and (forced-colors: none) and (min-width: 700px) and (max-width: 1023.98px) and (min-height: 720px) {
+    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-grid { grid-template-rows: auto auto; align-content: center; }
+    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-panel { align-self: start; }
+    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-dial { display: flex; align-items: center; gap: 16px; min-height: 72px; }
+    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-folio { margin: 0; }
+    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-readout { margin: 0 0 0 auto; font-size: clamp(1.75rem, 4vw, 2.25rem); }
+  }
+
+  /* ---------------------------------------------------------------------------------------------------------
+     Print: the static still, whatever the mode. The director never evaluates while printing (print is not a
+     window: PIN_QUERY's `screen and` would flip every chapter and relight marks), so a chapter prints in the mode
+     and with the marks it had on screen — every rule here neutralises them, in every mode, and !important beats
+     the mode rules' specificity without restating each. */
+  @media print {
+    /* paper is light whatever the screen's theme: a dark visitor's printout kept the dark tokens (company names
+       #e8e8e2, paler than the secondary lines) and the titles' dark halo smudged their light glyphs */
+    .chapter { --foreground: #0a0a0b; --legend: #52525b; --muted: #626c7a; --border: #dcdce0; }
+    /* and with "Background graphics" on, the page's dark ground and the dark glass printed too, under those dark
+       inks: a dark visitor's titles, companies and job titles vanished, black on black. The chapters print on white,
+       the panel as a plain box (its hairline stays). */
+    .chapter { background: #fff !important; }
+    .chapter .ch-panel {
+      background: transparent !important;
+      -webkit-backdrop-filter: none !important;
+              backdrop-filter: none !important;
+    }
+    .chapter .ch-title, .chapter .ch-folio { text-shadow: none !important; }
+    .chapter .ch-folio > span:first-child { background: none !important; }
+    .chapter .ch-item { break-inside: avoid; } /* an entry never splits across pages (UPenn's date line did) */
+    .chapter .ch-readout { display: block !important; } /* the static still's range, in every mode */
+    .chapter[data-mode] { height: auto !important; padding: 48px 24px !important; }
+    .chapter .ch-stage { position: static !important; height: auto !important; padding: 0 !important; }
+    .chapter .ch-grid { height: auto !important; }
+    .chapter .ch-dial { position: static !important; margin: 0 !important; }
+    .ch-rail-fill, .ch-rail-sticky { display: none !important; }
+    .chapter .ch-rail-track { background: var(--border) !important; }
+    .chapter .ch-head::before, .chapter .ch-head::after, .chapter .ch-sub::before,
+    .chapter .ch-item::before, .chapter .ch-item::after { display: none !important; }
+    .chapter .ch-sub { color: var(--legend) !important; }
+    .chapter .ch-index { color: var(--legend) !important; }
+    .chapter .ch-link { color: var(--muted) !important; }
+    .chapter .ch-tick { background: var(--border) !important; }
+    .chapter .ch-dot { background: var(--border) !important; transform: scale(0.6) !important; }
+    .chapter .yw-window { display: none !important; }
+    .chapter .yw-range { display: inline !important; }
+  }
+
+}
+
+/* Unlayered on purpose: the globals' `*:focus-visible` ring (outline-offset 2px) is unlayered, so it beats any
+   layered rule. .glass clips (overflow), and a ring 2 px outside a link at the panel's edge was never painted
+   (Experience.tsx's old card, E18): inside the panel every ring is drawn inset — the ↗ icon links within their
+   28 px box, the text links within the 3 px of inline padding they carry for it (above), clear of their glyphs. */
+.ch-panel a:focus-visible {
+  outline-offset: -2px;
+  border-radius: 6px;
+}
+
+/* Unlayered on purpose, for the same reason: the globals' unlayered `button, a { font-weight: 500 }` beat the
+   layered rules above, so a school's name (h3 > a) rendered at 500 beside the companies' 600, and a linked place
+   inside a dates line at 500 beside its 400 date. A text link takes its line's weight. */
+.ch-panel .ch-text-link { font-weight: inherit; }

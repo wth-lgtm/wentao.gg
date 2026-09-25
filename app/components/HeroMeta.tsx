@@ -33,6 +33,7 @@ export default function HeroMeta() {
   return (
     <div
       aria-hidden
+      data-print="hide"
       className={`fixed top-[4.5rem] left-0 right-0 z-40 pointer-events-none transition-opacity duration-500 ${
         hidden ? "opacity-0" : "opacity-100"
       }`}

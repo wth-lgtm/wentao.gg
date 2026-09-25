@@ -42,6 +42,30 @@
      BUTTON can have a hover without reaching for a palette step. */
   --loss-hover: #ef4444;
 
+  /* The reading chapters' marks (chapter.css): the active line's tint and the active item's head-row
+     tint. Accent-derived, so they appear only inside the active item (the accent is spent once per
+     viewport); never under muted text (muted over a 12 % tint is 4.56:1 dark, 4.23:1 light). */
+  --chapter-tint: color-mix(in oklab, var(--accent) 12%, transparent);
+  --chapter-tint-soft: color-mix(in oklab, var(--accent) 8%, transparent);
+  /* The chapters' rail track and unseated dots (chapter.css): the site's hairline in dark, where it reads. */
+  --chapter-rail: var(--border);
+  /* OC-T (the owner: "raise only as far as the pixel contrast check requires", for the PINNED panel). With the
+     inactive lines in --legend the two-column pinned panel passes at the site's own 24 %, so it keeps the site's
+     glass (no variable here). --chapter-flow-tint is the FLOW panel's fill (chapter.css), and it is NOT covered by
+     OC-T: it is an extension put to the owner as its own call. At 24 % a flow panel on a short desktop window
+     (1440 × 700, the index column over the fluid's dye) failed its numerals in three runs of five and a line
+     measured 4.42 at 32 %; at 40 % sixteen runs of sixteen passed (worst line 4.73, numeral 4.90). If the owner
+     declines, this line becomes var(--glass-tint) and the failing flow rows are recorded (DESIGN §10's fallback).
+     The blur stays either way: it reads as glass. */
+  --chapter-flow-tint: color-mix(in oklab, var(--card) 40%, transparent);
+  /* OC-T where the jack field is under a list (chapter.css, [data-over-field]: the director asks the scene's solve).
+     There a jack's highlights come through the blur behind the text, and on the site's 24 % the stack and dates
+     lines measured 3.48–3.64:1 one-column (820 × 1180, 1000 × 800) and the numerals 3.6–4.0 two-column (1024–1280
+     px). Over five fresh runs at each of the six field sizes (verify-motion contrastRowsRuns, box p90 and glyph
+     mask): 50 % (the old narrow fill) and 55 % failed 820 × 1180's "05" in every run (4.40); 62 % passed all thirty
+     (worst line 4.87, numeral 4.74). */
+  --chapter-field-tint: color-mix(in oklab, var(--card) 62%, transparent);
+
   /* Split-flap board (dark) — opaque plastic flaps so the animated bg doesn't bleed. */
   --flap-bg: #202024;
   --flap-fg: #e8e8e2;
@@ -90,6 +114,23 @@
   --loss: #b91c1c;
   --loss-hover: #991b1b;
 
+  /* The reading chapters' marks (light): a touch less accent over the light glass. */
+  --chapter-tint: color-mix(in oklab, var(--accent) 10%, transparent);
+  --chapter-tint-soft: color-mix(in oklab, var(--accent) 7%, transparent);
+  /* The rail track and unseated dots, light: --border (#dcdce0) over the 40 % light glass on a white page all but
+     vanished (at pin 0 the rail read as one black dot, and rows 02–05 showed no teeth). Ink, not accent (the accent
+     budget is untouched), and still quieter than the seated dots and the fill, which are --foreground. */
+  --chapter-rail: color-mix(in oklab, var(--foreground) 20%, transparent);
+  /* OC-T, light: NO raise at two columns. With muted lines the pinned panel needed 90 % (70–80 % failed one or two
+     runs of four); with --legend lines the site's own 40 % passes, pinned and flow, sixteen runs of sixteen (worst
+     line 5.82, numeral 4.67), so the light panels keep the site's liquid glass. */
+  --chapter-flow-tint: var(--glass-tint);
+  /* OC-T where the jack field is under a list, light: a jack's glossy black comes through the blur, and on the site's
+     40 % the lower rows measured 3.86–4.09:1 one-column and the numerals 3.75–4.6 two-column. Five fresh runs at each
+     of the six field sizes: 65 % failed one at 1000 × 800 (a line, 4.48); 70 % passed all thirty (worst line 4.87,
+     numeral 5.38). */
+  --chapter-field-tint: color-mix(in oklab, var(--card) 70%, transparent);
+
   /* Split-flap board (light). */
   --flap-bg: #e7e7ea;
   --flap-fg: #18181b;
@@ -100,10 +141,15 @@
   --flap-specular: rgba(0, 0, 0, 0.12);
 }
 
-/* Motion system — one easing + duration vocabulary so effects feel composed */
+/* Motion system — one easing + duration vocabulary so effects feel composed.
+   ESCAPEMENT (D-0020): discrete changes land on N × --beat; continuous travel runs free and only starts and
+   ends on a beat. app/lib/mechanism.ts mirrors --beat and the three curves, and tests/mechanism.test.ts
+   holds the two equal. New code writes calc(var(--beat) * n), never an ad-hoc duration. */
 :root {
+  --beat: 100ms; /* one flap of the Solari board (FLAP_MS) */
   --ease-entrance: cubic-bezier(0.16, 1, 0.3, 1); /* expo-out: one-shot reveals + interactions */
   --ease-ambient: cubic-bezier(0.42, 0, 0.58, 1); /* symmetric: infinite loops */
+  --ease-stop: cubic-bezier(0.2, 1.4, 0.4, 1); /* the hard stop, promoted from sfDrop: +5.3 % at x 0.485 */
   --dur-fast: 0.18s;
   --dur-base: 0.3s;
   --dur-slow: 0.6s;
@@ -309,6 +355,13 @@ button:active, .btn:active {
 
 .skip-link:focus {
   transform: translateY(0);
+}
+
+/* Print: the fixed chrome is not the page. A fixed box repeats on every printed page, so the W. / clock / INDEX
+   marks, the progress bar and the skip link overprinted whatever sat at each page's top (the Experience folio and
+   title, Education's first degree line) and bottom. */
+@media print {
+  .skip-link, [data-print="hide"] { display: none !important; }
 }
 
 /* Don't paint a focus ring when focus lands on <main> via the skip link */
@@ -626,7 +679,7 @@ input:focus {
   --sf-cell-h: clamp(1.6rem, 7.2vw, 2.9rem);
   --sf-gap: clamp(2px, 0.5vw, 4px);
   --sf-emoji: clamp(1.35rem, 5.4vw, 2rem);
-  --sf-flap: 50ms; /* one leaf phase; a full flap = fold (50) + drop (50) = 100ms (matches FLAP_MS) */
+  --sf-flap: calc(var(--beat) / 2); /* one leaf phase (50ms); a full flap = fold + drop = one beat (FLAP_MS) */
 }
 
 .sf-board {

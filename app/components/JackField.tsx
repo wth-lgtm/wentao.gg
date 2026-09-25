@@ -3,8 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { useTheme } from "./ThemeProvider";
+import { useSiteMotion } from "./SiteMotion";
 import { PACKS_WIDE, fieldPacks, packVariantFromSearch, type Pack } from "../lib/fieldPacks";
 import { createPointerRig } from "../lib/pointerRig";
+import { publishFieldPacks } from "../lib/fieldPresence";
 
 // The jack field — twenty-one of the GitHub card's six-way connector jacks in Lusion's dynamics
 // (jackDynamics.ts), in PACKS (fieldPacks.ts: the card's fourteen under the name and seven above
@@ -49,6 +51,12 @@ export default function JackField() {
   const [awake, setAwake] = useState(true);
   const [accentHex, setAccentHex] = useState("#3b82f6");
   const { resolvedTheme } = useTheme();
+  // The LIVE reduced-motion answer (SiteMotion): Reduce Motion turned on with the page open unmounts the scene
+  // (and its WebGL context) at the render below; turned off again, the gate re-runs and the field is born anew.
+  // Forced colours close the gate as reduced motion does (DESIGN §3.4: allowed = !reduced && !forcedColors): the
+  // chapters go static there, and a moving 3D field behind a forced Canvas panel is what the visitor opted out of.
+  const { reduced: reducedPref, forcedColors } = useSiteMotion();
+  const reduced = reducedPref || forcedColors;
   // Mutated in place, read by the scene's frame loop — no re-render per pointer move.
   const rig = useMemo(() => createPointerRig(), []);
 
@@ -57,13 +65,20 @@ export default function JackField() {
   // week count once: a change would be a new world and a new entrance.
   useEffect(() => {
     if (
+      reduced ||
       window.innerWidth < 640 ||
       !window.matchMedia("(hover: hover) and (pointer: fine)").matches ||
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches ||
+      window.matchMedia("(forced-colors: active)").matches
     ) return;
     let cancelled = false;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     let idleId: number | undefined;
+    // The gate has passed: publish the composition the field will be born with NOW, before the deferred birth
+    // (idle + 500 ms), so the reading chapters' titles are placed in the corridor between the packs at their
+    // first placement — on a hard load of /#experience the title used to drop ≈ 234 px 0.7 s after load, a
+    // layout shift. Withdrawn if the gate closes before (or after) the birth.
+    publishFieldPacks(fieldPacks(window.innerWidth, window.innerHeight, packVariantFromSearch(window.location.search)));
     const init = () => {
       if (cancelled) return;
       setPacks(fieldPacks(window.innerWidth, window.innerHeight, packVariantFromSearch(window.location.search)));
@@ -78,8 +93,9 @@ export default function JackField() {
       cancelled = true;
       if (idleId !== undefined) window.cancelIdleCallback(idleId);
       clearTimeout(timeoutId);
+      publishFieldPacks(null);
     };
-  }, []);
+  }, [reduced]);
 
   // Tab hidden → the frameloop is "never": no render, no step. The layer is always on screen
   // otherwise, so this is the field's one visibility gate.
@@ -109,6 +125,14 @@ export default function JackField() {
     };
   }, [born, rig]);
 
+  // The composition, for the reading chapters' title corridor (fieldPresence.ts → the ChapterDirector): published
+  // at the gate (above), confirmed at the birth (the same composition unless the window changed in between), and
+  // withdrawn when the gate closes or the scene unmounts. Publishes only; changes nothing here.
+  useEffect(() => {
+    if (born && !reduced) publishFieldPacks(packs);
+  }, [born, reduced, packs]);
+  useEffect(() => () => publishFieldPacks(null), []);
+
   useEffect(() => {
     let live = true;
     queueMicrotask(() => {
@@ -119,7 +143,7 @@ export default function JackField() {
     return () => { live = false; };
   }, [resolvedTheme]);
 
-  if (!born) return null;
+  if (!born || reduced) return null;
   return (
     <div aria-hidden className="fixed inset-0 z-10 pointer-events-none">
       <JackFieldScene packs={packs} accent={accentHex} theme={resolvedTheme} visible={awake} rig={rig} />

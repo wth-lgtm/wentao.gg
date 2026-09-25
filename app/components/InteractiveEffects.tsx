@@ -43,8 +43,14 @@ export default function InteractiveEffects() {
   useEffect(() => {
     if (!mounted || !canvasRef.current) return;
 
-    // Respect prefers-reduced-motion: skip the fluid sim entirely (no WebGL context, no rAF).
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    // Respect prefers-reduced-motion: skip the fluid sim entirely (no WebGL context, no rAF). Forced colours too,
+    // as the site's motion policy has it (siteMotion.ts: allowed = !reduced && !forcedColors; the rain, the jack
+    // field and the card already stop there): the intro splash and the pointer's dye played behind the forced
+    // Canvas panels and the titles' backplates, which is the movement a forced-colours visitor opted out of.
+    if (
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches ||
+      window.matchMedia("(forced-colors: active)").matches
+    ) return;
 
     let fluidInstance: FluidHandle | null = null;
     let cancelled = false;

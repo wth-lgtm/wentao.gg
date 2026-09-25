@@ -4,7 +4,11 @@ import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { ThemeProvider } from "./components/ThemeProvider";
 import MotionProvider from "./components/MotionProvider";
+import SiteMotion from "./components/SiteMotion";
+import { BOOT_MOTION_SCRIPT } from "./lib/siteMotion";
 import "./globals.css";
+// after globals.css, so its `@layer components` joins the layer order Tailwind declared (E17)
+import "./chapter.css";
 
 const spaceGrotesk = Space_Grotesk({
   variable: "--font-space-grotesk",
@@ -62,6 +66,11 @@ export const metadata: Metadata = {
 // storage visitor got no theme class at all, so every token fell back to its :root
 // default for the life of the page. Falling through to the system preference is the
 // same answer an absent key gets, which is the right one: nothing was stored.
+//
+// The same blocking script writes html[data-site-motion] = "on" | "off" (reduced motion or forced colours →
+// "off"; app/lib/siteMotion.ts BOOT_MOTION_SCRIPT), so the reading chapters' CSS can lay out the first paint
+// (pinned or in flow) before hydration without a shift. With JS off the attribute is absent and every
+// chapter renders static. SiteMotion keeps it live after hydration; <html suppressHydrationWarning> covers it.
 const themeScript = `
   (function() {
     var stored = null;
@@ -69,6 +78,7 @@ const themeScript = `
     var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
     var theme = stored === 'light' ? 'light' : stored === 'dark' ? 'dark' : (prefersDark ? 'dark' : 'light');
     document.documentElement.classList.add(theme);
+    try { ${BOOT_MOTION_SCRIPT} } catch (e) {}
   })();
 `;
 
@@ -85,6 +95,7 @@ export default function RootLayout({
       <body className={`${spaceGrotesk.variable} ${jetbrainsMono.variable} antialiased bg-background text-foreground`}>
         <ThemeProvider>
           <MotionProvider>
+            <SiteMotion />
             {children}
           </MotionProvider>
         </ThemeProvider>
