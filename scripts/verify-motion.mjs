@@ -834,7 +834,12 @@ async function fluidInPin(page, vp, theme) {
     const panel = s.querySelector(".ch-panel").getBoundingClientRect();
     const dial = s.querySelector(".ch-dial").getBoundingClientRect();
     const fluid = document.querySelector("canvas.fixed");
-    const pts = [[Math.max(4, panel.left - 24), panel.top + 20], [Math.max(4, (dial.right + panel.left) / 2), dial.bottom + 40], [panel.left + panel.width / 2, Math.min(innerHeight - 4, panel.bottom + 18)], [Math.min(innerWidth - 4, panel.right + 20), innerHeight / 2]];
+    // the gap between the dial and the panel: beside the panel in two columns; in one column (700–1023 px) the dial
+    // row sits ABOVE the panel, so the gap is the row gap between them, and the dial row itself passes the pointer on
+    const stacked = panel.top >= dial.bottom - 1;
+    const gap = stacked ? [panel.left + panel.width / 2, (dial.bottom + panel.top) / 2] : [Math.max(4, (dial.right + panel.left) / 2), dial.bottom + 40];
+    const pts = [[Math.max(4, panel.left - 24), panel.top + 20], gap, [panel.left + panel.width / 2, Math.min(innerHeight - 4, panel.bottom + 18)], [Math.min(innerWidth - 4, panel.right + 20), innerHeight / 2]];
+    if (stacked) pts.push([dial.left + dial.width * 0.6, dial.top + dial.height / 2]);
     return pts.map(([x, y]) => { const el = document.elementFromPoint(x, y); return { x: Math.round(x), y: Math.round(y), hit: el === fluid ? "fluid" : `${el?.tagName}.${String(el?.className || "").slice(0, 30)}` }; });
   }, c.id);
   return report("fluidInPin", vp.spec, theme, r.every((p) => p.hit === "fluid"), { points: r });
