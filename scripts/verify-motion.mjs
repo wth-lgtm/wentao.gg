@@ -49,6 +49,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import zlib from "node:zlib";
 import { captureTop, ssimFiles, masksFromSidecar } from "./capture-top.mjs";
 
 const PW = process.env.PLAYWRIGHT_CORE ?? "/tmp/shots/node_modules/playwright-core/index.mjs";
@@ -1033,6 +1034,21 @@ async function restAtTopIdentical(vp, theme) {
   return report("restAtTopIdentical", vp.spec, theme, ok, { ...r, errors });
 }
 
+/** the home page's initial JS (every script and module preload in the built index.html), raw and gzipped; run
+ *  from the repo so .next is at hand. Budget (DESIGN §6): ≤ 272 KB gz, against 264 KB on f4b738f. */
+function initialBytes() {
+  const html = fs.readFileSync(path.join(".next", "server", "app", "index.html"), "utf8");
+  const srcs = [...html.matchAll(/<script[^>]+src="([^"]+)"/g)].map((m) => m[1]);
+  const pre = [...html.matchAll(/<link[^>]+rel="(?:module)?preload"[^>]+href="([^"]+\.js)"/g)].map((m) => m[1]);
+  let raw = 0, gz = 0, files = 0;
+  for (const src of [...new Set([...srcs, ...pre])]) {
+    const buf = fs.readFileSync(path.join(".next", src.replace(/^\/_next\//, "").replace(/\?.*$/, "")));
+    raw += buf.length; gz += zlib.gzipSync(buf).length; files++;
+  }
+  const gzKB = +(gz / 1024).toFixed(1);
+  return report("initialBytes", "-", "-", gzKB <= 272, { files, rawKB: +(raw / 1024).toFixed(1), gzKB, budgetKB: 272, baseKB: 264 });
+}
+
 async function restAtTopPixels() {
   const out = path.join(OUT, "top");
   fs.mkdirSync(out, { recursive: true });
@@ -1108,6 +1124,7 @@ for (const spec of VIEWPORTS) {
     }
   }
 }
+if (!REDUCE && want("initialBytes")) { try { initialBytes(); } catch (e) { report("initialBytes", "-", "-", null, { note: `run from the repo root to read .next (${String(e).slice(0, 80)})` }); } }
 if (!REDUCE && want("hashLoadFailsBand")) await hashLoadFailsBand(THEMES[0]).catch((e) => report("harnessError", "-", THEMES[0], false, { check: "hashLoadFailsBand", error: String(e).slice(0, 300) }));
 if (!REDUCE && want("restAtTopPixels") && (!args.viewports || VIEWPORTS.includes("1440x900"))) await restAtTopPixels().catch((e) => report("harnessError", "-", "-", false, { check: "restAtTopPixels", error: String(e).slice(0, 300) }));
 

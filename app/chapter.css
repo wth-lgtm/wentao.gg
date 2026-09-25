@@ -227,7 +227,7 @@
     position: relative;
     isolation: isolate;
     display: flex;
-    align-items: center;
+    align-items: flex-start; /* a head that wraps (phones) keeps its numeral, logo and link on the first line */
     gap: 10px;
     min-height: 28px;
   }
@@ -248,6 +248,7 @@
     font-size: 12px;
     letter-spacing: 0.08em;
     font-variant-numeric: tabular-nums;
+    line-height: 28px; /* centred on the logo's 28 px */
     /* --legend, the site's measured token for small mono labels (--muted is too light to clear AA at 12 px on a
        card): over the live glass the muted numeral measured 3.0–4.4:1 in the light theme */
     color: var(--legend);
@@ -269,6 +270,7 @@
     align-items: baseline;
     column-gap: 10px;
     row-gap: 0;
+    padding-top: 4px; /* the name's first line centred on the logo */
   }
   .ch-name {
     margin: 0;
@@ -302,7 +304,9 @@
     color: inherit;
     text-decoration: none;
   }
-  .ch-text-link::after { inset: -10px -4px; }
+  /* stacked text links (a degree's field, then its location) sit 22 px apart: the hit boxes go UNDER the text
+     (z-index −1 inside the line's isolated context), so a 44 px target never steals a click from the link above */
+  .ch-text-link::after { inset: -12px -4px; z-index: -1; }
   .ch-text-link:hover { color: var(--accent); }
 
   /* the entry's line(s): dates · location, the stack, a degree */
