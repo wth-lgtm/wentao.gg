@@ -33,12 +33,25 @@ const BASE_SCHOOLS = [
   },
 ];
 
-test("Experience: every company, job title, date, location, link and stack string equals f4b738f's, in order", () => {
-  assert.deepEqual(JSON.parse(JSON.stringify(EXPERIENCE)), BASE_ROLES);
+// Dates show years only (the owner, 2026-09-25: "get rid of the month too"): the expected strings are the base's
+// with the month names taken out, so a year can never be retyped wrong either.
+const yearsOnly = (period: string) => period.replace(/\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.? /g, "");
+
+test("years only: the month names come out and nothing else changes", () => {
+  assert.equal(yearsOnly("May 2024 - Mar 2026"), "2024 - 2026");
+  assert.equal(yearsOnly("Mar 2026 - Present"), "2026 - Present");
+  assert.equal(yearsOnly("Dec 2017"), "2017");
 });
 
-test("Education: every school, degree, field, date, location and link string equals f4b738f's, in order", () => {
-  assert.deepEqual(JSON.parse(JSON.stringify(EDUCATION)), BASE_SCHOOLS);
+test("Experience: every company, job title, date (years only), location, link and stack string equals f4b738f's, in order", () => {
+  assert.deepEqual(JSON.parse(JSON.stringify(EXPERIENCE)), BASE_ROLES.map((r) => ({ ...r, period: yearsOnly(r.period) })));
+  for (const r of EXPERIENCE) assert.match(r.period, /^\d{4}( - (\d{4}|Present))?$/, `${r.company}: ${r.period}`);
+});
+
+test("Education: every school, degree, field, date (years only), location and link string equals f4b738f's, in order", () => {
+  const expected = BASE_SCHOOLS.map((s) => ({ ...s, degrees: s.degrees.map((d) => ({ ...d, period: yearsOnly(d.period) })) }));
+  assert.deepEqual(JSON.parse(JSON.stringify(EDUCATION)), expected);
+  for (const s of EDUCATION) for (const d of s.degrees) assert.match(d.period, /^\d{4}$/, `${s.name}: ${d.period}`);
 });
 
 test("no detailed bullets (owner, 2026-09-24): no role carries a description, no school a highlight — nothing invented, nothing kept", () => {

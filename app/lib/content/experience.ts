@@ -1,5 +1,5 @@
-// 02 Experience, as data (moved out of Experience.tsx, every string byte-identical to f4b738f;
-// tests/content.test.ts holds them). The site lists each role as its company, its job title, its dates and its
+// 02 Experience, as data (moved out of Experience.tsx, every string byte-identical to f4b738f except that dates
+// show years only — the owner, 2026-09-25: "get rid of the month too"; tests/content.test.ts derives them). The site lists each role as its company, its job title, its dates and its
 // location, and nothing else: `technologies` stays here as data (the resume's stack line), but Experience.tsx
 // does not render it. No detailed bullets: the owner, 2026-09-24 —
 // "for the bullet points we can keep them empty for now. We just need to list the individual experiences and
@@ -25,7 +25,7 @@ export const EXPERIENCE: readonly Role[] = [
     company: "Mercor",
     companyUrl: "https://www.mercor.com/",
     logo: "/images/profile/mercor_logo.png",
-    period: "Mar 2026 - Present",
+    period: "2026 - Present",
     location: "San Francisco, CA",
     technologies: [],
   },
@@ -34,7 +34,7 @@ export const EXPERIENCE: readonly Role[] = [
     company: "Meta",
     companyUrl: "https://www.meta.com/",
     logo: "/images/profile/meta_logo.jpeg",
-    period: "May 2024 - Mar 2026",
+    period: "2024 - 2026",
     location: "New York City, NY",
     technologies: ["Python", "SQL", "Java", "PHP", "Spark", "Presto"],
   },
@@ -43,7 +43,7 @@ export const EXPERIENCE: readonly Role[] = [
     company: "Cherre",
     companyUrl: "https://cherre.com/",
     logo: "/images/profile/cherre_logo.jpeg",
-    period: "Nov 2022 - May 2024",
+    period: "2022 - 2024",
     location: "New York City, NY",
     technologies: ["Python", "SQL", "PyTorch", "Postgres", "BigQuery", "Airflow", "dbt", "AWS", "GCP", "Docker", "Kubernetes"],
   },
@@ -52,7 +52,7 @@ export const EXPERIENCE: readonly Role[] = [
     company: "Mashey",
     companyUrl: "https://www.analytics8.com/blog/analytics8-acquires-mashey-investing-more-in-the-future-of-data-and-analytics-consulting/",
     logo: "/images/profile/mashey_logo.jpeg",
-    period: "Oct 2021 - Nov 2022",
+    period: "2021 - 2022",
     location: "Remote",
     technologies: ["Python", "SQL", "PyTorch", "Postgres", "BigQuery", "Airflow", "dbt", "AWS", "GCP", "Docker", "Kubernetes"],
   },
@@ -61,7 +61,7 @@ export const EXPERIENCE: readonly Role[] = [
     company: "Jefferson Street Technologies",
     companyUrl: "https://www.jeffersonst.io/",
     logo: "/images/profile/jefferson_street_technologies_logo.jpeg",
-    period: "May 2020 - Oct 2021",
+    period: "2020 - 2021",
     location: "Remote",
     technologies: ["Python", "SQL", "TensorFlow", "PyTorch", "RAG"],
   },
