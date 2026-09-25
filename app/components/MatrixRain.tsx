@@ -36,7 +36,10 @@ export default function MatrixRain() {
   // The LIVE reduced-motion answer (SiteMotion): turning Reduce Motion on with the page open re-runs the
   // effect below, which cancels the loop and paints the one still frame — the rain follows the setting
   // within a frame instead of on the next load.
-  const { reduced } = useSiteMotion();
+  // Forced colours count as reduced (DESIGN §3.4: motion is allowed only with neither): the site's policy is "off"
+  // there and the chapters go static, so the rain holds its still frame too.
+  const { reduced: reducedPref, forcedColors } = useSiteMotion();
+  const reduced = reducedPref || forcedColors;
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 

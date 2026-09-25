@@ -178,6 +178,15 @@
   @media (min-width: 640px) {
     .ch-panel { padding: clamp(24px, 1.25vw, 32px); } /* 24 px up to a 1920 px window, 32 px at 2560 */
   }
+  /* Forced colours: the panel is the system's opaque Canvas. A forced background keeps the author colour's alpha, so
+     the 24/40 % glass let blurred shapes show through behind the text, leaving legibility to the UA's backplates. */
+  @media (forced-colors: active) {
+    html .chapter .ch-panel {
+      background: Canvas;
+      -webkit-backdrop-filter: none;
+              backdrop-filter: none;
+    }
+  }
 
   .ch-body {
     position: relative;

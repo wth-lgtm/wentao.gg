@@ -99,7 +99,9 @@ export default function SiteStats() {
   // The LIVE policy, not framer's mount-latched useReducedMotion(): Reduce Motion turned on with the page open
   // takes use3D false below, which unmounts the card's scene (its WebGL context goes with it) and swaps the
   // CSS-3D board for the flat grid; the tilt below is gated at its binding site for the same reason (E16).
-  const { reduced: reduceMotion } = useSiteMotion();
+  // Forced colours count as reduced here too (DESIGN §3.4: motion is allowed only with neither).
+  const { reduced: reducedPref, forcedColors } = useSiteMotion();
+  const reduceMotion = reducedPref || forcedColors;
   const { resolvedTheme } = useTheme();
 
   // Background canvas, three stages observed on the card (the column itself only exists once
@@ -128,7 +130,7 @@ export default function SiteStats() {
         // Only where a canvas can mount at all (the use3D gates, read directly — this ref
         // callback is created once): a phone or a reduced-motion visitor was downloading the
         // chunk for a column that never exists.
-        if (window.innerWidth < 640 || !window.matchMedia("(hover: hover) and (pointer: fine)").matches || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+        if (window.innerWidth < 640 || !window.matchMedia("(hover: hover) and (pointer: fine)").matches || window.matchMedia("(prefers-reduced-motion: reduce)").matches || window.matchMedia("(forced-colors: active)").matches) return;
         // A failed warm is only a lost head start: dynamic() fetches again at mount and reports.
         import("./ConnectorField").catch(() => {});
       }, { rootMargin: "100% 0px" });

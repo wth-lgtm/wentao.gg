@@ -53,7 +53,10 @@ export default function JackField() {
   const { resolvedTheme } = useTheme();
   // The LIVE reduced-motion answer (SiteMotion): Reduce Motion turned on with the page open unmounts the scene
   // (and its WebGL context) at the render below; turned off again, the gate re-runs and the field is born anew.
-  const { reduced } = useSiteMotion();
+  // Forced colours close the gate as reduced motion does (DESIGN §3.4: allowed = !reduced && !forcedColors): the
+  // chapters go static there, and a moving 3D field behind a forced Canvas panel is what the visitor opted out of.
+  const { reduced: reducedPref, forcedColors } = useSiteMotion();
+  const reduced = reducedPref || forcedColors;
   // Mutated in place, read by the scene's frame loop — no re-render per pointer move.
   const rig = useMemo(() => createPointerRig(), []);
 
@@ -65,7 +68,8 @@ export default function JackField() {
       reduced ||
       window.innerWidth < 640 ||
       !window.matchMedia("(hover: hover) and (pointer: fine)").matches ||
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches ||
+      window.matchMedia("(forced-colors: active)").matches
     ) return;
     let cancelled = false;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
