@@ -23,7 +23,7 @@
 //   outside every chapter                              the element at the viewport centre keeps its viewport top
 //   above every chapter that changed                   nothing moves (that element's page top did not change)
 
-import { pinAtBeat, readingLineActive, type ChapterLayout } from "./chapterList";
+import { STAGE_CLEAR, pinAtBeat, readingLineActive, type ChapterLayout } from "./chapterList";
 
 /** px: a kept row lands at least this far past the reading line, and this far clear of the next row's top */
 export const LAND_PX = 2;
@@ -134,6 +134,9 @@ export function correctPlace(place: Place, after: AfterInput): number | null {
 export function landRow(view: number, line: number, across: boolean, nextTop: number | undefined, rowTop: number): number {
   if (!across) return Math.max(view, line + LAND_PX);
   const hi = line - LAND_PX;
-  const lo = nextTop === undefined ? -Infinity : line - (nextTop - rowTop) + LAND_PX;
+  // and never above the top clear band (the W. / INDEX marks, STAGE_CLEAR.top): a phone reader with JST 408 px above
+  // a portrait line kept that offset against the landscape line (242 px) and JST landed at −166, its list gone
+  // under the band, nothing marked. The kept row is the one the reader was reading, so it stays in view.
+  const lo = Math.max(STAGE_CLEAR.top, nextTop === undefined ? -Infinity : line - (nextTop - rowTop) + LAND_PX);
   return Math.min(hi, Math.max(view, Math.min(lo, hi)));
 }

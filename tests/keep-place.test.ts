@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { LAND_PX, correctPlace, snapshotPlace, type ChapterBox, type ChapterMode } from "../app/lib/keepPlace";
-import { HYSTERESIS_PX, pinAtBeat, readingLineActive } from "../app/lib/chapterList";
+import { HYSTERESIS_PX, STAGE_CLEAR, pinAtBeat, readingLineActive } from "../app/lib/chapterList";
 import { EXPERIENCE_LAYOUT } from "../app/lib/content/experience";
 import { EDUCATION_LAYOUT } from "../app/lib/content/education";
 
@@ -176,4 +176,14 @@ test("the reading place is the MARKED chapter, even when the viewport's centre a
   const exL: ChapterBox = { ...ex, top: 500, height: 900, stageHeight: 390, beatTops: [560, 700, 840, 990, 1150.5] };
   const y = correctPlace(place, { chapters: [exL, { ...ed, top: 1400, beatTops: [1500, 1640] }], pageTopOf: () => null, readingLine: 242 })!;
   assert.equal(markedAfter(exL.beatTops, y, 242), 4);
+});
+
+test("a rotation that would carry the kept row above the top clear band keeps it in view (portrait JST 408 px above the line → landscape)", () => {
+  const port: ChapterBox = { id: "experience", top: 700, height: 1074, mode: "flow", stageHeight: 844, beatTops: [800, 990, 1180, 1400, 1640.4], layout: EXPERIENCE_LAYOUT };
+  const land: ChapterBox = { ...port, top: 500, height: 900, stageHeight: 390, beatTops: [560, 700, 840, 990, 1150.6] };
+  const place = snapshotPlace({ scrollY: 1640.4 - 523 + 408.6, viewportH: 844, readingLine: 523, chapters: [port], shown: { experience: 4 }, centre: null });
+  const y = correctPlace(place, { chapters: [land], pageTopOf: () => null, readingLine: 242 })!;
+  const view = 1150.6 - Math.round(y);
+  assert.ok(view >= STAGE_CLEAR.top - 0.5 && view <= 242 - LAND_PX + 0.5, `JST's top lands in view, across the line: ${view}`);
+  assert.equal(markedAfter(land.beatTops, y, 242), 4);
 });
