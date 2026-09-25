@@ -43,7 +43,8 @@ export default function Chapter({
   id: SectionId;
   title: string;
   layout: ChapterLayout;
-  years: readonly number[];
+  /** the dial's year wheel; a chapter without dates (Education) passes none and gets no wheel */
+  years?: readonly number[];
   entries: readonly ChapterEntry[];
 }) {
   const pinDefault = PIN_CHAPTERS[id] === true;
@@ -71,7 +72,7 @@ export default function Chapter({
             <h2 id={`${id}-title`} className="ch-title heading-legible">
               <span className="ch-title-text">{title}</span>
             </h2>
-            <YearWheel years={years} className="ch-readout" />
+            {years && years.length > 0 && <YearWheel years={years} className="ch-readout" />}
           </div>
           <div className="ch-panel glass">
             <div className="ch-body">

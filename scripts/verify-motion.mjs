@@ -29,7 +29,8 @@
 //   commitOnBeat            each step lands 0–12 ms after a 100 ms boundary (median p95 of 3 runs; Metal only)
 //   railMatchesPin          --pin-progress = chapterPin ± 0.002, two frames after each scrollTo
 //   findReachesEveryItem    window.find reaches every entry's name and dates line, painted inside its panel
-//   findHitsOnlyVisibleText "2024", "2022", "2021", "2017": the first hit is list text, never the wheel
+//   findHitsOnlyVisibleText "2024", "2022", "2021": the first hit is list text, never the wheel
+//   educationNoYear         Education ships no year: none in its text, attributes or generated content (the owner, 2026-09-25)
 //   focusFollows / tabLeavesChapter   pinned and flow: Tab through the links, the lit entry is the focused one; Tab leaves
 //   anchorsAtPin0           a hard load of /#experience lands at the section top, pin 0, the first entry marked;
 //                           a flow chapter (/#education) lands at its top with ITS first entry marked (the travelling
@@ -606,7 +607,14 @@ async function findChecks(page, vp, theme) {
     const r = await page.evaluate((needle) => {
       window.getSelection().removeAllRanges();
       window.scrollTo({ top: 0, behavior: "instant" });
-      const found = window.find(needle, true, false, false, false, false, false);
+      // The hero's visitor card prints the VIEWER's network organisation (on a company network, a company name such
+      // as an employer listed in Experience), so a match inside it says nothing about the list: step past it.
+      let found = window.find(needle, true, false, false, false, false, false);
+      for (let k = 0; found && k < 5; k += 1) {
+        const at = window.getSelection().getRangeAt(0).startContainer.parentElement;
+        if (!at || !at.closest("[data-hero-card]")) break;
+        found = window.find(needle, true, false, false, false, false, false);
+      }
       if (!found) return { found };
       const sel = window.getSelection();
       const range = sel.getRangeAt(0);
@@ -619,7 +627,7 @@ async function findChecks(page, vp, theme) {
     if (!r.found || !r.inChapter || r.hidden || !r.inPanel) miss.push({ text: t, ...r });
   }
   report("findReachesEveryItem", vp.spec, theme, miss.length === 0, { searched: texts.length, misses: miss });
-  const years = ["2024", "2022", "2021", "2017"];
+  const years = ["2024", "2022", "2021"];
   const hits = [];
   for (const y of years) {
     const r = await page.evaluate((needle) => {
@@ -639,7 +647,26 @@ async function findChecks(page, vp, theme) {
   }
   const ok = hits.every((h) => h.found && !h.hidden && !h.inWheel && h.visible && h.insideClip);
   await page.evaluate(() => window.getSelection().removeAllRanges());
-  return report("findHitsOnlyVisibleText", vp.spec, theme, ok, { hits });
+  const findResult = report("findHitsOnlyVisibleText", vp.spec, theme, ok, { hits });
+  // Education shows no dates (the owner, 2026-09-25: "get rid of the years as it will expose my age"): no four-digit
+  // year in its text, in any attribute (a year wheel's data-y) or in any ::before/::after content.
+  const eduYears = await page.evaluate(() => {
+    const sec = document.getElementById("education");
+    if (!sec) return { missing: true, hits: [] };
+    const hits = [];
+    const yr = /\b(19|20)\d{2}\b/;
+    if (yr.test(sec.textContent)) hits.push("text: " + sec.textContent.match(yr)[0]);
+    for (const el of sec.querySelectorAll("*")) {
+      for (const a of el.attributes) if (yr.test(a.value)) hits.push(`${el.tagName.toLowerCase()}[${a.name}]=${a.value}`);
+      for (const pseudo of ["::before", "::after"]) {
+        const c = getComputedStyle(el, pseudo).content;
+        if (c && c !== "none" && yr.test(c)) hits.push(`${el.tagName.toLowerCase()}${pseudo}: ${c}`);
+      }
+    }
+    return { missing: false, hits: hits.slice(0, 8) };
+  });
+  report("educationNoYear", vp.spec, theme, !eduYears.missing && eduYears.hits.length === 0, eduYears);
+  return findResult;
 }
 
 /** Tab through one chapter's links from the element before it: after each step the marked entry is the one the
@@ -1937,7 +1964,7 @@ for (const spec of VIEWPORTS) {
         if (want("fluidInPin")) await fluidInPin(page, vp, theme);
         if (want("docHeight")) await docHeight(page, vp, theme);
         if (core || spec === "1280x720" || spec === "768x1024t") {
-          if (want("findReachesEveryItem") || want("findHitsOnlyVisibleText")) await findChecks(page, vp, theme);
+          if (want("findReachesEveryItem") || want("findHitsOnlyVisibleText") || want("educationNoYear")) await findChecks(page, vp, theme);
         }
         // keyboard focus in pinned AND flow chapters: Education flows at every desktop size, both chapters on phones
         if ((core || spec === "1280x720" || spec === "768x1024t" || spec === "844x390m") && (want("focusFollows") || want("tabLeavesChapter"))) await focusChecks(page, vp, theme);

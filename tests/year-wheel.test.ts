@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 
 import { yearOf, yearRange, yearsFor } from "../app/lib/yearWheel";
 import { EXPERIENCE } from "../app/lib/content/experience";
-import { EDUCATION } from "../app/lib/content/education";
 
 test("a period's year is its first four-digit year", () => {
   assert.equal(yearOf("May 2024 - Mar 2026"), 2024);
@@ -12,9 +11,8 @@ test("a period's year is its first four-digit year", () => {
   assert.equal(yearOf("Present"), null);
 });
 
-test("the wheels' years come from the data: Experience 2026 → 2020, Education 2020 → 2017", () => {
+test("the wheel's years come from the data: Experience 2026 → 2020 (Education has no dates and no wheel)", () => {
   assert.deepEqual(yearsFor(EXPERIENCE.map((r) => r.period)), [2026, 2024, 2022, 2021, 2020]);
-  assert.deepEqual(yearsFor(EDUCATION.map((s) => s.degrees[0].period)), [2020, 2017]);
 });
 
 test("the static readout shows the full range", () => {

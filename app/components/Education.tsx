@@ -1,13 +1,13 @@
 import Image from "next/image";
 import Chapter, { type ChapterEntry } from "./chapter/Chapter";
 import { EDUCATION, EDUCATION_LAYOUT } from "../lib/content/education";
-import { yearsFor } from "../lib/yearWheel";
 
 // 03 Education — a reading chapter (DESIGN §4.4), in FLOW by default (OC-P: the page reads pinned → flowing →
 // pinned; `?pin=edu` on a review build pins it). Each school is one entry and one beat: its head row (numeral,
-// logo, the school's name as its link) and its line (each degree — type and field, the field linked — with its
-// date and location, the location linked). The highlight chips are gone with every other detail line (the
-// owner's call, 2026-09-24), and so is the ±60 px zigzag. A server component; the ChapterDirector lights it.
+// logo, the school's name as its link, and its location beside it, linked) and its line (each degree — type and
+// field, the field linked). No dates anywhere and no year wheel: the owner, 2026-09-25 — "put the location next to
+// the school name and get rid of the years as it will expose my age". The highlight chips are gone with every other
+// detail line (2026-09-24), and so is the ±60 px zigzag. A server component; the ChapterDirector lights it.
 
 const entries: ChapterEntry[] = EDUCATION.map((school) => ({
   key: school.name,
@@ -28,6 +28,16 @@ const entries: ChapterEntry[] = EDUCATION.map((school) => ({
             school.name
           )}
         </h3>
+        {/* the place beside the name, as a role sits beside its company in Experience */}
+        <span className="ch-role ch-nowrap">
+          {school.locationLink ? (
+            <a href={school.locationLink} target="_blank" rel="noopener noreferrer" className="ch-text-link">
+              {school.location}
+            </a>
+          ) : (
+            school.location
+          )}
+        </span>
       </div>
     </>
   ),
@@ -45,18 +55,6 @@ const entries: ChapterEntry[] = EDUCATION.map((school) => ({
               degree.field
             )}
           </span>
-          {/* the date and the place each unbroken, a no-break space before the "·": the line breaks after it */}
-          <span className="ch-line">
-            <span className="ch-nowrap">{degree.period}</span>
-            {"\u00a0· "}
-            {degree.locationLink ? (
-              <a href={degree.locationLink} target="_blank" rel="noopener noreferrer" className="ch-text-link ch-nowrap">
-                {degree.location}
-              </a>
-            ) : (
-              <span className="ch-nowrap">{degree.location}</span>
-            )}
-          </span>
         </span>
       ))}
     </>,
@@ -64,13 +62,6 @@ const entries: ChapterEntry[] = EDUCATION.map((school) => ({
 }));
 
 export default function Education() {
-  return (
-    <Chapter
-      id="education"
-      title="Education"
-      layout={EDUCATION_LAYOUT}
-      years={yearsFor(EDUCATION.map((s) => s.degrees[0].period))}
-      entries={entries}
-    />
-  );
+  // No year wheel: Education shows no dates (the owner, 2026-09-25), so the chapter gets no `years` at all.
+  return <Chapter id="education" title="Education" layout={EDUCATION_LAYOUT} entries={entries} />;
 }

@@ -48,15 +48,27 @@ test("Experience: every company, job title, date (years only), location, link an
   for (const r of EXPERIENCE) assert.match(r.period, /^\d{4}( - (\d{4}|Present))?$/, `${r.company}: ${r.period}`);
 });
 
-test("Education: every school, degree, field, date (years only), location and link string equals f4b738f's, in order", () => {
-  const expected = BASE_SCHOOLS.map((s) => ({ ...s, degrees: s.degrees.map((d) => ({ ...d, period: yearsOnly(d.period) })) }));
+test("Education: every school, degree, field, location and link string equals f4b738f's, in order — the location lifted to the school, no dates", () => {
+  // The owner, 2026-09-25: "put the location next to the school name and get rid of the years as it will expose my
+  // age". Every base degree of a school shares its location, so lifting it loses nothing; the dates are dropped.
+  const expected = BASE_SCHOOLS.map((s) => {
+    const places = new Set(s.degrees.map((d) => `${d.location}|${d.locationLink}`));
+    assert.equal(places.size, 1, `${s.name}: its degrees disagree on the place, so it cannot sit beside the name`);
+    const { location, locationLink } = s.degrees[0];
+    return { name: s.name, url: s.url, logo: s.logo, location, locationLink, degrees: s.degrees.map(({ degreeType, field, fieldLink }) => ({ degreeType, field, fieldLink })) };
+  });
   assert.deepEqual(JSON.parse(JSON.stringify(EDUCATION)), expected);
-  for (const s of EDUCATION) for (const d of s.degrees) assert.match(d.period, /^\d{4}$/, `${s.name}: ${d.period}`);
+});
+
+test("Education exposes no year: none in its data, and its component renders no date and no year wheel", () => {
+  assert.doesNotMatch(JSON.stringify(EDUCATION), /\b(19|20)\d{2}\b/, "a year is in the Education data");
+  const src = fs.readFileSync(path.join(import.meta.dirname, "..", "app/components/Education.tsx"), "utf8");
+  assert.ok(!/period|yearsFor|years=/.test(src), "Education.tsx still reads a date or passes years");
 });
 
 test("no detailed bullets (owner, 2026-09-24): no role carries a description, no school a highlight — nothing invented, nothing kept", () => {
   for (const r of EXPERIENCE) assert.deepEqual(Object.keys(r).sort(), ["company", "companyUrl", "location", "logo", "period", "technologies", "title"]);
-  for (const s of EDUCATION) assert.deepEqual(Object.keys(s).sort(), ["degrees", "logo", "name", "url"]);
+  for (const s of EDUCATION) assert.deepEqual(Object.keys(s).sort(), ["degrees", "location", "locationLink", "logo", "name", "url"]);
   const root = path.join(import.meta.dirname, "..");
   for (const f of ["app/components/Experience.tsx", "app/components/Education.tsx", "app/lib/content/experience.ts", "app/lib/content/education.ts"]) {
     const src = fs.readFileSync(path.join(root, f), "utf8");
