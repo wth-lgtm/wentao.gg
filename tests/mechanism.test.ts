@@ -50,12 +50,18 @@ test("atBeat arms ONE timeout to the boundary and nothing else; cancel() clears 
   const cancel = atBeat(() => fired++, 1, clock);
   assert.equal(timers.length, 1);
   assert.equal(timers[0].at, 1300);
+  now = 1234.6;
+  const c3 = atBeat(() => {}, 1, clock);
+  assert.equal(timers[1].at, 1300.6, "the delay is rounded UP to whole ms, so it never fires before the boundary");
+  c3();
+  timers.splice(1, 1);
+  now = 1234;
   now = 1300; timers[0].cb();
   assert.equal(fired, 1);
   const c2 = atBeat(() => fired++, 2, clock);
   assert.equal(timers[1].at, 1500, "n = 2 is the second boundary");
   c2(); c2();
-  assert.deepEqual(cleared, [2]);
+  assert.deepEqual(cleared, [2, 3]);
   cancel();
 });
 

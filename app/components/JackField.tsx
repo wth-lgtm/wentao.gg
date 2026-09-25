@@ -6,6 +6,7 @@ import { useTheme } from "./ThemeProvider";
 import { useSiteMotion } from "./SiteMotion";
 import { PACKS_WIDE, fieldPacks, packVariantFromSearch, type Pack } from "../lib/fieldPacks";
 import { createPointerRig } from "../lib/pointerRig";
+import { publishFieldPacks } from "../lib/fieldPresence";
 
 // The jack field — twenty-one of the GitHub card's six-way connector jacks in Lusion's dynamics
 // (jackDynamics.ts), in PACKS (fieldPacks.ts: the card's fourteen under the name and seven above
@@ -113,6 +114,13 @@ export default function JackField() {
       rig.bind(null);
     };
   }, [born, rig]);
+
+  // The composition, for the reading chapters' title corridor (fieldPresence.ts → the ChapterDirector): the
+  // packs while the scene is mounted, null otherwise. Publishes only; changes nothing here.
+  useEffect(() => {
+    publishFieldPacks(born && !reduced ? packs : null);
+  }, [born, reduced, packs]);
+  useEffect(() => () => publishFieldPacks(null), []);
 
   useEffect(() => {
     let live = true;

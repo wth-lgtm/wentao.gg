@@ -1,14 +1,18 @@
 // Keep-your-place (DESIGN §4.2.3): ONE correction per trigger, for the whole page. A mode switch (a resize across
 // the pin gate, Reduce Motion toggled with the page open, a list that no longer fits its band) changes a pinned
-// chapter's height by hundreds of pixels, and everything below it moves. The ChapterDirector snapshots one
-// reading place from the layout still on screen, flips every chapter's mode in one commit, then applies one
-// instant scrollTo computed here. Pure: the director measures, this decides.
+// chapter's height by hundreds of pixels, and everything below it moves; a resize alone reflows every row. The
+// ChapterDirector keeps one reading place — taken from the layout on screen before a switch, or at the last
+// scroll rest before a resize (svh units have already moved by the time a resize event runs) — flips every
+// chapter's mode in one commit, then applies one instant scrollTo computed here. Pure: the director measures,
+// this decides.
 //
-//   Where the reader was                           Where the correction puts them
-//   inside chapter C, and C changed to flow/static  C's shown row on the reading line
-//   inside chapter C, and C changed to pinned       pinAtBeat(shown) in C
-//   outside every chapter (or C unchanged)          the element at the viewport centre keeps its viewport top
-//   above every chapter that changed                nothing moves (that element's page top did not change)
+//   Where the reader was                               Where the correction puts them
+//   inside chapter C, which is (still) pinned          the same pin in C (the same entry, the same instant)
+//   inside chapter C, which just became pinned         pinAtBeat(shown) in C
+//   inside chapter C, which just flowed or went static C's shown row on the reading line
+//   inside chapter C, still in flow / static           C's shown row at the same offset from the reading line
+//   outside every chapter                              the element at the viewport centre keeps its viewport top
+//   above every chapter that changed                   nothing moves (that element's page top did not change)
 
 import { pinAtBeat, type ChapterLayout } from "./chapterList";
 
@@ -30,25 +34,35 @@ export interface ChapterBox {
 export interface PlaceInput {
   scrollY: number;
   viewportH: number;
+  /** the reading line, viewport px */
+  readingLine: number;
   chapters: readonly ChapterBox[];
   /** each chapter's displayed beat (−1 when nothing is marked) */
   shown: Readonly<Record<string, number>>;
-  /** the element at the viewport centre (outside every chapter where possible), as a key and its page top */
+  /** the element at the viewport centre (outside every chapter), as a key and its page top */
   centre: { key: string; pageTop: number } | null;
 }
 
 export type Place =
-  | { kind: "chapter"; id: string; beat: number; mode: ChapterMode; fallback: { key: string; viewportTop: number } | null }
+  | { kind: "chapter"; id: string; beat: number; mode: ChapterMode; pin: number | null; rowOffset: number }
   | { kind: "element"; key: string; viewportTop: number }
   | { kind: "none" };
 
+function pinOf(ch: ChapterBox, scrollY: number): number {
+  const travel = ch.height - ch.stageHeight;
+  if (!(travel > 0)) return 0;
+  return Math.min(1, Math.max(0, (scrollY - ch.top) / travel));
+}
+
 export function snapshotPlace(input: PlaceInput): Place {
   const centreY = input.scrollY + input.viewportH / 2;
-  const fallback = input.centre ? { key: input.centre.key, viewportTop: input.centre.pageTop - input.scrollY } : null;
   const c = input.chapters.find((ch) => centreY >= ch.top && centreY < ch.top + ch.height);
   const beat = c ? input.shown[c.id] ?? -1 : -1;
-  if (c && beat >= 0) return { kind: "chapter", id: c.id, beat, mode: c.mode, fallback };
-  if (fallback) return { kind: "element", ...fallback };
+  if (c && beat >= 0) {
+    const rowTop = (c.beatTops[beat] ?? c.top) - input.scrollY;
+    return { kind: "chapter", id: c.id, beat, mode: c.mode, pin: c.mode === "pinned" ? pinOf(c, input.scrollY) : null, rowOffset: rowTop - input.readingLine };
+  }
+  if (input.centre) return { kind: "element", key: input.centre.key, viewportTop: input.centre.pageTop - input.scrollY };
   return { kind: "none" };
 }
 
@@ -56,7 +70,7 @@ export interface AfterInput {
   chapters: readonly ChapterBox[];
   /** the page top, in the NEW layout, of the element a snapshot keyed; null if it is gone */
   pageTopOf(key: string): number | null;
-  /** the reading line in viewport px (flow mode) */
+  /** the reading line in viewport px, in the new layout */
   readingLine: number;
 }
 
@@ -65,14 +79,16 @@ export function correctPlace(place: Place, after: AfterInput): number | null {
   if (place.kind === "none") return null;
   if (place.kind === "chapter") {
     const ch = after.chapters.find((c) => c.id === place.id);
-    if (ch && ch.mode !== place.mode) {
-      if (ch.mode === "pinned") return Math.max(0, ch.top + pinAtBeat(place.beat, ch.layout) * Math.max(0, ch.height - ch.stageHeight));
-      const rowTop = ch.beatTops[place.beat];
-      return rowTop === undefined ? Math.max(0, ch.top) : Math.max(0, rowTop - after.readingLine);
+    if (!ch) return null;
+    const travel = Math.max(0, ch.height - ch.stageHeight);
+    if (ch.mode === "pinned") {
+      const pin = place.mode === "pinned" && place.pin !== null ? place.pin : pinAtBeat(place.beat, ch.layout);
+      return Math.max(0, ch.top + pin * travel);
     }
-    if (!place.fallback) return null;
-    const top = after.pageTopOf(place.fallback.key);
-    return top === null ? null : Math.max(0, top - place.fallback.viewportTop);
+    const rowTop = ch.beatTops[place.beat];
+    if (rowTop === undefined) return Math.max(0, ch.top);
+    const offset = place.mode === ch.mode ? place.rowOffset : 0;
+    return Math.max(0, rowTop - after.readingLine - offset);
   }
   const top = after.pageTopOf(place.key);
   return top === null ? null : Math.max(0, top - place.viewportTop);

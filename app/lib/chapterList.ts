@@ -28,6 +28,10 @@ export const PIN_QUERY =
   "screen and (prefers-reduced-motion: no-preference) and (forced-colors: none) and (min-width: 700px) and (min-height: 720px)";
 /** px: the stage's padding — under the W. / INDEX marks, and above the fold */
 export const STAGE_CLEAR = { top: 96, bottom: 40 } as const;
+/** 700–1023 px wide, the pinned stage is one column: a compact dial row (72 px, app/chapter.css) and a 16 px gap come off the band */
+export const DIAL_ROW_PX = 72 + 16;
+/** the width from which the pinned stage has two columns (the dial beside the panel) */
+export const TWO_COLUMN_MIN = 1024;
 /** pin only with ≥ 16 px spare in the band; unpin at > 0 px overflow (hysteresis, E1) */
 export const PIN_SLACK_PX = 16;
 /** flow mode: the reading line, as a fraction of the cached client height (the small viewport on iOS) */

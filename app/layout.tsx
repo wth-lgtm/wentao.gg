@@ -7,6 +7,8 @@ import MotionProvider from "./components/MotionProvider";
 import SiteMotion from "./components/SiteMotion";
 import { BOOT_MOTION_SCRIPT } from "./lib/siteMotion";
 import "./globals.css";
+// after globals.css, so its `@layer components` joins the layer order Tailwind declared (E17)
+import "./chapter.css";
 
 const spaceGrotesk = Space_Grotesk({
   variable: "--font-space-grotesk",

@@ -46,7 +46,12 @@
      tint. Accent-derived, so they appear only inside the active item (the accent is spent once per
      viewport); never under muted text (muted over a 12 % tint is 4.56:1 dark, 4.23:1 light). */
   --chapter-tint: color-mix(in oklab, var(--accent) 12%, transparent);
-  --chapter-tint-soft: color-mix(in oklab, var(--accent) 6%, transparent);
+  --chapter-tint-soft: color-mix(in oklab, var(--accent) 8%, transparent);
+  /* OC-T (the owner: "raise only as far as the pixel contrast check requires"): the PINNED chapter panel's glass
+     fill. Pinned, the panel holds still over the fluid's dye and the jacks, and at the site's 24 % the muted rows
+     measured 4.3:1; 55 % passed four runs of four (worst 4.58) and 60 % failed one of seven (4.28), so 65 % (four
+     of four, worst 4.65). The blur stays: it still reads as glass. */
+  --chapter-panel-tint: color-mix(in oklab, var(--card) 65%, transparent);
 
   /* Split-flap board (dark) — opaque plastic flaps so the animated bg doesn't bleed. */
   --flap-bg: #202024;
@@ -97,8 +102,11 @@
   --loss-hover: #991b1b;
 
   /* The reading chapters' marks (light): a touch less accent over the light glass. */
-  --chapter-tint: color-mix(in oklab, var(--accent) 9%, transparent);
-  --chapter-tint-soft: color-mix(in oklab, var(--accent) 5%, transparent);
+  --chapter-tint: color-mix(in oklab, var(--accent) 10%, transparent);
+  --chapter-tint-soft: color-mix(in oklab, var(--accent) 7%, transparent);
+  /* OC-T, light: the muted rows need 90 % over dark dye (70 % failed one run of four at 3.85:1, 80 % two of four;
+     90 % passed four of four, worst 4.55). The light theme's own phone glass is already 92 %. */
+  --chapter-panel-tint: color-mix(in oklab, var(--card) 90%, transparent);
 
   /* Split-flap board (light). */
   --flap-bg: #e7e7ea;

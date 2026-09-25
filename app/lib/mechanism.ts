@@ -112,7 +112,9 @@ const browserClock: BeatClock = {
  */
 export function atBeat(cb: () => void, n = 1, clock: BeatClock = browserClock): () => void {
   const now = clock.now();
-  const id = clock.setTimeout(cb, Math.max(0, nextBeat(now, n) - now));
+  // rounded UP to whole ms: browsers run timers on integer-ms delays, and a truncated delay fires just BEFORE
+  // the boundary (measured in Chrome: 0.1 ms early), which is off the lattice
+  const id = clock.setTimeout(cb, Math.max(0, Math.ceil(nextBeat(now, n) - now)));
   let live = true;
   return () => {
     if (!live) return;

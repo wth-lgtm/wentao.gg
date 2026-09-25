@@ -1,0 +1,519 @@
+/* ===== THE READING CHAPTERS (DESIGN §4.2; the owner's highlighted list) =====
+   One server-rendered DOM per chapter (app/components/chapter/Chapter.tsx) in three modes, written as
+   data-mode by the one ChapterDirector after hydration:
+     pinned  a tall section (--chapter-vh svh) holding a sticky 100svh stage: the dial (folio, display title,
+             year wheel) left, the glass panel right; the entries light one at a time as the page scrolls.
+     flow    the same list in normal flow; entries light as they cross the 62 % reading line; the rail's fill
+             is CSS sticky (zero callbacks); the dial sticks beside the list at ≥ 1024 px, a year chip on phones.
+     static  reduced motion, forced colours, print, JS off: a plain legible list, no marks, the rail drawn full
+             in --border, no accent, the readout printing its full range.
+   CSS owns only the FIRST PAINT (the pinned layout for a pin-set chapter, inside @media PIN_QUERY, before any
+   data-mode exists); every later decision keys on [data-mode] alone, so the director always reads the old
+   layout before it flips.
+
+   Marks are ADDITIVE ONLY: nothing dims, inactive rows keep their full tokens at opacity 1, and muted text
+   never sits on a tint. Accent-derived colour appears only inside the active entry (its bar, its head tint,
+   its line's tint and tick): the accent is spent once per viewport. Only transform and opacity animate
+   (ESCAPEMENT: no animated background-color or box-shadow, no filter, no backdrop-filter on rows), and
+   nothing on the sticky stage or any .glass ancestor carries a transform, opacity, filter, clip-path or
+   will-change (D-0058: a backdrop root blanks the glass).
+
+   In @layer components, like .glass, so it never beats a Tailwind utility (E17). The globals' UNLAYERED base
+   rules (h2/h3 weight and tracking, p line-height, a's weight, *:focus-visible) beat any layered rule, so text
+   that needs its own metrics sits in a span or a div here, and the two focus rules at the bottom are
+   unlayered on purpose. */
+
+@layer components {
+  /* Nothing in a chapter transitions unless a rule below says which property. The globals' reduced-motion block
+     forces `transition-duration: 0.01ms !important` on every element, and with the initial `transition-property:
+     all` that turned a mode flip's padding and font-size into 0.01 ms transitions — for a frame the layout still
+     reported the OLD box, and keep-your-place measured it (a live Reduce Motion toggle landed 56 px off). */
+  .chapter, .chapter * { transition-property: none; }
+
+  /* ---------------------------------------------------------------------------------------------------------
+     Base = flow / static layout (and the first paint of a chapter that is not in the pin set) */
+  .chapter {
+    position: relative;
+    z-index: 20;
+    pointer-events: none; /* the fluid keeps the pointer (D-0077); only the panel and links opt back in */
+    padding: 80px 24px;
+  }
+  @media (min-width: 768px) {
+    .chapter { padding-block: 96px; }
+  }
+
+  .ch-stage {
+    position: relative;
+    max-width: 1152px;
+    margin-inline: auto;
+  }
+
+  .ch-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 32px;
+  }
+  @media (min-width: 1024px) {
+    .ch-grid {
+      grid-template-columns: minmax(0, 4fr) minmax(0, 8fr);
+      column-gap: 48px;
+      align-items: start;
+    }
+  }
+
+  /* The dial: folio, the display title (OC-H), the readout. */
+  .ch-folio {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 0 0 12px;
+    font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
+    font-size: 12px;
+    letter-spacing: 0.25em;
+    color: var(--muted);
+  }
+  .ch-folio-rule {
+    display: block;
+    width: 48px;
+    height: 1px;
+    background: var(--border);
+  }
+  .ch-title { margin: 0; }
+  .ch-title-text {
+    display: block;
+    font-size: clamp(2.5rem, 9vw, 4.5rem);
+    line-height: 1.02;
+    font-weight: 700;
+    letter-spacing: -0.035em;
+    color: var(--foreground);
+  }
+  .ch-readout {
+    display: block;
+    margin-top: 16px;
+    font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
+    font-size: clamp(2.5rem, 4vw, 3.5rem);
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+    color: var(--foreground);
+  }
+
+  /* The year wheel (YearWheel.tsx): a one-cell window over a strip of years, rolled by the section's
+     --active-item on the beat (two beats, --ease-stop). Every digit is generated content from data-y, so
+     find-in-page never lands on it; the wheel is aria-hidden and inert. */
+  .yw { display: inline-block; line-height: 1; }
+  .yw-window {
+    display: inline-block;
+    height: 1em;
+    overflow: hidden;
+    overflow: clip;
+    vertical-align: top;
+  }
+  .yw-strip {
+    display: flex;
+    flex-direction: column;
+    transform: translateY(calc(var(--active-item, 0) * -1em));
+    transition: transform calc(var(--beat) * 2) var(--ease-stop);
+  }
+  .yw-cell { display: block; height: 1em; line-height: 1; }
+  .yw-cell::before, .yw-range::before { content: attr(data-y); }
+  .yw-range { display: none; }
+  /* the static still (and the pre-hydration paint of a flow chapter): the full range, no wheel */
+  .chapter:not([data-mode="pinned"]):not([data-mode="flow"]) .yw-window { display: none; }
+  .chapter:not([data-mode="pinned"]):not([data-mode="flow"]) .yw-range { display: inline; }
+
+  /* The phone readout: a small sticky chip at the section's right edge, OUTSIDE the glass panel (which clips),
+     aria-hidden and inert. Height 0 so it never moves the layout. Flow mode under 1024 px only. */
+  .ch-chip-rail {
+    display: none;
+    position: sticky;
+    top: 76px;
+    z-index: 2;
+    height: 0;
+    justify-content: flex-end;
+    max-width: 1152px;
+    margin-inline: auto;
+  }
+  .ch-chip {
+    display: inline-flex;
+    align-items: center;
+    height: 32px;
+    padding: 0 12px;
+    border-radius: 999px;
+    border: 1px solid var(--glass-edge);
+    background: color-mix(in oklab, var(--card) 92%, transparent);
+    font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
+    font-size: 14px;
+    font-variant-numeric: tabular-nums;
+    color: var(--foreground);
+  }
+
+  /* The panel: the site's glass (.glass supplies the tint, blur, hairline and radius), no card-lift hover
+     (a lift on a pinned stage is wrong, E6). overflow: clip, not .glass's hidden — clip clips the same box
+     but is not a scroll container, so the flow-mode rail fill can stick to the viewport (E7). */
+  .ch-panel {
+    pointer-events: auto;
+    overflow: hidden;
+    overflow: clip;
+    padding: 20px 18px 20px 16px;
+  }
+  @media (min-width: 640px) {
+    .ch-panel { padding: 24px 24px 24px 24px; }
+  }
+
+  .ch-body {
+    position: relative;
+    padding-left: 30px; /* the rail's 16 px column + a 14 px gap before the text (the bar and the fill never share a column, O8) */
+  }
+  .ch-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  /* The rail (aria-hidden, inert): a 2 px track in the 16 px column; pinned mode scales a fill down it
+     (transform only, written in the render phase); flow mode keeps a sticky cover's top on the reading line. */
+  .ch-rail {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 16px;
+    overflow: hidden;
+    overflow: clip;
+  }
+  .ch-rail-track, .ch-rail-fill, .ch-rail-cover {
+    position: absolute;
+    left: 7px;
+    width: 2px;
+  }
+  .ch-rail-track { top: 0; bottom: 0; background: var(--border); }
+  .ch-rail-fill {
+    display: none;
+    top: 0;
+    height: 100%;
+    background: var(--foreground);
+    transform: scaleY(0);
+    transform-origin: top;
+  }
+  .ch-rail-sticky {
+    display: none;
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 200%; /* room for the cover to travel one rail-height down, clipped by the rail */
+  }
+  .ch-rail-cover {
+    display: block; /* a span: sticky does not blockify it */
+    position: sticky;
+    left: auto; /* a sticky box's left is a sticking inset, not an offset: place it by margin */
+    margin-left: 7px;
+    top: 62vh;
+    top: 62svh; /* READING_LINE (chapterList.ts) */
+    height: 50%;
+    background: var(--border);
+  }
+
+  /* An entry: its dot on the rail, its head row, its line(s). */
+  .ch-item {
+    position: relative;
+    padding-block: 10px;
+  }
+  .ch-head {
+    position: relative;
+    isolation: isolate;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 28px;
+  }
+  .ch-dot {
+    position: absolute;
+    left: -27px; /* centred in the rail's column: −30 + (16 − 10) / 2 */
+    top: 9px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--border);
+    transform: scale(0.6);
+  }
+  .ch-index {
+    flex: none;
+    width: 1.6rem;
+    font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    font-variant-numeric: tabular-nums;
+    /* --legend, the site's measured token for small mono labels (--muted is too light to clear AA at 12 px on a
+       card): over the live glass the muted numeral measured 3.0–4.4:1 in the light theme */
+    color: var(--legend);
+  }
+  .ch-logo {
+    flex: none;
+    width: 28px;
+    height: 28px;
+    border-radius: 9px;
+    overflow: hidden;
+    background: #ffffff;
+  }
+  .ch-logo img { display: block; width: 100%; height: 100%; object-fit: contain; }
+  .ch-head-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: 10px;
+    row-gap: 0;
+  }
+  .ch-name {
+    margin: 0;
+    font-size: 17px;
+    color: var(--foreground);
+    overflow-wrap: anywhere;
+  }
+  .ch-role {
+    font-size: 15px;
+    color: var(--foreground); /* was the accent (OC-F): the accent is spent once per viewport */
+  }
+  .ch-link {
+    position: relative;
+    flex: none;
+    display: inline-grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    color: var(--muted);
+  }
+  .ch-link:hover { color: var(--accent); }
+  /* ≥ 44 px touch target from a hit box that changes no height (E18) */
+  .ch-link::after, .ch-text-link::after {
+    content: "";
+    position: absolute;
+    inset: -8px;
+  }
+  .ch-text-link {
+    position: relative;
+    color: inherit;
+    text-decoration: none;
+  }
+  .ch-text-link::after { inset: -10px -4px; }
+  .ch-text-link:hover { color: var(--accent); }
+
+  /* the entry's line(s): dates · location, the stack, a degree */
+  .ch-sub {
+    position: relative;
+    isolation: isolate;
+    margin-top: 6px;
+    padding-left: 16px;
+    color: var(--muted);
+  }
+  .ch-tick {
+    position: absolute;
+    left: 2px;
+    top: 7px;
+    width: 6px;
+    height: 6px;
+    background: var(--border);
+  }
+  .ch-line {
+    display: block;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .ch-line + .ch-line { margin-top: 2px; }
+  .ch-line-strong { color: var(--foreground); font-size: 14px; font-weight: 500; }
+  .ch-stack {
+    display: block;
+    margin-top: 3px;
+    font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    letter-spacing: 0;
+    overflow-wrap: anywhere; /* wraps, never truncated (O12) */
+  }
+  .ch-degree + .ch-degree { margin-top: 8px; }
+
+  /* ---------------------------------------------------------------------------------------------------------
+     Flow and pinned: the marks (static never gets them — the director never writes data-active there) */
+  .chapter[data-mode="flow"] .ch-rail-sticky { display: block; }
+  .chapter[data-mode="flow"] .ch-rail-track { background: var(--foreground); }
+  .chapter[data-mode="pinned"] .ch-rail-fill { display: block; }
+
+  /* the accent bar: the head row's ::before, 2 px, inset 6 px top and bottom, in the gap left of the text */
+  .chapter:is([data-mode="pinned"], [data-mode="flow"]) .ch-head::before {
+    content: "";
+    position: absolute;
+    left: -8px;
+    top: 6px;
+    bottom: 6px;
+    width: 2px;
+    background: var(--accent);
+    transform: scaleY(0);
+    transform-origin: bottom;
+    transition: transform var(--beat) var(--ease-stop);
+  }
+  /* the head row's soft tint (pre-painted, faded by opacity only) */
+  .chapter:is([data-mode="pinned"], [data-mode="flow"]) .ch-head::after {
+    content: "";
+    position: absolute;
+    inset: -4px -8px -4px -8px;
+    z-index: -1;
+    border-radius: 8px;
+    background: var(--chapter-tint-soft);
+    opacity: 0;
+    transition: opacity calc(var(--beat) * 2) var(--ease-entrance);
+  }
+  /* the active line's tint */
+  .chapter:is([data-mode="pinned"], [data-mode="flow"]) .ch-sub::before {
+    content: "";
+    position: absolute;
+    inset: -3px -8px -3px -8px;
+    z-index: -1;
+    border-radius: 6px;
+    background: var(--chapter-tint);
+    opacity: 0;
+    transition: opacity calc(var(--beat) * 2) var(--ease-entrance);
+  }
+  .chapter:is([data-mode="pinned"], [data-mode="flow"]) .ch-dot { transition: transform calc(var(--beat) * 2) var(--ease-stop); }
+
+  /* an entry lights: the bar hands over (in over 2 beats from the top, the old one out over 1 from the
+     bottom), the head tint and the line tint fade in over 2 beats, the numeral, the text and the tick flip
+     on the beat (colours never transition), the dot seats */
+  .chapter:is([data-mode="pinned"], [data-mode="flow"]) .ch-item[data-active] .ch-head::before {
+    transform: scaleY(1);
+    transform-origin: top;
+    transition-duration: calc(var(--beat) * 2);
+  }
+  .chapter:is([data-mode="pinned"], [data-mode="flow"]) .ch-item[data-active] .ch-head::after { opacity: 1; }
+  .chapter:is([data-mode="pinned"], [data-mode="flow"]) .ch-item[data-active] .ch-index { color: var(--foreground); }
+  .chapter:is([data-mode="pinned"], [data-mode="flow"]) .ch-item[data-active] .ch-link { color: var(--foreground); }
+  .chapter:is([data-mode="pinned"], [data-mode="flow"]) .ch-sub[data-active] { color: var(--foreground); }
+  .chapter:is([data-mode="pinned"], [data-mode="flow"]) .ch-sub[data-active]::before { opacity: 1; }
+  .chapter:is([data-mode="pinned"], [data-mode="flow"]) .ch-sub[data-active] .ch-tick { background: var(--accent); }
+  .chapter:is([data-mode="pinned"], [data-mode="flow"]) .ch-item[data-active] .ch-dot,
+  .chapter:is([data-mode="pinned"], [data-mode="flow"]) .ch-item:has(~ .ch-item[data-active]) .ch-dot {
+    transform: scale(1);
+    background: var(--foreground);
+  }
+
+  /* ---------------------------------------------------------------------------------------------------------
+     Flow */
+  @media (min-width: 1024px) {
+    /* the dial sticks beside the list, in the pack corridor when there is one (--ch-dial-top, the director) */
+    .chapter[data-mode="flow"] .ch-dial {
+      position: sticky;
+      top: var(--ch-dial-top, 96px);
+      align-self: start;
+    }
+    /* in flow the list's marks are the one moving layer: the dial carries the title only */
+    .chapter[data-mode="flow"] .ch-readout { display: none; }
+  }
+  @media (max-width: 1023.98px) {
+    .chapter[data-mode="flow"] .ch-chip-rail { display: flex; }
+    .chapter[data-mode="flow"] .ch-readout { display: none; }
+  }
+
+  /* ---------------------------------------------------------------------------------------------------------
+     Pinned (after hydration). The first-paint twin of every rule here is in the @media PIN_QUERY block below. */
+  .chapter[data-mode="pinned"] {
+    height: calc(var(--chapter-vh) * 1vh);
+    height: calc(var(--chapter-vh) * 1svh);
+    padding: 0 24px;
+  }
+  .chapter[data-mode="pinned"] .ch-stage {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    height: 100svh;
+    padding: 96px 0 40px; /* STAGE_CLEAR */
+  }
+  .chapter[data-mode="pinned"] .ch-grid {
+    height: 100%;
+    grid-template-rows: auto minmax(0, 1fr);
+    row-gap: 16px;
+  }
+  /* OC-T: the pinned panel's chapter-local glass fill (--chapter-panel-tint, globals.css); the blur stays */
+  .chapter[data-mode="pinned"] .ch-panel { align-self: center; --glass-tint: var(--chapter-panel-tint); }
+  .chapter[data-mode="pinned"] .ch-title-text { font-size: clamp(3rem, 4.4vw, 4rem); }
+  @media (min-width: 1024px) {
+    .chapter[data-mode="pinned"] .ch-grid { grid-template-rows: minmax(0, 1fr); align-items: center; }
+    .chapter[data-mode="pinned"] .ch-dial {
+      align-self: start;
+      margin-top: max(0px, calc(var(--ch-dial-top, 96px) - 96px));
+    }
+  }
+  /* 700–1023 px: one column — a compact dial row on top ("02 Experience · 2026"), DIAL_ROW_PX tall */
+  @media (max-width: 1023.98px) {
+    .chapter[data-mode="pinned"] .ch-dial {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      height: 72px;
+    }
+    .chapter[data-mode="pinned"] .ch-folio { margin: 0; }
+    .chapter[data-mode="pinned"] .ch-title-text { font-size: clamp(2rem, 5vw, 2.75rem); }
+    .chapter[data-mode="pinned"] .ch-readout { margin: 0 0 0 auto; font-size: clamp(1.75rem, 4vw, 2.25rem); }
+  }
+
+  /* ---------------------------------------------------------------------------------------------------------
+     FIRST PAINT: a pin-set chapter on a window that may pin, motion allowed, before the director has written
+     any data-mode — the same pinned layout as above, so hydration never shifts the page. PIN_QUERY
+     (chapterList.ts) is the media text; tests/pin-query.test.ts holds the two equal. */
+  @media screen and (prefers-reduced-motion: no-preference) and (forced-colors: none) and (min-width: 700px) and (min-height: 720px) {
+    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) {
+      height: calc(var(--chapter-vh) * 1vh);
+      height: calc(var(--chapter-vh) * 1svh);
+      padding: 0 24px;
+    }
+    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-stage {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      height: 100svh;
+      padding: 96px 0 40px;
+    }
+    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-grid {
+      height: 100%;
+      grid-template-rows: auto minmax(0, 1fr);
+      row-gap: 16px;
+    }
+    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-panel { align-self: center; --glass-tint: var(--chapter-panel-tint); }
+    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-title-text { font-size: clamp(3rem, 4.4vw, 4rem); }
+    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .yw-window { display: inline-block; }
+    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .yw-range { display: none; }
+  }
+  @media screen and (prefers-reduced-motion: no-preference) and (forced-colors: none) and (min-width: 1024px) and (min-height: 720px) {
+    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-grid { grid-template-rows: minmax(0, 1fr); align-items: center; }
+    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-dial { align-self: start; }
+  }
+  @media screen and (prefers-reduced-motion: no-preference) and (forced-colors: none) and (min-width: 700px) and (max-width: 1023.98px) and (min-height: 720px) {
+    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-dial { display: flex; align-items: center; gap: 16px; height: 72px; }
+    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-folio { margin: 0; }
+    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-title-text { font-size: clamp(2rem, 5vw, 2.75rem); }
+    html[data-site-motion="on"] .chapter[data-pin-default]:not([data-mode]) .ch-readout { margin: 0 0 0 auto; font-size: clamp(1.75rem, 4vw, 2.25rem); }
+  }
+
+  /* ---------------------------------------------------------------------------------------------------------
+     Print: the static still, whatever the mode */
+  @media print {
+    .chapter[data-mode] { height: auto; padding: 48px 24px; }
+    .chapter:is([data-mode="pinned"], [data-mode="flow"]) .ch-stage { position: static; height: auto; padding: 0; }
+    .chapter:is([data-mode="pinned"], [data-mode="flow"]) .ch-dial { position: static; margin: 0; }
+    .ch-rail-fill, .ch-rail-sticky, .ch-chip-rail { display: none !important; }
+    .chapter[data-mode] .ch-head::before, .chapter[data-mode] .ch-head::after, .chapter[data-mode] .ch-sub::before { display: none; }
+  }
+}
+
+/* Unlayered on purpose: the globals' `*:focus-visible` ring (outline-offset 2px) is unlayered, so it beats any
+   layered rule. .glass clips (overflow), and a ring 2 px outside a link at the panel's edge was never painted
+   (Experience.tsx's old card, E18): inside the panel every ring is drawn inset. */
+.ch-panel a:focus-visible {
+  outline-offset: -2px;
+  border-radius: 6px;
+}
