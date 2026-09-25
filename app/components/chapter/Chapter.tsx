@@ -7,16 +7,18 @@ import YearWheel from "./YearWheel";
 // like you implemented on augnition's website". A SERVER component: the list is real, complete HTML before any
 // JavaScript, in DOM order, and identical in every mode; the one client island is the page's ChapterDirector,
 // which writes data-mode (pinned | flow | static) and, while the chapter is engaged, data-active on one entry and
-// its line. Nothing here is conditional on the mode: the rail, the dots, the readout and the phone chip are
-// always rendered and app/chapter.css shows or hides their decoration per data-mode (a post-hydration DOM
-// change would be a layout shift).
+// its line. Nothing here is conditional on the mode: the rail, the dots and the readout are always rendered and
+// app/chapter.css shows or hides their decoration per data-mode (a post-hydration DOM change would be a layout
+// shift). There is no sticky year chip on phones (DESIGN §4.2.9 had one): at every phone size it floated over
+// the list's rows and link icons as they scrolled under it (at 844 × 390 it covered Mercor's link), and the
+// owner's call is that nothing overlaps; each entry's dates line already carries its year.
 //
 // The pinned height (--chapter-vh, in svh) is written inline from the data, so the first paint never shifts.
 // data-pin-default marks a chapter in the pin set (OC-P: Experience yes, Education no), which is all the
 // first-paint CSS needs; the director decides the rest from the live window.
 //
 // Screen readers get the content, not the theatre: one <ol> under <section aria-labelledby>, h2 → h3; the
-// visible "01" numerals are aria-hidden (an item is not announced twice); the rail, dots, readout and chip are
+// visible "01" numerals are aria-hidden (an item is not announced twice); the rail, dots and readout are
 // aria-hidden and inert; there is no aria-current and no aria-live — data-active is presentational.
 
 export interface ChapterEntry {
@@ -52,11 +54,6 @@ export default function Chapter({
       data-pin-default={pinDefault ? "" : undefined}
       style={style}
     >
-      <div className="ch-chip-rail" aria-hidden="true" inert>
-        <span className="ch-chip">
-          <YearWheel years={years} />
-        </span>
-      </div>
       <div className="ch-stage">
         <div className="ch-grid">
           <div className="ch-dial">

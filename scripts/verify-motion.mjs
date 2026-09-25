@@ -1005,8 +1005,10 @@ async function zeroRafMidChapter(vp, theme) {
 
 async function docHeight(page, vp, theme) {
   const doch = (() => { try { return JSON.parse(fs.readFileSync(path.join(BASELINE, "index.json"), "utf8")).docH; } catch { return {}; } })();
-  const key = vp.kind === "phone" ? `${vp.width}x${vp.height}m` : `${vp.width}x${vp.height}`;
-  const base = doch[key];
+  // Spike 0 measured desktop sizes with desktop emulation and 390×844 with phone emulation: a tablet run (touch,
+  // so the heatmap is flat) has no like-for-like base
+  const key = vp.kind === "phone" ? `${vp.width}x${vp.height}m` : vp.kind === "desktop" ? `${vp.width}x${vp.height}` : null;
+  const base = key ? doch[key] : null;
   const r = await page.evaluate(() => {
     const s = (id) => { const e = document.getElementById(id); return { h: e.getBoundingClientRect().height, mode: e.dataset.mode, vh: Number(getComputedStyle(e).getPropertyValue("--chapter-vh")), stageH: e.querySelector(".ch-stage").clientHeight }; };
     return { docH: document.documentElement.scrollHeight, experience: s("experience"), education: s("education") };
@@ -1131,7 +1133,9 @@ if (!REDUCE && want("restAtTopPixels") && (!args.viewports || VIEWPORTS.includes
 await browser.close();
 const failed = results.filter((r) => r.pass === false);
 const summary = { angle: ANGLE_NAME, reduce: REDUCE, viewports: VIEWPORTS, themes: THEMES, checks: results.length, failed: failed.length, info: results.filter((r) => r.pass === "info").length, secs: Math.round((Date.now() - t0) / 1000) };
-fs.writeFileSync(path.join(OUT, `verify-motion${REDUCE ? "-reduce" : ""}-${ANGLE_NAME}.json`), JSON.stringify({ summary, results }, null, 1));
+const outName = `verify-motion${REDUCE ? "-reduce" : ""}-${ANGLE_NAME}-${THEMES.join("+")}${ONLY || args.viewports ? "-partial" : ""}${args.tag ? `-${args.tag}` : ""}.json`;
+fs.writeFileSync(path.join(OUT, outName), JSON.stringify({ summary, results }, null, 1));
+console.log("WROTE", path.join(OUT, outName));
 console.log("SUMMARY", JSON.stringify(summary));
 for (const f of failed) console.log("FAIL", f.check, f.viewport, f.theme, JSON.stringify(f).slice(0, 400));
 process.exit(failed.length ? 1 : 0);

@@ -4,7 +4,7 @@
      pinned  a tall section (--chapter-vh svh) holding a sticky 100svh stage: the dial (folio, display title,
              year wheel) left, the glass panel right; the entries light one at a time as the page scrolls.
      flow    the same list in normal flow; entries light as they cross the 62 % reading line; the rail's fill
-             is CSS sticky (zero callbacks); the dial sticks beside the list at ≥ 1024 px, a year chip on phones.
+             is CSS sticky (zero callbacks); the dial sticks beside the list at ≥ 1024 px.
      static  reduced motion, forced colours, print, JS off: a plain legible list, no marks, the rail drawn full
              in --border, no accent, the readout printing its full range.
    CSS owns only the FIRST PAINT (the pinned layout for a pin-set chapter, inside @media PIN_QUERY, before any
@@ -121,32 +121,6 @@
   /* the static still (and the pre-hydration paint of a flow chapter): the full range, no wheel */
   .chapter:not([data-mode="pinned"]):not([data-mode="flow"]) .yw-window { display: none; }
   .chapter:not([data-mode="pinned"]):not([data-mode="flow"]) .yw-range { display: inline; }
-
-  /* The phone readout: a small sticky chip at the section's right edge, OUTSIDE the glass panel (which clips),
-     aria-hidden and inert. Height 0 so it never moves the layout. Flow mode under 1024 px only. */
-  .ch-chip-rail {
-    display: none;
-    position: sticky;
-    top: 76px;
-    z-index: 2;
-    height: 0;
-    justify-content: flex-end;
-    max-width: 1152px;
-    margin-inline: auto;
-  }
-  .ch-chip {
-    display: inline-flex;
-    align-items: center;
-    height: 32px;
-    padding: 0 12px;
-    border-radius: 999px;
-    border: 1px solid var(--glass-edge);
-    background: color-mix(in oklab, var(--card) 92%, transparent);
-    font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
-    font-size: 14px;
-    font-variant-numeric: tabular-nums;
-    color: var(--foreground);
-  }
 
   /* The panel: the site's glass (.glass supplies the tint, blur, hairline and radius), no card-lift hover
      (a lift on a pinned stage is wrong, E6). overflow: clip, not .glass's hidden — clip clips the same box
@@ -418,8 +392,8 @@
     /* in flow the list's marks are the one moving layer: the dial carries the title only */
     .chapter[data-mode="flow"] .ch-readout { display: none; }
   }
+  /* under 1024 px the list flows full width beneath the title: the marks are the moving layer, no readout */
   @media (max-width: 1023.98px) {
-    .chapter[data-mode="flow"] .ch-chip-rail { display: flex; }
     .chapter[data-mode="flow"] .ch-readout { display: none; }
   }
 
@@ -509,7 +483,7 @@
     .chapter[data-mode] { height: auto; padding: 48px 24px; }
     .chapter:is([data-mode="pinned"], [data-mode="flow"]) .ch-stage { position: static; height: auto; padding: 0; }
     .chapter:is([data-mode="pinned"], [data-mode="flow"]) .ch-dial { position: static; margin: 0; }
-    .ch-rail-fill, .ch-rail-sticky, .ch-chip-rail { display: none !important; }
+    .ch-rail-fill, .ch-rail-sticky { display: none !important; }
     .chapter[data-mode] .ch-head::before, .chapter[data-mode] .ch-head::after, .chapter[data-mode] .ch-sub::before { display: none; }
   }
 }
