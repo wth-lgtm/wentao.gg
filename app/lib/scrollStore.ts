@@ -99,10 +99,14 @@ export function createScrollStore(env: ScrollEnv): ScrollStore {
 let store: ScrollStore | null = null;
 let detach: (() => void) | null = null;
 
+/** The page store's own callbacks (its scroll listener, its velocity-zero timer), counted for the harness's
+ *  "the chapter code runs 0 callbacks at rest" (ChapterDirector's ?chapterDebug counter sums them in). */
+export const scrollStoreCalls = { listener: 0, timer: 0 };
+
 function pageStore(): ScrollStore {
   if (!store) {
     store = createScrollStore({
-      setTimeout: (cb, ms) => setTimeout(cb, ms),
+      setTimeout: (cb, ms) => setTimeout(() => { scrollStoreCalls.timer++; cb(); }, ms),
       clearTimeout: (id) => clearTimeout(id as ReturnType<typeof setTimeout>),
       read: (cb) => { onFrame("read", cb); },
     });
@@ -113,7 +117,7 @@ function pageStore(): ScrollStore {
 function attach(s: ScrollStore): () => void {
   const html = document.documentElement;
   const measure = () => s.setMaxY(html.scrollHeight - window.innerHeight);
-  const onScroll = () => s.sample(window.scrollY, performance.now());
+  const onScroll = () => { scrollStoreCalls.listener++; s.sample(window.scrollY, performance.now()); };
   measure();
   s.sample(window.scrollY, performance.now());
   window.addEventListener("scroll", onScroll, { passive: true });
