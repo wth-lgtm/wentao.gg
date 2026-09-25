@@ -47,6 +47,8 @@
      viewport); never under muted text (muted over a 12 % tint is 4.56:1 dark, 4.23:1 light). */
   --chapter-tint: color-mix(in oklab, var(--accent) 12%, transparent);
   --chapter-tint-soft: color-mix(in oklab, var(--accent) 8%, transparent);
+  /* The chapters' rail track and unseated dots (chapter.css): the site's hairline in dark, where it reads. */
+  --chapter-rail: var(--border);
   /* OC-T (the owner: "raise only as far as the pixel contrast check requires", for the PINNED panel). With the
      inactive lines in --legend the two-column pinned panel passes at the site's own 24 %, so it keeps the site's
      glass (no variable here). --chapter-flow-tint is the FLOW panel's fill (chapter.css), and it is NOT covered by
@@ -114,6 +116,10 @@
   /* The reading chapters' marks (light): a touch less accent over the light glass. */
   --chapter-tint: color-mix(in oklab, var(--accent) 10%, transparent);
   --chapter-tint-soft: color-mix(in oklab, var(--accent) 7%, transparent);
+  /* The rail track and unseated dots, light: --border (#dcdce0) over the 40 % light glass on a white page all but
+     vanished (at pin 0 the rail read as one black dot, and rows 02–05 showed no teeth). Ink, not accent (the accent
+     budget is untouched), and still quieter than the seated dots and the fill, which are --foreground. */
+  --chapter-rail: color-mix(in oklab, var(--foreground) 20%, transparent);
   /* OC-T, light: NO raise at two columns. With muted lines the pinned panel needed 90 % (70–80 % failed one or two
      runs of four); with --legend lines the site's own 40 % passes, pinned and flow, sixteen runs of sixteen (worst
      line 5.82, numeral 4.67), so the light panels keep the site's liquid glass. */

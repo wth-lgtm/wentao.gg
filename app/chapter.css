@@ -210,7 +210,8 @@
     gap: 6px;
   }
 
-  /* The rail (aria-hidden, inert): a 2 px track in the 16 px column; pinned mode scales a fill down it
+  /* The rail (aria-hidden, inert): a 2 px track in the 16 px column (--chapter-rail: the hairline in dark, a light
+     ink in light); pinned mode scales a fill down it
      (transform only, written in the render phase); flow mode keeps a sticky cover's top on the reading line. */
   .ch-rail {
     position: absolute;
@@ -226,7 +227,7 @@
     left: 7px;
     width: 2px;
   }
-  .ch-rail-track { top: 0; bottom: 0; background: var(--border); }
+  .ch-rail-track { top: 0; bottom: 0; background: var(--chapter-rail); }
   .ch-rail-fill {
     display: none;
     top: 0;
@@ -251,7 +252,7 @@
     top: 62vh;
     top: 62svh; /* READING_LINE (chapterList.ts) */
     height: 50%;
-    background: var(--border);
+    background: var(--chapter-rail);
   }
 
   /* An entry: its dot on the rail, its head row, its line(s).
@@ -279,7 +280,7 @@
     width: 10px;
     height: 10px;
     border-radius: 50%;
-    background: var(--border);
+    background: var(--chapter-rail);
     transform: scale(0.6);
   }
   .ch-index {
