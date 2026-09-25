@@ -15,7 +15,7 @@ import { createCommit, type Commit } from "../../lib/chapterCommit";
 import { emitChapterStep } from "../../lib/chapterBus";
 import { correctPlace, snapshotPlace, type ChapterBox, type ChapterMode, type Place } from "../../lib/keepPlace";
 import { packCorridor } from "../../lib/packCorridor";
-import { atPageTop, type Rect } from "../../lib/fieldLayout";
+import type { Rect } from "../../lib/fieldLayout";
 import { getFieldPacks, onFieldPacks } from "../../lib/fieldPresence";
 
 // THE ONE DIRECTOR of the reading chapters (DESIGN §4.2.3, E1). Mounted once on the home page; renders nothing.
@@ -66,10 +66,17 @@ interface Geometry {
 
 interface Stats { callbacks: number; steps: number }
 
-function viewportRect(el: Element | null): Rect | null {
-  if (!el) return null;
-  const r = el.getBoundingClientRect();
-  return { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+/**
+ * An element's LAYOUT box in page coordinates (the offsetParent chain; transforms ignored): where the hero's h1 and
+ * visitor card rest. Their entrance animates a translate for ≈ 300 ms after hydration, and a corridor read from
+ * getBoundingClientRect then followed it — the title slid 16 px and back, logged as layout shifts. The jack field
+ * reads the same boxes at its birth, after the entrance, so this is the composition it solves.
+ */
+function layoutRect(el: Element | null): Rect | null {
+  if (!(el instanceof HTMLElement)) return null;
+  let x = 0, y = 0;
+  for (let n: HTMLElement | null = el; n; n = n.offsetParent as HTMLElement | null) { x += n.offsetLeft; y += n.offsetTop; }
+  return { left: x, top: y, right: x + el.offsetWidth, bottom: y + el.offsetHeight };
 }
 
 class ChapterRuntime {
@@ -581,9 +588,9 @@ function createDirector(): () => void {
   const placeDials = () => {
     const packs = getFieldPacks();
     const w = html.clientWidth, h = html.clientHeight;
-    const sy = window.scrollY;
-    const h1 = viewportRect(document.querySelector("[data-hero-h1]"));
-    const card = viewportRect(document.querySelector("[data-hero-card]"));
+    // at their page-top position, as the scene solves them (fieldLayout.atPageTop of a rect read at scroll 0)
+    const h1 = layoutRect(document.querySelector("[data-hero-h1]"));
+    const card = layoutRect(document.querySelector("[data-hero-card]"));
     const span = document.querySelector<HTMLElement>("[data-hero-h1] span");
     const font = span ? parseFloat(getComputedStyle(span).fontSize) : null;
     for (const rt of runtimes) {
@@ -596,7 +603,7 @@ function createDirector(): () => void {
       const d = rt.dial.getBoundingClientRect();
       const c = packCorridor({
         width: w, height: h, h1FontPx: font,
-        hero: { h1: h1 ? atPageTop(h1, sy) : null, card: card ? atPageTop(card, sy) : null },
+        hero: { h1, card },
         packs, x: [d.left, d.right], clear: STAGE_CLEAR,
       });
       rt.corridor = c ? { top: c.top, bottom: c.bottom } : null;

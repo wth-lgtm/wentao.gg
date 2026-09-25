@@ -29,7 +29,7 @@
 //   railMatchesPin          --pin-progress = chapterPin ± 0.002, two frames after each scrollTo
 //   findReachesEveryItem    window.find reaches every entry's name and dates line, painted inside its panel
 //   findHitsOnlyVisibleText "2024", "2022", "2021", "2017": the first hit is list text, never the wheel
-//   focusFollows / tabLeavesChapter   pinned: Tab through the links, the mark follows; Tab leaves the chapter
+//   focusFollows / tabLeavesChapter   pinned and flow: Tab through the links, the lit entry is the focused one; Tab leaves
 //   anchorsAtPin0           a hard load of /#experience lands at the section top, pin 0, the first entry marked
 //   keepPlaceOnResize       1440×900 → 1440×700 → back, mid-Experience, mid-Education and below: ± 40 px
 //   liveReduceToggle        emulateMedia reduce mid-Education: static, the shown row stays on the reading line
@@ -46,6 +46,17 @@
 //   docHeight               docH = Spike 0's docH − the old chapters + the measured chapters ± 40; pinned = vh × svh
 //   restAtTopIdentical      the field at the top: passes 42, bodies 21, programs 3, no errors
 //   restAtTopPixels         SSIM ≥ 0.99 against Spike 0's f4b738f first screens (capture-top.mjs)
+//   (fix round 1)
+//   keepPlaceHeightOnly     a height-only resize with a flow chapter on a non-last entry: the mark is the live-line row
+//   resizeMidScroll         a resize while the reader is still scrolling: their place holds ± 40 px (not the last rest)
+//   textSpacing             WCAG 1.4.12 CSS and a 24 px root at every size: layoutSane (title glyphs included) holds
+//   touchTargets            every row link by elementFromPoint: its centre hits it, vertical reach ≥ 24 px
+//   printNeutral            print emulation changes no mode or mark, prints the marks neutral; the round trip moves nothing
+//   dialNoShift             a hard load of /#experience: no layout shift from the dial
+//   framesMidChapter        CDP frames produced per second mid-chapter at rest (recorded)
+//   flowFillZeroJs          a flow scroll writes nothing to the rail; the fill's tip rides the reading line
+//   lcpIsH1 / contexts      the LCP element is the hero h1; WebGL contexts ≤ 3 desktop / 1 phone
+// contrastRows also runs at 1440x700 (EXTRA): both chapters flow in the site's glass at a desktop size.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -124,6 +135,20 @@ async function openPage(vp, theme, { hash = "", reduce = REDUCE, extra = "" } = 
     const orig = window.requestAnimationFrame.bind(window);
     window.requestAnimationFrame = (cb) => { R.calls++; return orig((ts) => { R.exec++; return cb(ts); }); };
     window.__vm = { log: [] };
+    // WebGL contexts created (one per canvas), for `contexts`
+    const G = (window.__gl = { contexts: 0 });
+    const seen = new WeakSet();
+    const getContext = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function (type, ...rest) {
+      const c = getContext.call(this, type, ...rest);
+      if (c && /webgl/.test(String(type)) && !seen.has(this)) { seen.add(this); G.contexts++; }
+      return c;
+    };
+    // layout shifts, for `dialNoShift`
+    window.__shifts = [];
+    try {
+      new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__shifts.push({ t: Math.round(e.startTime), v: e.value, input: e.hadRecentInput, dial: e.sources.some((x) => x.node && x.node.nodeType === 1 && !!x.node.closest?.(".ch-dial")) }); }).observe({ type: "layout-shift", buffered: true });
+    } catch {}
     document.addEventListener("DOMContentLoaded", () => {
       const mo = new MutationObserver((recs) => {
         const t = performance.now();
@@ -236,7 +261,11 @@ async function layoutSane(page, vp, theme, label = "layoutSane") {
         if (document.documentElement.scrollWidth > vw + 1) out.push(`page scrollWidth ${document.documentElement.scrollWidth} > ${vw}`);
         const s = document.getElementById(cid);
         const panel = s.querySelector(".ch-panel").getBoundingClientRect();
-        const title = s.querySelector(".ch-title-text").getBoundingClientRect();
+        // the title's painted glyphs (its text range), not its box: a word that overflows its box (a text-spacing
+        // override, a large default font) runs under the panel while the box still sits beside it
+        const titleRange = document.createRange();
+        titleRange.selectNodeContents(s.querySelector(".ch-title-text"));
+        const title = titleRange.getBoundingClientRect();
         const dial = s.querySelector(".ch-dial").getBoundingClientRect();
         if (panel.left < -0.5 || panel.right > vw + 0.5) out.push(`panel x ${panel.left.toFixed(0)}–${panel.right.toFixed(0)} outside 0–${vw}`);
         if (title.left < -0.5 || title.right > vw + 0.5) out.push(`title x ${title.left.toFixed(0)}–${title.right.toFixed(0)}`);
@@ -519,21 +548,18 @@ async function findChecks(page, vp, theme) {
   return report("findHitsOnlyVisibleText", vp.spec, theme, ok, { hits });
 }
 
-async function focusChecks(page, vp, theme) {
-  const L = await list(page);
-  const c = L.find((x) => x.mode === "pinned");
-  if (!c) { report("focusFollows", vp.spec, theme, null, { note: "no pinned chapter" }); return report("tabLeavesChapter", vp.spec, theme, null, { note: "no pinned chapter" }); }
-  const g = await geoOf(page, c.id);
+/** Tab through one chapter's links from the element before it: after each step the marked entry is the one the
+ *  focus ring is in (pinned: its beat; flow: its row brought onto the reading line), and Tab leaves in DOM order */
+async function focusChapter(page, vp, id) {
+  const g = await geoOf(page, id);
   await scrollTo(page, g.top - vp.height);
   await settled(page);
-  // focus the last focusable before the chapter, then Tab into it
   await page.evaluate((cid) => {
     const s = document.getElementById(cid);
     const all = [...document.querySelectorAll("a[href], button:not([disabled])")].filter((e) => e.offsetParent !== null || getComputedStyle(e).position === "fixed");
     const firstIn = all.findIndex((e) => s.contains(e));
-    const before = all[firstIn - 1];
-    before.focus({ preventScroll: true });
-  }, c.id);
+    all[firstIn - 1].focus({ preventScroll: true });
+  }, id);
   const steps = [];
   let left = null;
   for (let i = 0; i < 16; i++) {
@@ -546,17 +572,33 @@ async function focusChecks(page, vp, theme) {
       if (!s.contains(a)) return { inside: false, tag: a?.tagName, text: (a?.textContent || a?.getAttribute("aria-label") || "").trim().slice(0, 30) };
       const item = Number(a.closest("[data-item]")?.dataset.item ?? -1);
       const sub = a.closest("[data-beat]");
-      const shown = window.__chapters.list.find((x) => x.id === cid).shown;
+      const c = window.__chapters.list.find((x) => x.id === cid);
       const beat = sub ? Number(sub.dataset.beat) : item;
       const r = a.getBoundingClientRect();
-      return { inside: true, label: (a.getAttribute("aria-label") || a.textContent).trim().slice(0, 30), beat, shown, onScreen: r.top >= 0 && r.bottom <= innerHeight };
-    }, c.id);
+      const lit = s.querySelector("li[data-item][data-active]");
+      return { inside: true, label: (a.getAttribute("aria-label") || a.textContent).trim().slice(0, 30), beat, shown: c.shown, litEntry: lit ? Number(lit.dataset.item) : -1, focusEntry: item, onScreen: r.top >= 0 && r.bottom <= innerHeight };
+    }, id);
     if (!r.inside) { if (steps.length) { left = r; break; } else continue; }
     steps.push(r);
   }
-  const follows = steps.length > 0 && steps.every((s) => s.shown === s.beat && s.onScreen);
-  report("focusFollows", vp.spec, theme, follows, { steps });
-  return report("tabLeavesChapter", vp.spec, theme, !!left && steps.length > 0, { linksVisited: steps.length, landedOn: left });
+  return { steps, left };
+}
+
+async function focusChecks(page, vp, theme) {
+  const L = await list(page);
+  const chapters = L.filter((x) => x.mode === "pinned" || x.mode === "flow");
+  if (!chapters.length) { report("focusFollows", vp.spec, theme, null, { note: "no marked chapter" }); return report("tabLeavesChapter", vp.spec, theme, null, { note: "no marked chapter" }); }
+  const per = {};
+  let follows = true, leaves = true;
+  for (const c of chapters) {
+    const { steps, left } = await focusChapter(page, vp, c.id);
+    const ok = steps.length > 0 && steps.every((s) => s.shown === s.beat && s.litEntry === s.focusEntry && s.onScreen);
+    if (!ok) follows = false;
+    if (!left || !steps.length) leaves = false;
+    per[c.id] = { mode: c.mode, follows: ok, steps, landedOn: left };
+  }
+  report("focusFollows", vp.spec, theme, follows, Object.fromEntries(Object.entries(per).map(([k, v]) => [k, { mode: v.mode, follows: v.follows, steps: v.steps }])));
+  return report("tabLeavesChapter", vp.spec, theme, leaves, Object.fromEntries(Object.entries(per).map(([k, v]) => [k, { linksVisited: v.steps.length, landedOn: v.landedOn }])));
 }
 
 async function anchorsAtPin0(vp, theme) {
@@ -1008,13 +1050,15 @@ async function zeroRafMidChapter(vp, theme) {
     await scrollTo(page, await yForBeat(page, c.id, Math.floor(c.layout.length / 2)));
     await settled(page);
     await sleep(3000);
-    const a = await page.evaluate(() => ({ cb: window.__chapters.callbacks, raf: window.__raf.calls, exec: window.__raf.exec, t: performance.now() }));
+    const a = await page.evaluate(() => ({ cb: window.__chapters.callbacks, by: window.__chapters.callbackBreakdown, raf: window.__raf.calls, exec: window.__raf.exec, t: performance.now() }));
     await sleep(4000);
-    const b = await page.evaluate(() => ({ cb: window.__chapters.callbacks, raf: window.__raf.calls, exec: window.__raf.exec, t: performance.now() }));
+    const b = await page.evaluate(() => ({ cb: window.__chapters.callbacks, by: window.__chapters.callbackBreakdown, raf: window.__raf.calls, exec: window.__raf.exec, t: performance.now() }));
     const secs = (b.t - a.t) / 1000;
     const cb = b.cb - a.cb;
     if (cb !== 0) ok = false;
-    rows.push({ id: c.id, mode: c.mode, chapterCallbacks: cb, rafCallsPerSec: +((b.raf - a.raf) / secs).toFixed(1), rafExecPerSec: +((b.exec - a.exec) / secs).toFixed(1) });
+    // every chapter callback counts: the runtimes', the director's own and the scroll store's (callbackBreakdown)
+    const moved = Object.fromEntries(Object.keys(b.by).map((k) => [k, b.by[k] - (a.by[k] ?? 0)]).filter(([, v]) => v !== 0));
+    rows.push({ id: c.id, mode: c.mode, chapterCallbacks: cb, which: moved, rafCallsPerSec: +((b.raf - a.raf) / secs).toFixed(1), rafExecPerSec: +((b.exec - a.exec) / secs).toFixed(1) });
   }
   await ctx.close();
   return report("zeroRafMidChapter", vp.spec, theme, ok, { rows, baselineMidPage: vp.spec === "1440x900" ? "Spike 0 f4b738f Metal 1440×900 mid-page: 120.3 calls/s, 90.3 exec/s" : null });
@@ -1084,6 +1128,302 @@ async function restAtTopPixels() {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
+// fix round 1: the checks the review asked for
+
+/** the live-line row: the last entry whose top has crossed 62 % of the client height now (and the one the 24 px
+ *  hysteresis may still hold) */
+function liveLineRows(page, id) {
+  return page.evaluate((cid) => {
+    const s = document.getElementById(cid);
+    const line = Math.round(0.62 * document.documentElement.clientHeight);
+    const tops = [...s.querySelectorAll("li[data-item]")].map((li) => li.getBoundingClientRect().top);
+    let fwd = -1, back = -1;
+    tops.forEach((t, k) => { if (t <= line) fwd = k; if (t <= line + 24) back = k; });
+    const c = window.__chapters.list.find((x) => x.id === cid);
+    return { line, tops: tops.map(Math.round), fwd, back, shown: c.shown, target: c.target, mode: c.mode };
+  }, id);
+}
+
+/** a HEIGHT-ONLY resize with a flow chapter on a non-last entry: the mark is the row on the LIVE reading line
+ *  (the one line the director re-measures), never one computed from the old height */
+async function keepPlaceHeightOnly(vp, theme) {
+  if (vp.spec !== "1440x900") return;
+  const rows = [];
+  let ok = true;
+  const cases = [
+    { from: "1440x900", id: "education", beat: 0, to: [1440, 700], nudge: 0 },
+    { from: "1440x700", id: "experience", beat: 1, to: [1440, 560], nudge: 1 },
+  ];
+  for (const k of cases) {
+    const { ctx, page } = await openPage(parseVp(k.from), theme);
+    const c0 = await chapter(page, k.id);
+    await scrollTo(page, await yForBeat(page, k.id, k.beat));
+    await settled(page);
+    await sleep(300);
+    const a = await liveLineRows(page, k.id);
+    await page.setViewportSize({ width: k.to[0], height: k.to[1] });
+    await sleep(500); await settled(page);
+    if (k.nudge) { await page.evaluate((d) => window.scrollBy({ top: d, behavior: "instant" }), k.nudge); await sleep(200); await settled(page); }
+    const b = await liveLineRows(page, k.id);
+    const good = c0.mode === "flow" && b.mode === "flow" && b.shown >= b.fwd && b.shown <= Math.max(b.fwd, b.back) && b.shown === k.beat;
+    if (!good) ok = false;
+    rows.push({ case: `${k.id} beat ${k.beat} in flow, ${k.from} → ${k.to.join("x")}${k.nudge ? `, scrollBy(${k.nudge})` : ""}`, before: a, after: b, good });
+    await ctx.close();
+  }
+  return report("keepPlaceHeightOnly", vp.spec, theme, ok, { rows });
+}
+
+/** mark the element at the viewport centre (outside the chapters: the deepest box spanning the centre line) */
+const markCentre = (page) => page.evaluate(() => {
+  document.querySelectorAll("[data-vm-anchor]").forEach((e) => e.removeAttribute("data-vm-anchor"));
+  const y = innerHeight / 2;
+  const main = document.querySelector("main");
+  let node = [...main.children, ...document.querySelectorAll("body > footer")].find((el) => { const r = el.getBoundingClientRect(); return r.top <= y && r.bottom > y; });
+  for (let d = 0; node && d < 12; d++) {
+    const child = [...node.children].find((c) => { const r = c.getBoundingClientRect(); return r.height > 0 && r.top <= y && r.bottom > y; });
+    if (!child) break;
+    node = child;
+  }
+  if (!node) return null;
+  node.setAttribute("data-vm-anchor", "");
+  return { top: node.getBoundingClientRect().top, tag: `${node.tagName}.${String(node.className).slice(0, 24)}`, inChapter: !!node.closest("[data-chapter]") };
+});
+const anchorTop = (page) => page.evaluate(() => { const e = document.querySelector("[data-vm-anchor]"); return e ? e.getBoundingClientRect().top : null; });
+/** scroll 30 px every 16 ms until y ≥ to (the reader's momentum), then stop */
+const scrollOn = (page, to) => page.evaluate((t) => new Promise((res) => { const id = setInterval(() => { const y = Math.min(t, scrollY + 30); window.scrollTo({ top: y, behavior: "instant" }); if (y >= t) { clearInterval(id); res(); } }, 16); }), to);
+
+/** a resize WHILE the reader is scrolling: the place they are at holds (± 40 px), not the last rest place */
+async function resizeMidScroll(vp, theme) {
+  if (vp.spec !== "1440x900") return;
+  const rows = [];
+  let ok = true;
+  const cases = [
+    { name: "rest mid-Experience, scroll on below Education, width 1440 → 1400", to: [1400, 900], where: "below" },
+    { name: "rest mid-Experience, scroll on below Education, height 900 → 700 (Experience flips to flow above)", to: [1440, 700], where: "below" },
+    { name: "rest above Experience, scroll on into mid-Experience (pinned), width 1440 → 1400", to: [1400, 900], where: "inside" },
+  ];
+  for (const k of cases) {
+    const { ctx, page } = await openPage(vp, theme);
+    const ex = await chapter(page, "experience");
+    const ed = await geoOf(page, "education");
+    const start = k.where === "inside" ? ex.pageTop - 600 : await yForBeat(page, "experience", 2);
+    await scrollTo(page, start); await settled(page); await sleep(400); // a rest place is captured here
+    const rest = await page.evaluate(() => window.__chapters.restPlace);
+    const target = k.where === "inside" ? ex.pageTop + 0.5 * (ex.height - ex.stageH) : ed.top + ed.height + 350;
+    await scrollOn(page, target);
+    let before;
+    if (k.where === "inside") before = await page.evaluate(() => { const c = window.__chapters.list.find((x) => x.id === "experience"); return { shown: c.shown, pin: c.pin, scrollY }; });
+    else before = await markCentre(page);
+    const stale = await page.evaluate(() => window.__chapters.restStale);
+    await page.setViewportSize({ width: k.to[0], height: k.to[1] });
+    await sleep(600); await settled(page);
+    let after, good;
+    if (k.where === "inside") {
+      after = await page.evaluate(() => { const c = window.__chapters.list.find((x) => x.id === "experience"); return { shown: c.shown, pin: c.pin, scrollY, mode: c.mode }; });
+      good = after.shown === before.shown && Math.abs(after.pin - before.pin) <= 0.03;
+    } else {
+      const t = await anchorTop(page);
+      after = { top: t };
+      good = before && t !== null && Math.abs(t - before.top) <= 40;
+    }
+    if (!good) ok = false;
+    const corr = await page.evaluate(() => window.__chapters.corrections.slice(-2));
+    rows.push({ case: k.name, restPlaceKind: rest?.kind ?? null, restStaleAtResize: stale, before, after, good, lastCorrections: corr.map((c) => ({ kind: c.place.kind, y: c.y === null ? null : Math.round(c.y), from: Math.round(c.from) })) });
+    await ctx.close();
+  }
+  return report("resizeMidScroll", vp.spec, theme, ok, { rows });
+}
+
+/** WCAG 1.4.12 text spacing, and a 24 px default font: the director re-measures, and at every size nothing
+ *  overlaps, clips or leaves the viewport — the titles' glyphs included; the year wheel keeps its own metrics */
+async function textSpacing(vp, theme) {
+  const overrides = {
+    "wcag-1.4.12": "* { line-height: 1.5 !important; letter-spacing: 0.12em !important; word-spacing: 0.16em !important; } p { margin-bottom: 2em !important; }",
+    "root-24px": "html { font-size: 24px !important; }",
+  };
+  const out = {};
+  let ok = true;
+  for (const [name, css] of Object.entries(overrides)) {
+    const { ctx, page } = await openPage(vp, theme);
+    await page.addStyleTag({ content: css });
+    await sleep(700); await settled(page);
+    const modes = Object.fromEntries((await list(page)).map((c) => [c.id, c.mode]));
+    const sane = await layoutSane(page, vp, theme, `textSpacing:${name}`);
+    const fits = (await list(page)).some((c) => c.mode === "pinned") ? await pinnedOnlyWhenFits(page, vp, theme) : null;
+    const wheel = await page.evaluate(() => {
+      const cell = document.querySelector("#experience .yw-cell");
+      const cs = getComputedStyle(cell, "::before");
+      return { fontPx: parseFloat(cs.fontSize), lineHeightPx: parseFloat(cs.lineHeight), heightPx: parseFloat(cs.height) };
+    });
+    const wheelOk = Math.abs(wheel.lineHeightPx - wheel.fontPx) <= 0.5 && Math.abs(wheel.heightPx - wheel.fontPx) <= 0.5;
+    if (!sane.pass || (fits && fits.pass === false) || !wheelOk) ok = false;
+    out[name] = { modes, layoutSane: sane.pass, problems: sane.problems, pinnedOnlyWhenFits: fits ? fits.pass : "no pinned chapter", yearWheelGlyph: { ...wheel, ok: wheelOk } };
+    await ctx.close();
+  }
+  return report("textSpacing", vp.spec, theme, ok, out);
+}
+
+/** every row link's hit area, by elementFromPoint (not the ::after box): its text centre hits it, and its vertical
+ *  reach through the centre is ≥ 24 px (WCAG 2.5.8; stacked inline links are 24, not 44); pinned and flow */
+async function touchTargets(page, vp, theme) {
+  const L = await list(page);
+  const rows = [];
+  let ok = true;
+  for (const c of L.filter((x) => x.mode === "pinned" || x.mode === "flow")) {
+    if (c.mode === "pinned") { const g = await geoOf(page, c.id); await scrollTo(page, g.top + 0.5 * (g.height - g.stageH)); await settled(page); }
+    const n = await page.evaluate((cid) => document.querySelectorAll(`#${cid} .ch-panel a`).length, c.id);
+    for (let i = 0; i < n; i++) {
+      if (c.mode === "flow") {
+        await page.evaluate(({ cid, k }) => { const a = document.querySelectorAll(`#${cid} .ch-panel a`)[k]; const r = a.getBoundingClientRect(); window.scrollBy({ top: Math.round(r.top - innerHeight / 2), behavior: "instant" }); }, { cid: c.id, k: i });
+        await frames(page, 2);
+      }
+      const r = await page.evaluate(({ cid, k }) => {
+        const a = document.querySelectorAll(`#${cid} .ch-panel a`)[k];
+        const rect = a.getClientRects()[0];
+        const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
+        const mine = (x, y) => { const e = document.elementFromPoint(x, y); return !!e && (e === a || a.contains(e)); };
+        let up = 0; while (up < 40 && mine(cx, cy - up - 1)) up++;
+        let dn = 0; while (dn < 40 && mine(cx, cy + dn + 1)) dn++;
+        const blocker = (y) => { const e = document.elementFromPoint(cx, y); return e ? `${e.tagName}.${String(e.className).split(" ")[0]}` : null; };
+        return { label: (a.getAttribute("aria-label") || a.textContent).trim().slice(0, 28), kind: a.classList.contains("ch-link") ? "icon" : "text", centreHits: mine(cx, cy), vertical: up + dn + 1, blockedAbove: blocker(cy - up - 1), blockedBelow: blocker(cy + dn + 1) };
+      }, { cid: c.id, k: i });
+      if (!r.centreHits || r.vertical < 24) ok = false;
+      rows.push({ chapter: c.id, mode: c.mode, ...r });
+    }
+  }
+  if (!rows.length) return report("touchTargets", vp.spec, theme, null, { note: "no marked chapter" });
+  const minBy = (kind) => Math.min(...rows.filter((x) => x.kind === kind).map((x) => x.vertical));
+  return report("touchTargets", vp.spec, theme, ok, { links: rows.length, minVerticalText: minBy("text"), minVerticalIcon: minBy("icon"), rows: rows.map((x) => `${x.chapter}/${x.mode} ${x.kind} "${x.label}" ${x.vertical}px${x.centreHits ? "" : " CENTRE-MISS"} (↑${x.blockedAbove} ↓${x.blockedBelow})`) });
+}
+
+/** print is not a window: emulating print leaves every mode and mark alone, the marks print neutral, and the round
+ *  trip back to the screen moves nothing */
+async function printNeutral(vp, theme) {
+  if (vp.spec !== "1440x900" || REDUCE) return;
+  const { ctx, page } = await openPage(vp, theme);
+  const rows = [];
+  let ok = true;
+  for (const [id, beat] of [["experience", 2], ["education", 1]]) {
+    await scrollTo(page, await yForBeat(page, id, beat)); await settled(page); await sleep(300);
+    const before = await page.evaluate(() => ({ y: Math.round(scrollY), modes: window.__chapters.list.map((c) => `${c.id}:${c.mode}:${c.shown}`).join(" "), corrections: window.__chapters.corrections.length, evaluations: window.__chapters.evaluations }));
+    await page.emulateMedia({ media: "print" });
+    await sleep(600);
+    const inPrint = await page.evaluate(() => {
+      const legend = (() => { const d = document.createElement("div"); d.style.color = "var(--legend)"; document.body.appendChild(d); const c = getComputedStyle(d).color; d.remove(); return c; })();
+      const act = document.querySelector("[data-sub][data-active]");
+      const tick = act ? getComputedStyle(act.querySelector(".ch-tick")).display : null;
+      const tint = act ? getComputedStyle(act.closest("li"), "::before").display : null;
+      return { modes: window.__chapters.list.map((c) => `${c.id}:${c.mode}:${c.shown}`).join(" "), activeLineColour: act ? getComputedStyle(act).color : null, legend, tint, tick, wheelsShowRange: [...document.querySelectorAll(".yw-range")].every((e) => getComputedStyle(e).display !== "none") };
+    });
+    await page.emulateMedia({ media: "screen" });
+    await sleep(800); await settled(page);
+    const after = await page.evaluate(() => ({ y: Math.round(scrollY), modes: window.__chapters.list.map((c) => `${c.id}:${c.mode}:${c.shown}`).join(" "), corrections: window.__chapters.corrections.length }));
+    const good = inPrint.modes === before.modes && (inPrint.activeLineColour === null || inPrint.activeLineColour === inPrint.legend) && inPrint.tint !== "block" && inPrint.wheelsShowRange && Math.abs(after.y - before.y) <= 2 && after.modes === before.modes && after.corrections === before.corrections;
+    if (!good) ok = false;
+    rows.push({ from: `${id} beat ${beat}`, before, inPrint, after, good });
+  }
+  await ctx.close();
+  return report("printNeutral", vp.spec, theme, ok, { rows });
+}
+
+/** a hard load of /#experience: the display title never shifts (it waits unseen for its corridor) */
+async function dialNoShift(vp, theme) {
+  if (REDUCE || vp.mobile) return;
+  const { ctx, page } = await openPage(vp, theme, { hash: "#experience" });
+  await sleep(2500);
+  const r = await page.evaluate(() => ({ shifts: window.__shifts, dialTop: getComputedStyle(document.getElementById("experience")).getPropertyValue("--ch-dial-top").trim() }));
+  await ctx.close();
+  const dial = r.shifts.filter((x) => x.dial && !x.input);
+  const cls = r.shifts.filter((x) => !x.input).reduce((n, x) => n + x.v, 0);
+  return report("dialNoShift", vp.spec, theme, dial.length === 0, { dialShifts: dial.length, dialShiftValue: +dial.reduce((n, x) => n + x.v, 0).toFixed(4), totalCls: +cls.toFixed(4), dialTop: r.dialTop || null });
+}
+
+/** frames produced per second mid-chapter at rest (a CDP trace: DrawFrame / BeginMainThreadFrame over 8 s); the
+ *  brief's PR 1 row is "measured" — recorded here against the rain's 30 + the field's cadence */
+async function framesMidChapter(vp, theme) {
+  if (REDUCE) return;
+  const { ctx, page } = await openPage(vp, theme);
+  await page.waitForFunction(() => performance.now() >= 9000, null, { timeout: 30000, polling: 250 });
+  const rows = [];
+  for (const c of await list(page)) {
+    await scrollTo(page, await yForBeat(page, c.id, Math.floor(c.layout.length / 2)));
+    await settled(page);
+    await sleep(2000);
+    await browser.startTracing(page, { categories: ["disabled-by-default-devtools.timeline.frame"] });
+    const t0 = Date.now();
+    await sleep(8000);
+    const buf = await browser.stopTracing();
+    const secs = (Date.now() - t0) / 1000;
+    const ev = JSON.parse(buf.toString()).traceEvents;
+    const n = (name) => ev.filter((e) => e.name === name).length;
+    rows.push({ id: c.id, mode: c.mode, drawFramesPerSec: +(n("DrawFrame") / secs).toFixed(1), mainFramesPerSec: +(n("BeginMainThreadFrame") / secs).toFixed(1) });
+  }
+  await ctx.close();
+  return report("framesMidChapter", vp.spec, theme, null, { rows, budget: "PR 1: measured (DESIGN §6); after PR 4: ≤ the rain's 30 + the field's cadence" });
+}
+
+/** flow mode's rail fill is CSS sticky: scrolling through a flow chapter writes nothing to the rail, and the
+ *  fill's tip rides the reading line */
+async function flowFillZeroJs(page, vp, theme) {
+  const L = await list(page);
+  const c = L.find((x) => x.mode === "flow");
+  if (!c) return report("flowFillZeroJs", vp.spec, theme, null, { note: "no flow chapter" });
+  await page.evaluate((cid) => {
+    window.__railMut = 0;
+    const mo = new MutationObserver((recs) => { window.__railMut += recs.length; });
+    mo.observe(document.querySelector(`#${cid} .ch-rail`), { subtree: true, attributes: true, childList: true });
+    window.__railMo = mo;
+  }, c.id);
+  const g = await geoOf(page, c.id);
+  let worst = 0, samples = 0;
+  for (let y = g.top - g.vh; y <= g.top + g.height; y += 23) {
+    await scrollTo(page, y); await frames(page, 1);
+    const r = await page.evaluate((cid) => {
+      const rail = document.querySelector(`#${cid} .ch-rail`).getBoundingClientRect();
+      const cover = document.querySelector(`#${cid} .ch-rail-cover`).getBoundingClientRect();
+      const line = 0.62 * document.documentElement.clientHeight;
+      return { inSpan: line > rail.top + 1 && line < rail.bottom - 1, off: cover.top - line };
+    }, c.id);
+    if (r.inSpan) { worst = Math.max(worst, Math.abs(r.off)); samples++; }
+  }
+  const mut = await page.evaluate(() => { window.__railMo.disconnect(); return window.__railMut; });
+  return report("flowFillZeroJs", vp.spec, theme, mut === 0 && worst <= 2, { chapter: c.id, railMutations: mut, samplesOnLine: samples, worstTipOffLinePx: +worst.toFixed(2) });
+}
+
+/** the LCP element is the hero's h1 (a fresh load, no input) */
+async function lcpIsH1(vp, theme) {
+  if (REDUCE) return;
+  const { ctx, page } = await openPage(vp, theme);
+  await sleep(3000);
+  const r = await page.evaluate(() => new Promise((res) => {
+    new PerformanceObserver((l) => {
+      const es = l.getEntries();
+      const e = es[es.length - 1];
+      res({ entries: es.length, tag: e?.element ? `${e.element.tagName}.${String(e.element.className).slice(0, 30)}` : null, inH1: !!e?.element?.closest?.("h1, [data-hero-h1]"), size: e?.size ?? null, t: e ? Math.round(e.startTime) : null });
+    }).observe({ type: "largest-contentful-paint", buffered: true });
+    setTimeout(() => res({ entries: 0 }), 2000);
+  }));
+  await ctx.close();
+  return report("lcpIsH1", vp.spec, theme, !!r.inH1, r);
+}
+
+/** WebGL contexts: desktop 3 (fluid, field, card), phone 1 (DESIGN §6) */
+async function contexts(vp, theme) {
+  if (REDUCE) return;
+  const { ctx, page } = await openPage(vp, theme);
+  if (!vp.mobile) await page.waitForFunction(() => !!window.__field && window.__field.entered, null, { timeout: 40000 }).catch(() => {});
+  else await sleep(4000);
+  const top = await page.evaluate(() => window.__gl.contexts);
+  await page.evaluate(() => { const s = document.getElementById("projects").nextElementSibling; window.scrollTo({ top: s.getBoundingClientRect().top + scrollY - 100, behavior: "instant" }); });
+  await sleep(3000);
+  if (!vp.mobile) await page.waitForFunction(() => !!window.__jacks, null, { timeout: 20000 }).catch(() => {});
+  const all = await page.evaluate(() => window.__gl.contexts);
+  await ctx.close();
+  const budget = vp.mobile ? 1 : 3;
+  return report("contexts", vp.spec, theme, all <= budget, { atTop: top, afterCard: all, budget });
+}
+
+// ---------------------------------------------------------------------------------------------------------------
 // the run
 
 const t0 = Date.now();
@@ -1119,9 +1459,12 @@ for (const spec of VIEWPORTS) {
         if (want("docHeight")) await docHeight(page, vp, theme);
         if (core || spec === "1280x720" || spec === "768x1024t") {
           if (want("findReachesEveryItem") || want("findHitsOnlyVisibleText")) await findChecks(page, vp, theme);
-          if (want("focusFollows") || want("tabLeavesChapter")) await focusChecks(page, vp, theme);
           if (want("titleClearOfPacks")) await titleClearOfPacks(page, vp, theme);
         }
+        // keyboard focus in pinned AND flow chapters: Education flows at every desktop size, both chapters on phones
+        if ((core || spec === "1280x720" || spec === "768x1024t" || spec === "844x390m") && (want("focusFollows") || want("tabLeavesChapter"))) await focusChecks(page, vp, theme);
+        if ((CONTRAST.has(spec) || spec === "844x390m") && want("touchTargets")) await touchTargets(page, vp, theme);
+        if (CONTRAST.has(spec) && want("flowFillZeroJs")) await flowFillZeroJs(page, vp, theme);
         if (CONTRAST.has(spec) && want("contrastRows")) await contrastRows(page, vp, theme);
         if (core && want("glassBlurIntact")) await glassBlurIntact(page, vp, theme);
       }
@@ -1138,6 +1481,16 @@ for (const spec of VIEWPORTS) {
       if (want("liveReduceStopsCanvases")) await liveReduceStopsCanvases(vp, theme).catch((e) => report("harnessError", spec, theme, false, { check: "liveReduceStopsCanvases", error: String(e).slice(0, 300) }));
       if (want("zeroRafMidChapter") && (CORE.has(spec) || spec === "1280x720" || spec === "768x1024t")) await zeroRafMidChapter(vp, theme).catch((e) => report("harnessError", spec, theme, false, { check: "zeroRafMidChapter", error: String(e).slice(0, 300) }));
       if (want("restAtTopIdentical")) await restAtTopIdentical(vp, theme).catch((e) => report("harnessError", spec, theme, false, { check: "restAtTopIdentical", error: String(e).slice(0, 300) }));
+      const guard = (name, fn) => (want(name) ? fn().catch((e) => report("harnessError", spec, theme, false, { check: name, error: String(e).slice(0, 300) })) : null);
+      await guard("keepPlaceHeightOnly", () => keepPlaceHeightOnly(vp, theme));
+      await guard("resizeMidScroll", () => resizeMidScroll(vp, theme));
+      await guard("printNeutral", () => printNeutral(vp, theme));
+      if (spec === "1440x900" || spec === "1280x720" || spec === "1920x1080") await guard("dialNoShift", () => dialNoShift(vp, theme));
+      if (spec === "1440x900") await guard("framesMidChapter", () => framesMidChapter(vp, theme));
+      if (core) await guard("lcpIsH1", () => lcpIsH1(vp, theme));
+      if (core) await guard("contexts", () => contexts(vp, theme));
+      // text spacing and a 24 px default font: geometry, not colour — once per size, in the first theme
+      if (theme === THEMES[0] && MATRIX.includes(spec)) await guard("textSpacing", () => textSpacing(vp, theme));
     }
   }
 }
