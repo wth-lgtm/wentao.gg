@@ -11,6 +11,9 @@ import { yearsFor } from "../lib/yearWheel";
 // foreground, because inside a chapter the accent belongs to the active entry alone. A server component: the
 // list is complete HTML before any JavaScript, and the page's ChapterDirector lights it.
 
+/** " · " with a no-break space before the dot: a line may break after a separator, never before one */
+const SEP = "\u00a0· ";
+
 const entries: ChapterEntry[] = EXPERIENCE.map((role) => ({
   key: role.company,
   head: (
@@ -37,12 +40,16 @@ const entries: ChapterEntry[] = EXPERIENCE.map((role) => ({
       )}
     </>
   ),
+  // Lines break only AFTER a separator: a no-break space before each "·" (SEP), and the period and the place each
+  // unbroken, so a wrapped stack never starts a line with "·" and a phone never leaves "NY" alone on a line.
   lines: [
     <>
       <span className="ch-line">
-        {role.period} · {role.location}
+        <span className="ch-nowrap">{role.period}</span>
+        {SEP}
+        <span className="ch-nowrap">{role.location}</span>
       </span>
-      {role.technologies.length > 0 && <span className="ch-stack">{role.technologies.join(" · ")}</span>}
+      {role.technologies.length > 0 && <span className="ch-stack">{role.technologies.join(SEP)}</span>}
     </>,
   ],
 }));

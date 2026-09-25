@@ -45,14 +45,16 @@ const entries: ChapterEntry[] = EDUCATION.map((school) => ({
               degree.field
             )}
           </span>
+          {/* the date and the place each unbroken, a no-break space before the "·": the line breaks after it */}
           <span className="ch-line">
-            {degree.period} ·{" "}
+            <span className="ch-nowrap">{degree.period}</span>
+            {"\u00a0· "}
             {degree.locationLink ? (
-              <a href={degree.locationLink} target="_blank" rel="noopener noreferrer" className="ch-text-link">
+              <a href={degree.locationLink} target="_blank" rel="noopener noreferrer" className="ch-text-link ch-nowrap">
                 {degree.location}
               </a>
             ) : (
-              degree.location
+              <span className="ch-nowrap">{degree.location}</span>
             )}
           </span>
         </span>

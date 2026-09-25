@@ -508,7 +508,7 @@ async function railMatchesPin(page, vp, theme) {
 }
 
 async function findChecks(page, vp, theme) {
-  const texts = await page.evaluate(() => [...document.querySelectorAll("[data-chapter] .ch-name, [data-chapter] .ch-sub .ch-line:first-child")].map((e) => e.textContent.trim().split(" · ")[0]).filter(Boolean));
+  const texts = await page.evaluate(() => [...document.querySelectorAll("[data-chapter] .ch-name, [data-chapter] .ch-sub .ch-line:first-child")].map((e) => e.textContent.trim().split(/\s·\s/)[0]).filter(Boolean));
   const miss = [];
   for (const t of texts) {
     const r = await page.evaluate((needle) => {
