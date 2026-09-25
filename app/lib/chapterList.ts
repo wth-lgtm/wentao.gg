@@ -187,16 +187,24 @@ export function readingLineFor(clientHeight: number): number {
   return Math.round(READING_LINE * clientHeight);
 }
 
+/** px: on a coarse pointer, a height-only change smaller than this is the browser's toolbars, not a new window */
+export const TOOLBAR_PX = 120;
+
 /**
- * The reading line, refreshed only on a WIDTH (or orientation) change: iOS's toolbars change innerHeight by
- * 50–80 px as they collapse, and a line that moved with them would flip still rows (E7, O17).
+ * THE reading line (one per page: the ChapterDirector's gates, keep-your-place and the focus scroll all read this
+ * one, and the flow rail's CSS fill sits on 62svh). It follows the window: a width change, or any height change
+ * on a fine pointer (a dragged window edge, DevTools docked at the bottom, macOS tiling), re-measures it. Only on
+ * a coarse pointer does a height-only change under TOOLBAR_PX leave it where it was: iOS's toolbars change
+ * innerHeight by 50–80 px as they collapse, and a line that moved with them would flip still rows (E7, O17).
  */
-export function createReadingLine(): { at(width: number, clientHeight: number): number } {
+export function createReadingLine(): { at(width: number, clientHeight: number, coarse: boolean): number } {
   let width = Number.NaN;
+  let height = Number.NaN;
   let line = 0;
   return {
-    at(w, h) {
-      if (w !== width) { width = w; line = readingLineFor(h); }
+    at(w, h, coarse) {
+      const heightMoved = h !== height && (!coarse || !(Math.abs(h - height) < TOOLBAR_PX));
+      if (w !== width || heightMoved) { width = w; height = h; line = readingLineFor(h); }
       return line;
     },
   };

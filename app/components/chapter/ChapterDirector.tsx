@@ -7,7 +7,7 @@ import { atBeat, BEAT_MS } from "../../lib/mechanism";
 import { getScroll, subscribeScroll, type ScrollState } from "../../lib/scrollStore";
 import { getSiteMotion, subscribeSiteMotion } from "../../lib/siteMotion";
 import {
-  DIAL_ROW_PX, HYSTERESIS_PX, PIN_CHAPTERS, PIN_QUERY, STAGE_CLEAR, TWO_COLUMN_MIN,
+  DIAL_ROW_PX, HYSTERESIS_PX, PIN_CHAPTERS, PIN_QUERY, STAGE_CLEAR, TOOLBAR_PX, TWO_COLUMN_MIN,
   activeItemAt, bandFits, beatCount, beatOf, beatToActive, chapterPin, createReadingLine, headClamp, pinAtBeat,
   pinSetFromFlag, railHeadAt, readingLineActive, type ChapterLayout,
 } from "../../lib/chapterList";
@@ -102,7 +102,6 @@ class ChapterRuntime {
   private written = { scale: Number.NaN, pin: Number.NaN };
   private io: IntersectionObserver | null = null;
   private near = false;
-  private readonly line = createReadingLine();
   private readonly onNear: (near: boolean) => void;
 
   constructor(el: HTMLElement, onNear: (near: boolean) => void) {
@@ -232,9 +231,9 @@ class ChapterRuntime {
   /**
    * READ phase: arithmetic on cached layout only. Sets this chapter's gate (engaged) and target beat; the
    * director then lets exactly one chapter own the marks (the accent is spent once per viewport) and hands the
-   * owner's target to its commit.
+   * owner's target to its commit. `line` is the page's one reading line (the director's, viewport px).
    */
-  gate(s: Readonly<ScrollState>): void {
+  gate(s: Readonly<ScrollState>, line: number): void {
     this.stats.callbacks++;
     const g = this.geom;
     const vh = window.innerHeight;
@@ -251,7 +250,6 @@ class ChapterRuntime {
       }
       onFrame("render", this.render);
     } else if (this.mode === "flow") {
-      const line = this.line.at(window.innerWidth, document.documentElement.clientHeight);
       const listTop = (g.beatTops[0] ?? g.pageTop) - s.y;
       const listBottom = g.listBottom - s.y;
       this.engaged = line >= listTop && line <= listBottom;
@@ -373,8 +371,6 @@ function createDirector(): () => void {
   const runtimes: ChapterRuntime[] = [...document.querySelectorAll<HTMLElement>("[data-chapter]")].map((el) => new ChapterRuntime(el, onNear));
   if (runtimes.length === 0) return () => {};
 
-  const readingLine = () => Math.round(0.62 * html.clientHeight);
-
   // READ phase: every nearby chapter computes its gate and target; exactly ONE owns the marks, so two chapters
   // are never marked in one viewport (the accent is spent once per viewport). When two are engaged at once — a
   // released pinned stage still crossing the middle third while the next chapter's first row reaches the reading
@@ -383,8 +379,8 @@ function createDirector(): () => void {
   // owner clears on the same boundary the new one docks on.
   const onScroll = (s: Readonly<ScrollState>) => {
     const near = runtimes.filter((rt) => rt.subscribed);
-    for (const rt of near) rt.gate(s);
     const line = readingLine();
+    for (const rt of near) rt.gate(s, line);
     const dist = (rt: ChapterRuntime) => Math.abs(rt.focusY - line);
     let best: ChapterRuntime | null = null;
     for (const rt of near) if (rt.engaged && (!best || dist(rt) < dist(best))) best = rt;
@@ -398,6 +394,14 @@ function createDirector(): () => void {
 
   const pinMq = matchMedia(PIN_QUERY);
   const coarseMq = matchMedia("(pointer: coarse)");
+  // THE reading line, one for the page: the flow gates, keep-your-place and the focus scroll all read it, and it
+  // is re-measured on every evaluation (every resize the director accepts), so a height-only resize on a desktop
+  // moves it with the window while iOS's toolbars do not (createReadingLine). The flow rail's CSS fill sits on
+  // the same 62svh.
+  const lineMeter = createReadingLine();
+  const lineNow = () => lineMeter.at(window.innerWidth, html.clientHeight, coarseMq.matches);
+  let lineY = lineNow();
+  const readingLine = () => lineY;
   const pinSet = (REVIEW && pinSetFromFlag(window.location.search)) || PIN_CHAPTERS;
   const probe = document.createElement("div");
   probe.setAttribute("aria-hidden", "true");
@@ -528,6 +532,7 @@ function createDirector(): () => void {
     const firstTime = runtimes.some((rt) => rt.mode === null);
     const changed = runtimes.some((rt, i) => rt.currentMode() !== next[i]);
     if (!changed && !firstTime && !resized) {
+      lineY = lineNow();
       for (const rt of runtimes) rt.measure();
       placeDials();
       kick();
@@ -535,6 +540,8 @@ function createDirector(): () => void {
     }
     // one reading place: after a resize, the one from the last rest; otherwise from the layout still on screen
     const held = resized && restPlace ? restPlace : snapshot();
+    // the place was read against the old line; the correction and every gate from here read the new one
+    lineY = lineNow();
     if (changed || resized) {
       if (changed) flips++;
       html.style.setProperty("overflow-anchor", "none");
@@ -599,8 +606,8 @@ function createDirector(): () => void {
 
   const onResize = () => {
     const w = window.innerWidth, h = window.innerHeight;
-    // iOS toolbars: a height-only change under 120 px on a coarse pointer moves nothing
-    if (coarseMq.matches && w === lastW && Math.abs(h - lastH) < 120) return;
+    // iOS toolbars: a height-only change under TOOLBAR_PX on a coarse pointer moves nothing
+    if (coarseMq.matches && w === lastW && Math.abs(h - lastH) < TOOLBAR_PX) return;
     lastW = w; lastH = h;
     resizePending = true;
     clearTimeout(restTimer);
