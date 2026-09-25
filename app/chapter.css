@@ -377,6 +377,11 @@
      where the two meet) */
   .ch-name .ch-text-link::after { inset: -11px -4px; z-index: 1; }
   .ch-text-link:hover { color: var(--accent); text-decoration-color: currentColor; }
+  /* Focus not obscured (WCAG 2.4.11): the browser's own focus scroll keeps a chapter link clear of the fixed W. /
+     INDEX marks and the progress bar (STAGE_CLEAR, 96 px top, 40 px bottom) in every mode. The director re-scrolls
+     only when the focused entry is not the marked one; a Shift+Tab onto the marked entry's link in flow left it at
+     the viewport's top edge, under the 74 px marks band, its ring touching the progress bar. */
+  .chapter a { scroll-margin-block: 96px 40px; }
 
   /* the entry's line(s): dates · location, the stack, a degree. In --legend, the site's measured token for small
      secondary text, not --muted: over the live canvases (the fluid's dye under the glass) muted lines measured
