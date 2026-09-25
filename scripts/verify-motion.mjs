@@ -1403,8 +1403,9 @@ async function printNeutral(vp, theme) {
     await page.emulateMedia({ media: "print" });
     await sleep(600);
     const inPrint = await page.evaluate(() => {
-      const legend = (() => { const d = document.createElement("div"); d.style.color = "var(--legend)"; document.body.appendChild(d); const c = getComputedStyle(d).color; d.remove(); return c; })();
       const act = document.querySelector("[data-sub][data-active]");
+      // --legend as the chapter resolves it (print pins the light tokens on .chapter, whatever the theme)
+      const legend = (() => { const d = document.createElement("div"); d.style.color = "var(--legend)"; (act?.closest("[data-chapter]") ?? document.body).appendChild(d); const c = getComputedStyle(d).color; d.remove(); return c; })();
       const tick = act ? getComputedStyle(act.querySelector(".ch-tick")).display : null;
       const tint = act ? getComputedStyle(act.closest("li"), "::before").display : null;
       return { modes: window.__chapters.list.map((c) => `${c.id}:${c.mode}:${c.shown}`).join(" "), activeLineColour: act ? getComputedStyle(act).color : null, legend, tint, tick, wheelsShowRange: [...document.querySelectorAll(".yw-range")].every((e) => getComputedStyle(e).display !== "none") };
