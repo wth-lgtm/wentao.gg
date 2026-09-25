@@ -82,7 +82,9 @@ export default function Chapter({
                   <span className="ch-rail-cover" />
                 </span>
               </div>
-              <ol className="ch-list">
+              {/* role="list": WebKit drops list semantics from a list-style:none <ol>, and VoiceOver's "list, 5 items"
+                  is what lets the visible numerals stay aria-hidden */}
+              <ol className="ch-list" role="list">
                 {entries.map((entry, i) => (
                   <li key={entry.key} className="ch-item" data-item={i}>
                     <div className="ch-head">
