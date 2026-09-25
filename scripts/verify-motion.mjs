@@ -26,7 +26,7 @@
 //   activeItemMonotone      scrolling down in 30 px steps never moves the mark back
 //   noSkipOnNotch           1-, 2- and 3-notch wheels and PageDown: every beat between start and end, in order
 //   headNeverLeads          pinned: the rail head at or above the next uncommitted row in every sampled frame
-//   commitOnBeat            each step lands 0–12 ms after a 100 ms boundary (p95; asserted on Metal only)
+//   commitOnBeat            each step lands 0–12 ms after a 100 ms boundary (median p95 of 3 runs; Metal only)
 //   railMatchesPin          --pin-progress = chapterPin ± 0.002, two frames after each scrollTo
 //   findReachesEveryItem    window.find reaches every entry's name and dates line, painted inside its panel
 //   findHitsOnlyVisibleText "2024", "2022", "2021", "2017": the first hit is list text, never the wheel
@@ -43,8 +43,9 @@
 //   glassBlurIntact         Metal: the pinned panel's backdrop stays blurred (Spike 0's hf metric vs raw and control)
 //   contrastRows            pixel contrast over the live canvases, inactive ≥ 4.5, active line ≥ 7, index ≥ 4.5, tints ΔL* ≥ 3
 //   accentBudget            accent-derived paint only inside the active entry (none at all in the static still)
-//   titleClearOfPacks       the pinned title's box against the live jack bodies (window.__field)
-//   zeroRafMidChapter       at rest mid-chapter the chapter code runs 0 callbacks; rAF calls/exec recorded
+//   titleClearOfPacks       the pinned title's box against the live jack bodies (window.__field), fresh page at rest
+//   zeroRafMidChapter       at rest mid-chapter the chapter code runs 0 callbacks (rAF recorded, debug URL)
+//   rafPlain                rAF calls/exec per second at rest on a PLAIN URL: top, mid-Experience, mid-Education
 //   docHeight               docH = Spike 0's docH − the old chapters + the measured chapters ± 40; pinned = vh × svh
 //   restAtTopIdentical      the field at the top: passes 42, bodies 21, programs 3, no errors
 //   restAtTopPixels         SSIM ≥ 0.99 against Spike 0's f4b738f first screens (capture-top.mjs)
@@ -122,7 +123,7 @@ const browser = await chromium.launch({ executablePath: CHROME, args: ANGLE[ANGL
 // ---------------------------------------------------------------------------------------------------------------
 // page plumbing
 
-async function openPage(vp, theme, { hash = "", reduce = REDUCE, extra = "" } = {}) {
+async function openPage(vp, theme, { hash = "", reduce = REDUCE, extra = "", plain = false } = {}) {
   const ctx = await browser.newContext({
     viewport: { width: vp.width, height: vp.height },
     deviceScaleFactor: vp.dpr,
@@ -169,6 +170,12 @@ async function openPage(vp, theme, { hash = "", reduce = REDUCE, extra = "" } = 
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e).slice(0, 300)));
   page.on("console", (m) => { if (m.type() === "error" && !/_vercel|Failed to load resource|MIME type/.test(m.text())) errors.push(m.text().slice(0, 300)); });
+  if (plain) {
+    // the page as a visitor gets it: no ?chapterDebug, no ?jacksDebug (their hooks cost frames of their own)
+    await page.goto(`${URL_}${hash}`, { waitUntil: "load" });
+    await page.evaluate(() => document.fonts.ready);
+    return { ctx, page, errors };
+  }
   await page.goto(`${URL_}?chapterDebug=1&jacksDebug=1${extra}${hash}`, { waitUntil: "load" });
   // tuning only (OC-T search): --panel-fill=NN overrides the pinned panel's glass fill to NN % of --card;
   // --inactive-legend sets the pinned panel's inactive lines in --legend (light theme only)
@@ -471,15 +478,33 @@ async function headNeverLeads(page, vp, theme) {
   return report("headNeverLeads", vp.spec, theme, r.worst <= 0.75, { framesSampled: r.frames, worstLeadPx: +r.worst.toFixed(2) });
 }
 
+/** one more riffle run: three sweeps through Experience, first entry → last → first, each a riffle of every entry */
+async function commitRun(page) {
+  const c = await chapter(page, "experience");
+  if (!c || c.mode === "static") return [];
+  const t0 = await page.evaluate(() => performance.now());
+  for (let k = 0; k < 3; k++) {
+    await scrollTo(page, await yForBeat(page, c.id, c.layout.length - 1)); await settled(page);
+    await scrollTo(page, await yForBeat(page, c.id, 0)); await settled(page);
+  }
+  return page.evaluate((t) => window.__vm.log.filter((e) => e.on && e.t >= t).map((e) => e.t), t0);
+}
+
+/** each step lands 0–12 ms after a 100 ms boundary. One run's p95 swung 2.8–12.6 ms at 2560 × 1440 on the same
+ *  build, so the assertion is on the MEDIAN p95 of three runs: the steps the earlier checks logged, and two
+ *  dedicated riffle runs */
 async function commitOnBeat(page, vp, theme) {
-  const log = await page.evaluate(() => window.__vm.log.filter((e) => e.on));
+  const first = await page.evaluate(() => window.__vm.log.filter((e) => e.on).map((e) => e.t));
+  const runs = [first, await commitRun(page), await commitRun(page)];
   // signed offset from the nearest boundary: a step that fired early reads as a small negative number
-  const phase = log.map((e) => { const m = e.t % 100; return m >= 50 ? m - 100 : m; }).sort((a, b) => a - b);
-  if (phase.length < 5) return report("commitOnBeat", vp.spec, theme, null, { note: "too few steps logged", steps: phase.length });
-  const q = (p) => +phase[Math.min(phase.length - 1, Math.floor(p * phase.length))].toFixed(2);
-  const p95 = q(0.95);
+  const phases = runs.map((ts) => ts.map((t) => { const m = t % 100; return m >= 50 ? m - 100 : m; }).sort((a, b) => a - b));
+  const q = (phase, p) => +phase[Math.min(phase.length - 1, Math.floor(p * phase.length))].toFixed(2);
+  const all = phases.flat().sort((a, b) => a - b);
+  if (all.length < 5) return report("commitOnBeat", vp.spec, theme, null, { note: "too few steps logged", steps: all.length });
+  const p95s = phases.filter((ph) => ph.length >= 5).map((ph) => q(ph, 0.95));
+  const medianP95 = [...p95s].sort((a, b) => a - b)[Math.floor(p95s.length / 2)];
   const asserted = ANGLE_NAME === "metal";
-  return report("commitOnBeat", vp.spec, theme, asserted ? p95 <= 12 && phase[0] >= -0.5 : null, { steps: phase.length, minMs: +phase[0].toFixed(2), p50ms: q(0.5), p95ms: p95, maxMs: +phase[phase.length - 1].toFixed(2), asserted });
+  return report("commitOnBeat", vp.spec, theme, asserted ? medianP95 <= 12 && all[0] >= -0.5 : null, { runs: phases.map((ph) => ph.length), p95PerRunMs: p95s, medianP95ms: medianP95, minMs: +all[0].toFixed(2), p50ms: q(all, 0.5), maxMs: +all[all.length - 1].toFixed(2), asserted });
 }
 
 async function railMatchesPin(page, vp, theme) {
@@ -1019,13 +1044,28 @@ async function accentBudget(page, vp, theme) {
   return report("accentBudget", vp.spec, theme, ok, { rows });
 }
 
-async function titleClearOfPacks(page, vp, theme) {
+/** On a FRESH page (as zeroRafMidChapter): the checks before it stir the field — noSkipOnNotch parks the pointer
+ *  at the centre and wheels — and 60 stepped frames did not bring the jacks home (one run read −13.5 px where a
+ *  fresh page reads +76). The pointer is never moved (it has never been over the canvas), the entrance is
+ *  stepped through, and the field is idle before the first sample. */
+async function titleClearOfPacks(vp, theme) {
+  const { ctx, page } = await openPage(vp, theme);
+  try {
+    return await titleClearOn(page, vp, theme);
+  } finally {
+    await ctx.close();
+  }
+}
+
+async function titleClearOn(page, vp, theme) {
+  await sleep(1500); // the field's gate and deferred birth (idle + 500 ms)
   const has = await page.evaluate(() => !!window.__field);
   const L = await list(page);
   const c = L.find((x) => x.mode === "pinned");
   if (!has || !c) return report("titleClearOfPacks", vp.spec, theme, null, { note: !has ? "no jack field at this viewport (the gate: ≥ 640 px, fine pointer)" : "no pinned chapter" });
   await page.waitForFunction(() => window.__field.entered, null, { timeout: 40000 });
   await page.evaluate(() => { const j = window.__field; while (j.entranceT < 12) j.step(1 / 60); });
+  await page.waitForFunction(() => window.__field.idle, null, { timeout: 120000, polling: 250 });
   const g = await geoOf(page, c.id);
   const rows = [];
   let worst = Infinity;
@@ -1081,6 +1121,32 @@ async function zeroRafMidChapter(vp, theme) {
   }
   await ctx.close();
   return report("zeroRafMidChapter", vp.spec, theme, ok, { rows, baselineMidPage: vp.spec === "1440x900" ? "Spike 0 f4b738f Metal 1440×900 mid-page: 120.3 calls/s, 90.3 exec/s" : null });
+}
+
+/** rAF calls and executed callbacks per second on a PLAIN URL (no ?chapterDebug, no ?jacksDebug: their hooks run
+ *  frames of their own — 95.5 exec/s mid-Experience with the flags against 89.9 without), a fresh page, the
+ *  pointer never moved: at the top, mid-Experience and mid-Education, each after 3 s of rest, over 4 s. These are
+ *  the PR's rAF numbers, against Spike 0's plain f4b738f baseline (mid-page 120.3 calls/s, 90.3 exec/s at 1440). */
+async function rafPlain(vp, theme) {
+  const { ctx, page } = await openPage(vp, theme, { plain: true });
+  await page.waitForFunction(() => performance.now() >= 9000, null, { timeout: 30000, polling: 250 });
+  const where = {
+    top: () => 0,
+    midExperience: () => page.evaluate(() => { const s = document.getElementById("experience"); const st = s.querySelector(".ch-stage"); const top = s.getBoundingClientRect().top + scrollY; const travel = s.offsetHeight - st.clientHeight; return travel > 0 ? top + travel / 2 : top + s.offsetHeight / 2 - innerHeight / 2; }),
+    midEducation: () => page.evaluate(() => { const s = document.getElementById("education"); return s.getBoundingClientRect().top + scrollY + s.offsetHeight / 2 - innerHeight / 2; }),
+  };
+  const rows = {};
+  for (const [name, y] of Object.entries(where)) {
+    await scrollTo(page, await y());
+    await sleep(3000);
+    const a = await page.evaluate(() => ({ raf: window.__raf.calls, exec: window.__raf.exec, t: performance.now() }));
+    await sleep(4000);
+    const b = await page.evaluate(() => ({ raf: window.__raf.calls, exec: window.__raf.exec, t: performance.now() }));
+    const secs = (b.t - a.t) / 1000;
+    rows[name] = { rafCallsPerSec: +((b.raf - a.raf) / secs).toFixed(1), rafExecPerSec: +((b.exec - a.exec) / secs).toFixed(1) };
+  }
+  await ctx.close();
+  return report("rafPlain", vp.spec, theme, null, { rows, baseline: vp.spec === "1440x900" ? "Spike 0 f4b738f Metal 1440×900 plain URL, mid-page: 120.3 calls/s, 90.3 exec/s" : null });
 }
 
 async function docHeight(page, vp, theme) {
@@ -1496,7 +1562,6 @@ for (const spec of VIEWPORTS) {
         if (want("docHeight")) await docHeight(page, vp, theme);
         if (core || spec === "1280x720" || spec === "768x1024t") {
           if (want("findReachesEveryItem") || want("findHitsOnlyVisibleText")) await findChecks(page, vp, theme);
-          if (want("titleClearOfPacks")) await titleClearOfPacks(page, vp, theme);
         }
         // keyboard focus in pinned AND flow chapters: Education flows at every desktop size, both chapters on phones
         if ((core || spec === "1280x720" || spec === "768x1024t" || spec === "844x390m") && (want("focusFollows") || want("tabLeavesChapter"))) await focusChecks(page, vp, theme);
@@ -1517,6 +1582,8 @@ for (const spec of VIEWPORTS) {
       if (want("liveResizes")) await liveResizes(vp, theme).catch((e) => report("harnessError", spec, theme, false, { check: "liveResizes", error: String(e).slice(0, 300) }));
       if (want("liveReduceStopsCanvases")) await liveReduceStopsCanvases(vp, theme).catch((e) => report("harnessError", spec, theme, false, { check: "liveReduceStopsCanvases", error: String(e).slice(0, 300) }));
       if (want("zeroRafMidChapter") && (CORE.has(spec) || spec === "1280x720" || spec === "768x1024t")) await zeroRafMidChapter(vp, theme).catch((e) => report("harnessError", spec, theme, false, { check: "zeroRafMidChapter", error: String(e).slice(0, 300) }));
+      if (want("titleClearOfPacks") && (spec === "1440x900" || spec === "1280x720" || spec === "1920x1080" || spec === "2560x1440")) await titleClearOfPacks(vp, theme).catch((e) => report("harnessError", spec, theme, false, { check: "titleClearOfPacks", error: String(e).slice(0, 300) }));
+      if (want("rafPlain") && (spec === "1440x900" || spec === "390x844m")) await rafPlain(vp, theme).catch((e) => report("harnessError", spec, theme, false, { check: "rafPlain", error: String(e).slice(0, 300) }));
       if (want("restAtTopIdentical")) await restAtTopIdentical(vp, theme).catch((e) => report("harnessError", spec, theme, false, { check: "restAtTopIdentical", error: String(e).slice(0, 300) }));
       const guard = (name, fn) => (want(name) ? fn().catch((e) => report("harnessError", spec, theme, false, { check: name, error: String(e).slice(0, 300) })) : null);
       await guard("keepPlaceHeightOnly", () => keepPlaceHeightOnly(vp, theme));
