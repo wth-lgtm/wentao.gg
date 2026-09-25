@@ -68,7 +68,8 @@
 //   touchTargets            every row link by elementFromPoint: its centre hits it, vertical reach ≥ 24 px
 //   printNeutral            print emulation changes no mode or mark, prints the marks neutral; the round trip moves nothing
 //   slowDirectorChunk       the director's chunk held back 1500 ms: a wheel on a /#education hard load before it arrives
-//                           is not snapped back to the section top by the landing (1440×900)
+//                           is not snapped back to the section top by the landing; held back 2500 ms, Education's flow
+//                           title is visible in place before the director and does not move after it (1440×900)
 //   hashLoadCls             hard loads of /#experience, /#education, /#projects: non-input CLS ≤ 0.01 each, no dial shift
 //                           (every phone and tablet, three desktops; the first theme)
 //   framesMidChapter        CDP frames produced per second mid-chapter at rest (recorded)
@@ -1748,8 +1749,32 @@ async function slowDirectorChunk(vp, theme) {
   await ctx.close();
   if (!held) return report("slowDirectorChunk", vp.spec, theme, null, { note: "no chunk carried the debug surface (a production build?)" });
   // the reader's wheel happened before the director existed, and the page stays where it took them
-  const ok = !wheeled.director && Math.abs(after.y - wheeled.y) <= 40 && Math.abs(after.y - after.educationTop) > 100;
-  return report("slowDirectorChunk", vp.spec, theme, ok, { heldMs: 1500, wheeledBeforeDirector: !wheeled.director, wheeledAtMs: wheeled.at, yAfterWheel: wheeled.y, yAfterDirector: after.y, educationTop: after.educationTop, landHash: after.landHash, secs: Math.round((Date.now() - t0) / 1000) });
+  const noSnap = !wheeled.director && Math.abs(after.y - wheeled.y) <= 40 && Math.abs(after.y - after.educationTop) > 100;
+  // and held back 2500 ms, past the dials' 1.5 s fallback, on a hard load of /#education left alone: Education's flow
+  // title is visible where CSS put it before the director arrives, and the director does not move it (it showed at
+  // 96 px and jumped into the corridor). Experience's pinned dial is recorded (its corridor needs the director).
+  const ctx2 = await browser.newContext({ viewport: { width: vp.width, height: vp.height }, deviceScaleFactor: 1, colorScheme: theme });
+  await ctx2.addInitScript((t) => { try { localStorage.setItem("theme", t); } catch {} }, theme);
+  await ctx2.route(/\/_next\/static\/chunks\/.*\.js(\?|$)/, async (route) => {
+    const res = await route.fetch();
+    const body = await res.text();
+    if (body.includes("__chapters")) await sleep(2500);
+    await route.fulfill({ response: res, body });
+  });
+  const p2 = await ctx2.newPage();
+  await p2.goto(`${URL_}?chapterDebug=1#education`, { waitUntil: "domcontentloaded" });
+  const dials = () => p2.evaluate(() => Object.fromEntries(["experience", "education"].map((id) => {
+    const d = document.querySelector(`#${id} .ch-dial`);
+    return [id, { top: Math.round(d.getBoundingClientRect().top), visible: getComputedStyle(d).visibility === "visible" }];
+  }).concat([["director", !!window.__chapters], ["at", Math.round(performance.now())]])));
+  await p2.waitForFunction(() => performance.now() > 1800, null, { polling: 50 });
+  const early = await dials();
+  await p2.waitForFunction(() => window.__chapters && window.__chapters.ready && window.__chapters.evaluations > 0, null, { timeout: 30000, polling: 100 });
+  await sleep(1000);
+  const late = await dials();
+  await ctx2.close();
+  const titleStill = !early.director && early.education.visible && Math.abs(late.education.top - early.education.top) <= 1;
+  return report("slowDirectorChunk", vp.spec, theme, noSnap && titleStill, { heldMs: 1500, wheeledBeforeDirector: !wheeled.director, wheeledAtMs: wheeled.at, yAfterWheel: wheeled.y, yAfterDirector: after.y, educationTop: after.educationTop, landHash: after.landHash, dialsHeld2500: { beforeDirector: early, afterDirector: late, educationTitleStill: titleStill }, secs: Math.round((Date.now() - t0) / 1000) });
 }
 
 /** a hard load of /#experience, /#education and /#projects: the first paint is the hydrated layout — total
