@@ -323,6 +323,10 @@
   .chapter[data-mode="flow"] .ch-rail-track { background: var(--foreground); }
   .chapter[data-mode="pinned"] .ch-rail-fill { display: block; }
 
+  /* Every mark below is decoration: pointer-events none, so a mark painted over a link's enlarged hit box never
+     takes its click (the head tint sat above the school name's hit box, and taps landed on the row). */
+  .chapter .ch-head::before, .chapter .ch-head::after, .chapter .ch-sub::before { pointer-events: none; }
+
   /* the accent bar: the head row's ::before, 2 px, inset 6 px top and bottom, in the gap left of the text */
   .chapter:is([data-mode="pinned"], [data-mode="flow"]) .ch-head::before {
     content: "";
