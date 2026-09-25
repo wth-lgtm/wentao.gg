@@ -42,10 +42,27 @@ test("decideMode: 700–1023 px, a pinned dial row grown by text spacing comes o
   const b = band(stageH, grown + 16);
   assert.equal(decideMode({ ...base, stageH, narrow: true, pinnedNow: true, dialH: grown, panelH: b }), "pinned");
   assert.equal(decideMode({ ...base, stageH, narrow: true, pinnedNow: true, dialH: grown, panelH: b + 1 }), "flow");
-  // not pinned yet: the row's nominal DIAL_ROW_PX (the row is not laid out as a row while the chapter flows)
-  assert.equal(decideMode({ ...base, stageH, narrow: true, dialH: grown, panelH: band(stageH, DIAL_ROW_PX) - PIN_SLACK_PX }), "pinned");
+  // not pinned: the same grown allowance (the row as last laid out pinned), with PIN_SLACK_PX to spare
+  assert.equal(decideMode({ ...base, stageH, narrow: true, dialH: grown, panelH: b - PIN_SLACK_PX }), "pinned");
+  assert.equal(decideMode({ ...base, stageH, narrow: true, dialH: grown, panelH: b - PIN_SLACK_PX + 1 }), "flow");
+  // never laid out pinned (dialH 0): the nominal DIAL_ROW_PX
+  assert.equal(decideMode({ ...base, stageH, narrow: true, dialH: 0, panelH: band(stageH, DIAL_ROW_PX) - PIN_SLACK_PX }), "pinned");
   // two columns: no dial row comes off the band
   assert.equal(decideMode({ ...base, stageH, narrow: false, pinnedNow: true, dialH: grown, panelH: band(stageH) }), "pinned");
+});
+
+test("decideMode has a fixed point: fed its own answer back as pinnedNow, it returns the same mode (no 2-cycle)", () => {
+  // the review's cycle: flow with panelH 784 in a 1024 stage pinned; pinned with a 120 px row then released it
+  for (const narrow of [false, true]) for (const stageH of [720, 800, 900, 1024, 1180]) {
+    for (let dialH = 0; dialH <= 200; dialH += 4) for (let panelH = 300; panelH <= stageH; panelH += 3) {
+      for (const start of [false, true]) {
+        const i = { ...base, stageH, narrow, dialH, panelH };
+        const m1 = decideMode({ ...i, pinnedNow: start });
+        const m2 = decideMode({ ...i, pinnedNow: m1 === "pinned" });
+        assert.equal(m2, m1, `narrow ${narrow} stage ${stageH} dial ${dialH} panel ${panelH} from ${start ? "pinned" : "flow"}`);
+      }
+    }
+  }
 });
 
 const ch = (engaged: boolean, focusY: number) => ({ engaged, focusY });

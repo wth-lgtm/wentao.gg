@@ -223,8 +223,11 @@ export function bandFits(listHeight: number, stageHeight: number, pinnedNow: boo
  * A chapter's mode from the live window (the ChapterDirector's decision, pure): static when motion is not allowed;
  * flow when the window fails PIN_QUERY or the chapter is out of the pin set; otherwise pinned exactly while its
  * panel fits the band (bandFits: PIN_SLACK_PX of slack to pin, none to stay). 700–1023 px wide (`narrow`) the
- * compact dial row comes off the band too: DIAL_ROW_PX, or the row as it stands (`dialH` + its 16 px gap) when it
- * is pinned and text spacing or a large default font has grown it.
+ * compact dial row comes off the band too: DIAL_ROW_PX, or the row's CONTENT (`dialH`, the tallest of its folio,
+ * title and readout as last laid out pinned, + its 16 px gap) when text spacing or a large default font has grown
+ * it. The same allowance in both directions, so PIN_SLACK_PX is the only asymmetry and feeding the result back as
+ * `pinnedNow` returns it again (a fixed point): an allowance read only while pinned made the pin and unpin
+ * thresholds cross whenever the grown row passed DIAL_ROW_PX, a 2-cycle only the row's squeezed track hid.
  */
 export function decideMode(i: {
   motion: boolean;
@@ -234,12 +237,12 @@ export function decideMode(i: {
   stageH: number;
   pinnedNow: boolean;
   narrow: boolean;
-  /** the pinned compact dial row's height (read only when narrow and pinned) */
+  /** the compact dial row's content height, as last laid out pinned (0 before it ever was); read only when narrow */
   dialH: number;
 }): "pinned" | "flow" | "static" {
   if (!i.motion) return "static";
   if (!i.pinQuery || !i.inPinSet) return "flow";
-  const dialRow = i.narrow ? Math.max(DIAL_ROW_PX, i.pinnedNow ? i.dialH + 16 : 0) : 0;
+  const dialRow = i.narrow ? Math.max(DIAL_ROW_PX, i.dialH + 16) : 0;
   return bandFits(i.panelH, i.stageH, i.pinnedNow, dialRow) ? "pinned" : "flow";
 }
 

@@ -106,6 +106,12 @@ class ChapterRuntime {
   /** the target row's viewport y while engaged: how near the reader's eye (the reading line) this chapter's mark is */
   focusY = Number.NaN;
   corridor: { top: number; bottom: number } | null = null;
+  /** the compact dial row's CONTENT height (its tallest child: folio, title, readout) as last laid out pinned at
+   *  700–1023 px — the row's own box is its grid track, which squeezes when text spacing grows the content; 0
+   *  before it ever was, and reset by a width change (the type scales with the window). decideMode reads it in
+   *  both directions, so the pin and unpin thresholds never cross. */
+  dialRowH = 0;
+  private dialRowW = 0;
   private lineTarget = -1;
   private side: -1 | 1 = -1;
   private head = 0;
@@ -170,6 +176,7 @@ class ChapterRuntime {
       }
     }
     const list = this.items[this.items.length - 1]?.getBoundingClientRect();
+    this.measureDialRow();
     this.geom = {
       pageTop: r.top + sy,
       height: r.height,
@@ -180,6 +187,18 @@ class ChapterRuntime {
       rowRel: beatTops.map((t) => t - sy - stageTop),
       listBottom: list ? list.bottom + sy : r.bottom + sy,
     };
+  }
+
+  private measureDialRow(): void {
+    const w = window.innerWidth;
+    if (w !== this.dialRowW) { this.dialRowW = w; this.dialRowH = 0; }
+    if (this.mode !== "pinned" || w >= TWO_COLUMN_MIN) return;
+    let top = Infinity, bottom = -Infinity;
+    for (const c of this.dial.children) {
+      const r = c.getBoundingClientRect();
+      if (r.height > 0) { top = Math.min(top, r.top); bottom = Math.max(bottom, r.bottom); }
+    }
+    if (bottom > top) this.dialRowH = Math.round(bottom - top);
   }
 
   box(): ChapterBox {
@@ -500,7 +519,7 @@ function createDirector(): () => void {
     const pinQuery = pinMq.matches, inPinSet = !!pinSet[rt.id];
     if (!motion || !pinQuery || !inPinSet) return decideMode({ motion, pinQuery, inPinSet, panelH: 0, stageH, pinnedNow: false, narrow, dialH: 0 });
     const pinnedNow = rt.currentMode() === "pinned";
-    return decideMode({ motion, pinQuery, inPinSet, panelH: rt.panel.offsetHeight, stageH, pinnedNow, narrow, dialH: narrow && pinnedNow ? rt.dial.offsetHeight : 0 });
+    return decideMode({ motion, pinQuery, inPinSet, panelH: rt.panel.offsetHeight, stageH, pinnedNow, narrow, dialH: narrow ? rt.dialRowH : 0 });
   };
 
   /** the element at the viewport centre outside every chapter: the deepest one whose box spans the centre line */
@@ -811,7 +830,7 @@ function createDirector(): () => void {
           id: rt.id, mode: rt.mode, shown: rt.commit.shown, target: rt.target, engaged: rt.engaged, pending: rt.commit.pending,
           held: rt.commit.held, subscribed: rt.subscribed, pin: rt.pin, callbacks: rt.stats.callbacks, steps: rt.stats.steps,
           panelH: rt.panel.offsetHeight, stageH: rt.geom.stageH, height: rt.geom.height, pageTop: rt.geom.pageTop,
-          rowYs: rt.geom.rowYs, railLen: rt.geom.railLen, beatTops: rt.geom.beatTops, corridor: rt.corridor, layout: rt.layout,
+          rowYs: rt.geom.rowYs, railLen: rt.geom.railLen, beatTops: rt.geom.beatTops, corridor: rt.corridor, layout: rt.layout, dialRowH: rt.dialRowH,
           owner: rt === owner,
         }));
       },
