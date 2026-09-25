@@ -12,8 +12,8 @@
    layout before it flips.
 
    Marks are ADDITIVE ONLY: nothing dims, inactive rows keep their full tokens at opacity 1, and muted text
-   never sits on a tint. Accent-derived colour appears only inside the active entry (its bar, its head tint,
-   its line's tint and tick): the accent is spent once per viewport. Only transform and opacity animate
+   never sits on a tint. Accent-derived colour appears only inside the active entry (its bar and its tint; in
+   a two-beat chapter its head tint, its line's tint and tick): the accent is spent once per viewport. Only transform and opacity animate
    (ESCAPEMENT: no animated background-color or box-shadow, no filter, no backdrop-filter on rows), and
    nothing on the sticky stage or any .glass ancestor carries a transform, opacity, filter, clip-path or
    will-change (D-0058: a backdrop root blanks the glass).
@@ -385,6 +385,58 @@
   }
 
   /* ---------------------------------------------------------------------------------------------------------
+     ONE MARK PER ENTRY (data-grain="entry", written by Chapter.tsx when every entry is one beat: Experience and
+     Education since the owner's no-bullets call). There the entry IS the beat, so entry-level and line-level marks
+     would say the same thing twice — two stacked tints with a seam, a bar beside the head only, a blue tick, and a
+     grey tick square on every inactive row that read as a bullet. Augnition's facts panel lights ONE row: one
+     tint, one full-height edge, the index in the tone. So here: one rounded tint around the head and its line
+     (li::before, faded by opacity only, under the text in the li's isolated context), one 2 px bar the entry's
+     full height at the tint's left edge (li::after, scaleY on --ease-stop, handing over like the head bar), the
+     numeral and the line flipping to the foreground on the beat. No tick. The line sits under the name, in the
+     head's text column (under the logo on phones). Projects (PR 2, two beats a project) keeps the
+     head-plus-line marks above. */
+  .chapter[data-grain="entry"] .ch-item { isolation: isolate; }
+  .chapter[data-grain="entry"] .ch-tick { display: none; }
+  .chapter[data-grain="entry"] .ch-sub { padding-left: calc(1.6rem + 10px); } /* the index column + its gap: under the logo */
+  @media (min-width: 640px) {
+    .chapter[data-grain="entry"] .ch-sub { padding-left: calc(1.6rem + 48px); } /* + the 28 px logo + its gap: under the name */
+  }
+  .chapter[data-grain="entry"][data-mode] .ch-head::before,
+  .chapter[data-grain="entry"][data-mode] .ch-head::after,
+  .chapter[data-grain="entry"][data-mode] .ch-sub::before { content: none; }
+  .chapter[data-grain="entry"]:is([data-mode="pinned"], [data-mode="flow"]) .ch-item::before {
+    content: "";
+    position: absolute;
+    inset: 2px -12px 2px -10px;
+    z-index: -1;
+    border-radius: 8px;
+    background: var(--chapter-tint);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity calc(var(--beat) * 2) var(--ease-entrance);
+  }
+  .chapter[data-grain="entry"]:is([data-mode="pinned"], [data-mode="flow"]) .ch-item::after {
+    content: "";
+    position: absolute;
+    left: -10px;
+    top: 8px; /* 6 px inside the tint's top and bottom */
+    bottom: 8px;
+    width: 2px;
+    border-radius: 1px;
+    background: var(--accent);
+    transform: scaleY(0);
+    transform-origin: bottom;
+    pointer-events: none;
+    transition: transform var(--beat) var(--ease-stop);
+  }
+  .chapter[data-grain="entry"]:is([data-mode="pinned"], [data-mode="flow"]) .ch-item[data-active]::before { opacity: 1; }
+  .chapter[data-grain="entry"]:is([data-mode="pinned"], [data-mode="flow"]) .ch-item[data-active]::after {
+    transform: scaleY(1);
+    transform-origin: top;
+    transition-duration: calc(var(--beat) * 2);
+  }
+
+  /* ---------------------------------------------------------------------------------------------------------
      Flow */
   @media (min-width: 1024px) {
     /* the dial sticks beside the list, in the pack corridor when there is one (--ch-dial-top, the director) */
@@ -488,7 +540,8 @@
     .chapter:is([data-mode="pinned"], [data-mode="flow"]) .ch-stage { position: static; height: auto; padding: 0; }
     .chapter:is([data-mode="pinned"], [data-mode="flow"]) .ch-dial { position: static; margin: 0; }
     .ch-rail-fill, .ch-rail-sticky { display: none !important; }
-    .chapter[data-mode] .ch-head::before, .chapter[data-mode] .ch-head::after, .chapter[data-mode] .ch-sub::before { display: none; }
+    .chapter[data-mode] .ch-head::before, .chapter[data-mode] .ch-head::after, .chapter[data-mode] .ch-sub::before,
+    .chapter[data-mode] .ch-item::before, .chapter[data-mode] .ch-item::after { display: none; }
   }
 }
 

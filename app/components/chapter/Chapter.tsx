@@ -17,6 +17,10 @@ import YearWheel from "./YearWheel";
 // data-pin-default marks a chapter in the pin set (OC-P: Experience yes, Education no), which is all the
 // first-paint CSS needs; the director decides the rest from the live window.
 //
+// When every entry is one beat (the owner's no-bullets call: Experience and Education), data-grain="entry" draws
+// ONE mark per entry — one tint around the head and its line, one full-height bar — as Augnition's facts panel
+// lights one row; a chapter with line beats (Projects, PR 2) keeps the head-plus-line marks.
+//
 // Screen readers get the content, not the theatre: one <ol> under <section aria-labelledby>, h2 → h3; the
 // visible "01" numerals are aria-hidden (an item is not announced twice); the rail, dots and readout are
 // aria-hidden and inert; there is no aria-current and no aria-live — data-active is presentational.
@@ -43,6 +47,8 @@ export default function Chapter({
   entries: readonly ChapterEntry[];
 }) {
   const pinDefault = PIN_CHAPTERS[id] === true;
+  // every entry one beat (Experience, Education): one mark per entry (app/chapter.css, data-grain="entry")
+  const entryGrain = layout.every((n) => n === 1);
   const style = { "--chapter-vh": chapterVh(layout) } as CSSProperties;
   return (
     <section
@@ -51,6 +57,7 @@ export default function Chapter({
       className="chapter"
       data-chapter={id}
       data-layout={layout.join(",")}
+      data-grain={entryGrain ? "entry" : undefined}
       data-pin-default={pinDefault ? "" : undefined}
       style={style}
     >
