@@ -332,10 +332,16 @@
     position: absolute;
     inset: -8px;
   }
+  /* A text link is findable without hovering (WCAG 1.4.1): a quiet underline in its own colour at 40 %, which the
+     accent takes over on hover. Experience marks its one link with the ↗ icon; Education's school, field and place
+     links sit mid-phrase ("Master of Science in Robotics …") and read as plain text without it. */
   .ch-text-link {
     position: relative;
     color: inherit;
-    text-decoration: none;
+    text-decoration-line: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+    text-decoration-color: color-mix(in oklab, currentColor 40%, transparent);
   }
   /* Stacked text links (a degree's field, then its date and location) sit ≈ 22 px apart, so 44 px is not
      possible without one link's box stealing the other's clicks. Each box reaches half-way to its neighbour
@@ -355,7 +361,7 @@
   /* a school's name in the head row has room above and to its line below (which, later in the tree, still wins
      where the two meet) */
   .ch-name .ch-text-link::after { inset: -11px -4px; z-index: 1; }
-  .ch-text-link:hover { color: var(--accent); }
+  .ch-text-link:hover { color: var(--accent); text-decoration-color: currentColor; }
 
   /* the entry's line(s): dates · location, the stack, a degree. In --legend, the site's measured token for small
      secondary text, not --muted: over the live canvases (the fluid's dye under the glass) muted lines measured
