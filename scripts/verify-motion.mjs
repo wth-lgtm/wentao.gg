@@ -34,6 +34,9 @@
 //   anchorsAtPin0           a hard load of /#experience lands at the section top, pin 0, the first entry marked;
 //                           a flow chapter (/#education) lands at its top with a mark, the CSS rail agreeing with the dots
 //   keepPlaceOnResize       1440×900 → 1440×700 → back, mid-Experience, mid-Education and below: ± 40 px
+//   markedAfterFlip         the MARKED entry after every flip is the one before: resizes across the pin gate (and 150 /
+//                           200 / 300 % zoom's CSS viewports), Reduce Motion round trips mid-Education (820×1180, 390×844),
+//                           phone rotation round trips at ten positions
 //   liveReduceToggle        emulateMedia reduce mid-Education: static, the shown row stays on the reading line
 //   hashLoadFailsBand       a hard load of /#education where Experience fails bandFits lands on Education
 //   liveResizes             drags across the pin/flow boundary; the place holds and layoutSane holds at each size
@@ -41,11 +44,16 @@
 //   liveReduceStopsCanvases rain still, field and card unmounted within 1 s of a live Reduce Motion toggle
 //   fluidInPin              the pinned stage's gaps hit-test to the fluid canvas
 //   glassBlurIntact         Metal: the pinned panel's backdrop stays blurred (Spike 0's hf metric vs raw and control)
-//   contrastRows            pixel contrast over the live canvases, inactive ≥ 4.5, active line ≥ 7, index and folio ≥ 4.5, tints ΔL* ≥ 3
+//   contrastRows            pixel contrast over the live canvases, inactive ≥ 4.5, active line ≥ 7, index and folio ≥ 4.5, tints ΔL* ≥ 3:
+//                           the box's p90 background AND the glyph mask's p10 (the strokes only); five fresh runs
+//                           where a jack sits under a list (CONTRAST_RUNS: contrastRowsRuns sums them)
 //   accentBudget            accent-derived paint only inside the active entry (none at all in the static still)
-//   titleClearOfPacks       the pinned title's box against the live jack bodies (window.__field), fresh page at rest
+//   titleClearOfPacks       every corridor-placed dial (pinned and flow): folio, rule, title and readout against the live
+//                           jack bodies (window.__field), fresh page at rest; flow at its section-top landing (inside the
+//                           corridor) and while held, and 200 px below (asserted only while still held)
 //   zeroRafMidChapter       at rest mid-chapter the chapter code runs 0 callbacks (rAF recorded, debug URL)
-//   rafPlain                rAF calls/exec per second at rest on a PLAIN URL: top, mid-Experience, mid-Education
+//   rafPlain                rAF calls/exec per second at rest on a PLAIN URL: top, mid-Experience, mid-Education;
+//                           asserted at 1440×900 Metal against Spike 0 (calls ≤ 121/s, exec ≤ 92/s mid-chapter)
 //   docHeight               docH = Spike 0's docH − the old chapters + the measured chapters ± 40; pinned = vh × svh
 //   restAtTopIdentical      the field at the top: passes 42, bodies 21, programs 3, no errors
 //   restAtTopPixels         SSIM ≥ 0.99 against Spike 0's f4b738f first screens (capture-top.mjs)
@@ -60,8 +68,9 @@
 //   framesMidChapter        CDP frames produced per second mid-chapter at rest (recorded)
 //   flowFillZeroJs          a flow scroll writes nothing to the rail; the fill's tip rides the reading line
 //   lcpInHero / contexts    the LCP element stays in the hero (never a chapter); WebGL contexts ≤ 3 desktop / 1 phone
-// contrastRows also runs at EXTRA's desktop windows: 1440x700 (both chapters flow) and 820x1180 / 1000x800 (the
-// one-column pinned stage over the jack field, fine pointer).
+// contrastRows also runs at EXTRA's desktop windows: 1440x700 (both chapters flow), 820x1180 / 1000x800 (the
+// one-column pinned stage over the jack field, fine pointer) and 1024x768 / 1100x800 (two columns, the 14-pack
+// under the numerals), at 1280x720 / 1366x768, and on two touch tablets.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -86,11 +95,17 @@ const MATRIX = [
 // the heavier checks run where the brief's screenshots and budgets are taken; the rest run everywhere
 const CORE = new Set(["1440x900", "390x844m"]);
 // beyond the owner's matrix: a desktop window too short to pin (both chapters flow), where contrastRows proves the
-// FLOW panels over the live canvases as well as the pinned one; and two fine-pointer desktop windows 700–1023 px
-// wide, where the pinned stage is one column, the panel spans the full width and the jack field's 14-pack sits
-// under its lower rows (the matrix's tablet sizes run as touch iPads, where the field is never mounted)
-const EXTRA = ["1440x700", "820x1180", "1000x800"];
-const CONTRAST = new Set([...CORE, ...EXTRA]);
+// FLOW panels over the live canvases as well as the pinned one; two fine-pointer desktop windows 700–1023 px wide,
+// where the pinned stage is one column, the panel spans the full width and the jack field's 14-pack sits under its
+// lower rows (the matrix's tablet sizes run as touch iPads, where the field is never mounted); and two two-column
+// windows below the matrix's 1280, where the 14-pack reaches under the panel's index numerals
+const EXTRA = ["1440x700", "820x1180", "1000x800", "1024x768", "1100x800"];
+// contrastRows runs at the core sizes, the extras, the matrix's two smallest desktops (the field under the numerals)
+// and two touch tablets (no field: the site's glass must pass there on its own) ...
+const CONTRAST = new Set([...CORE, ...EXTRA, "1280x720", "1366x768", "820x1180t", "1180x820t"]);
+// ... and FIVE times, each on a fresh page (the jacks' jam and the fluid differ run to run), wherever the scene's
+// solve puts a jack under a list (data-over-field): one run in five failing is a failure
+const CONTRAST_RUNS = { "820x1180": 5, "1000x800": 5, "1024x768": 5, "1100x800": 5, "1280x720": 5, "1366x768": 5 };
 
 const args = Object.fromEntries(process.argv.slice(2).map((a) => { const [k, ...v] = a.replace(/^--/, "").split("="); return [k, v.length ? v.join("=") : true]; }));
 const URL_ = (args.url ?? "http://127.0.0.1:3301/").replace(/\/?$/, "/");
@@ -184,6 +199,12 @@ async function openPage(vp, theme, { hash = "", reduce = REDUCE, extra = "", pla
   // --inactive-legend sets the pinned panel's inactive lines in --legend (light theme only)
   if (args["panel-fill"]) await page.addStyleTag({ content: `.chapter[data-mode="pinned"] .ch-panel { --glass-tint: color-mix(in oklab, var(--card) ${args["panel-fill"]}%, transparent) !important; }` });
   if (args["flow-fill"]) await page.addStyleTag({ content: `.chapter[data-mode="flow"] .ch-panel { --glass-tint: color-mix(in oklab, var(--card) ${args["flow-fill"]}%, transparent) !important; }` });
+  // --field-fill=dark:NN,light:MM overrides --chapter-field-tint (the panels over the jack field); "site" forces the
+  // site's glass there (what the pixel check measures without the raise)
+  if (args["field-fill"]) {
+    const v = Object.fromEntries(String(args["field-fill"]).split(",").map((kv) => kv.split(":")))[theme];
+    if (v) await page.addStyleTag({ content: v === "site" ? `.chapter[data-over-field] .ch-panel { --glass-tint: ${theme === "dark" ? "color-mix(in oklab, var(--card) 24%, transparent)" : "color-mix(in oklab, var(--card) 40%, transparent)"} !important; } .chapter[data-over-field][data-mode="flow"] .ch-panel { --glass-tint: var(--chapter-flow-tint) !important; }` : `.chapter[data-over-field] .ch-panel { --glass-tint: color-mix(in oklab, var(--card) ${v}%, transparent) !important; }` });
+  }
   if (args["inactive-legend"]) await page.addStyleTag({ content: args["inactive-legend"] === "all" ? `.chapter .ch-sub:not([data-active]) { color: var(--legend) !important; }` : `.light .chapter[data-mode="pinned"] .ch-sub:not([data-active]) { color: var(--legend) !important; }` });
   await page.waitForFunction(() => window.__chapters && window.__chapters.ready && window.__chapters.evaluations > 0, null, { timeout: 30000, polling: 100 });
   await page.evaluate(() => document.fonts.ready);
@@ -739,6 +760,60 @@ async function liveReduceToggle(vp, theme) {
   return report("liveReduceToggle", vp.spec, theme, ok, { before: a, afterRowTop: Math.round(b.rowTop), line: b.line, offLine: Math.round(b.rowTop - b.line), modes: L.map((c) => c.mode), marks });
 }
 
+/** the marked entries, as "chapter:item" */
+const markedNow = (page) => page.evaluate(() => [...document.querySelectorAll("[data-chapter] li[data-item][data-active]")].map((e) => `${e.closest("[data-chapter]").id}:${e.dataset.item}`).join(",") || "-");
+
+/** review round 3: after every mode flip the MARKED ENTRY is the one marked before it (the position checks allow
+ *  ± 40 px, which a flip to the previous entry passed). A resize across the pin gate (and the CSS viewports of 150 %,
+ *  200 % and 300 % zoom), a Reduce Motion round trip mid-Education, a phone rotation round trip at ten positions. */
+async function markedAfterFlip(vp, theme) {
+  const runs = [];
+  const leg = async (page, label, fn) => {
+    await fn(); await sleep(600); await settled(page);
+    const L = await list(page);
+    return { label, marked: await markedNow(page), statics: L.every((c) => c.mode === "static"), modes: L.map((c) => `${c.id}:${c.mode}`).join(" "), y: await page.evaluate(() => Math.round(scrollY)), chapters: L.map((c) => ({ id: c.id, shown: c.shown, target: c.target, engaged: c.engaged, owner: c.owner, near: c.subscribed })), corrections: await page.evaluate(() => window.__chapters.corrections.slice(-2)) };
+  };
+  const trip = async (spec, place, legs) => {
+    const v = parseVp(spec);
+    const { ctx, page } = await openPage(v, theme);
+    try {
+      await scrollTo(page, await place(page));
+      await settled(page);
+      await sleep(400); // the rest place
+      const before = await markedNow(page);
+      const after = [];
+      for (const [label, fn] of legs(page)) after.push(await leg(page, label, fn));
+      // a static leg (Reduce Motion on) marks nothing by design; every other leg marks the entry marked before
+      // (nothing marked before — the list's first row still below the line — stays nothing marked)
+      runs.push({ from: spec, before, after, same: after.every((a) => (a.statics ? a.marked === "-" : a.marked === before)) });
+    } finally { await ctx.close(); }
+  };
+  const pinAt = (id, f) => async (page) => { const g = await geoOf(page, id); return g.top + f * (g.height - g.stageH); };
+  const size = (page, w, h) => () => page.setViewportSize({ width: w, height: h });
+  if (vp.spec === "1440x900") {
+    // pinned → flow by a resize (and 150 % zoom's CSS viewport), and back
+    await trip("1440x900", pinAt("experience", 0.5), (p) => [["960x600", size(p, 960, 600)], ["1440x900", size(p, 1440, 900)]]);
+    await trip("1440x900", pinAt("experience", 0.5), (p) => [["1440x700", size(p, 1440, 700)], ["1440x900", size(p, 1440, 900)]]);
+    // 200 % at 1920 × 1080 and 300 % at 2560 × 1440
+    await trip("1920x1080", pinAt("experience", 0.5), (p) => [["960x540", size(p, 960, 540)], ["1920x1080", size(p, 1920, 1080)]]);
+    await trip("2560x1440", pinAt("experience", 0.5), (p) => [["853x480", size(p, 853, 480)], ["2560x1440", size(p, 2560, 1440)]]);
+    // a Reduce Motion round trip mid-Education with Experience pinned one-column above it (820 × 1180, fine pointer)
+    for (const beat of [0, 1]) await trip("820x1180", (p) => yForBeat(p, "education", beat), (p) => [["reduce", () => p.emulateMedia({ reducedMotion: "reduce" })], ["no-preference", () => p.emulateMedia({ reducedMotion: "no-preference" })]]);
+  } else if (vp.spec === "390x844m") {
+    for (const beat of [0, 1]) await trip("390x844m", (p) => yForBeat(p, "education", beat), (p) => [["reduce", () => p.emulateMedia({ reducedMotion: "reduce" })], ["no-preference", () => p.emulateMedia({ reducedMotion: "no-preference" })]]);
+    // rotation round trips, five positions through each chapter
+    for (const [a, r] of [[[390, 844], [844, 390]], [[430, 932], [932, 430]]]) {
+      for (const id of ["experience", "education"]) {
+        for (const f of [0.2, 0.35, 0.5, 0.65, 0.8]) {
+          await trip(`${a[0]}x${a[1]}m`, async (p) => { const g = await geoOf(p, id); return g.top + g.height * f - a[1] * 0.62; }, (p) => [[`${r[0]}x${r[1]}`, size(p, r[0], r[1])], [`${a[0]}x${a[1]}`, size(p, a[0], a[1])]]);
+        }
+      }
+    }
+  } else return;
+  const changed = runs.filter((r) => !r.same);
+  return report("markedAfterFlip", vp.spec, theme, changed.length === 0, { trips: runs.length, changed: changed.length, runs: changed.length ? changed : runs.slice(0, 6) });
+}
+
 /** E1: a hard load of /#education at a viewport where Experience passes PIN_QUERY but fails bandFits */
 async function hashLoadFailsBand(theme) {
   // one-column pinned windows (700–1023 wide) lose 88 px of band to the compact dial row: search for a height where
@@ -898,9 +973,10 @@ async function glassBlurIntact(page, vp, theme) {
 }
 
 /** pixel contrast of every row over the live canvases, at three pins (or three beats in flow) */
-async function contrastRows(page, vp, theme) {
+async function contrastRows(page, vp, theme, run = 1) {
   const L = await list(page);
   const worst = { inactive: Infinity, active: Infinity, index: Infinity, activeIndex: Infinity, folio: Infinity, tintDL: Infinity, headTintDL: Infinity };
+  const worstGlyph = { inactive: Infinity, active: Infinity, index: Infinity, activeIndex: Infinity, folio: Infinity };
   const byChapter = {};
   const fails = [];
   let rowsMeasured = 0;
@@ -931,12 +1007,19 @@ async function contrastRows(page, vp, theme) {
         }
         return out;
       }, c.id);
-      await page.evaluate(() => { const s = document.createElement("style"); s.id = "vm-tx"; s.textContent = "[data-chapter] .ch-panel *, [data-chapter] .ch-folio * { color: transparent !important; -webkit-text-fill-color: transparent !important; text-shadow: none !important; } [data-chapter] .ch-panel img { opacity: 0 !important; }"; document.head.appendChild(s); });
+      await page.evaluate(() => { const s = document.createElement("style"); s.id = "vm-tx"; s.textContent = "[data-chapter] .ch-panel *, [data-chapter] .ch-folio * { color: transparent !important; -webkit-text-fill-color: transparent !important; text-shadow: none !important; text-decoration-color: transparent !important; } [data-chapter] .ch-panel img { opacity: 0 !important; }"; document.head.appendChild(s); });
       await frames(page, 2);
       const f = path.join(OUT, `_contrast.png`);
       await page.screenshot({ path: f });
+      // the GLYPH MASK (review round 3): the same frame with the text keyed magenta, so the contrast is taken under
+      // the glyph strokes only (the 10th percentile of per-pixel contrast), beside the box's p90 background
+      await page.evaluate(() => { document.getElementById("vm-tx").textContent = "[data-chapter] .ch-panel *, [data-chapter] .ch-folio * { color: #ff00ff !important; -webkit-text-fill-color: #ff00ff !important; text-shadow: none !important; text-decoration-color: transparent !important; } [data-chapter] .ch-panel img { opacity: 0 !important; }"; });
+      await frames(page, 2);
+      const fm = path.join(OUT, `_contrast-mask.png`);
+      await page.screenshot({ path: fm });
       await page.evaluate(() => document.getElementById("vm-tx")?.remove());
       const img = await decode(f);
+      const mask = await decode(fm);
       for (const box of boxes) {
         const col = parse(box.color);
         const x0 = Math.max(0, Math.floor(box.rect.x * vp.dpr)), y0 = Math.max(0, Math.floor(box.rect.y * vp.dpr));
@@ -957,7 +1040,23 @@ async function contrastRows(page, vp, theme) {
         if (key) worst[key] = Math.min(worst[key], cr);
         if (key === "inactive") { const k = `${c.id}:${c.mode}`; byChapter[k] = Math.min(byChapter[k] ?? Infinity, +cr.toFixed(2)); }
         if ((box.kind === "active" || box.kind === "inactive" || box.kind === "index" || box.kind === "folio") && cr < need) fails.push({ chapter: c.id, beat: b, kind: box.kind, text: box.text, contrast: +cr.toFixed(2) });
+        // glyph mask: per-pixel contrast under the magenta-keyed strokes, its 10th percentile
+        const per = [];
+        for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+          const om = (y * mask.w + x) * mask.ch;
+          if (!(mask.px[om] > 180 && mask.px[om + 1] < 90 && mask.px[om + 2] > 180)) continue;
+          const o = (y * img.w + x) * img.ch;
+          const tY = lum(col.r * col.a + img.px[o] * (1 - col.a), col.g * col.a + img.px[o + 1] * (1 - col.a), col.b * col.a + img.px[o + 2] * (1 - col.a));
+          per.push(contrast(tY, lum(img.px[o], img.px[o + 1], img.px[o + 2])));
+        }
+        if (per.length >= 5 && key) {
+          per.sort((a, z) => a - z);
+          const g = per[Math.floor(per.length * 0.1)];
+          worstGlyph[key] = Math.min(worstGlyph[key], g);
+          if ((box.kind === "active" || box.kind === "inactive" || box.kind === "index" || box.kind === "folio") && g < need) fails.push({ chapter: c.id, beat: b, kind: box.kind, text: box.text, glyphP10: +g.toFixed(2) });
+        }
       }
+      fs.rmSync(fm, { force: true });
       // the tints' visibility: the SAME box (the active line; the active head row's right end, clear of the logo
       // and the link) with its tint on and off, text hidden, the rain's wrapper hidden for these two shots (its
       // glyph streaks would be noise between two moments; the fluid and the jacks stay live)
@@ -998,7 +1097,21 @@ async function contrastRows(page, vp, theme) {
   }
   const fmt = (v) => (Number.isFinite(v) ? +v.toFixed(2) : null);
   const ok = fails.length === 0 && (worst.tintDL === Infinity || worst.tintDL >= 3) && (worst.headTintDL === Infinity || worst.headTintDL >= 3);
-  return report("contrastRows", vp.spec, theme, ok, { rowsMeasured, worstInactive: fmt(worst.inactive), worstActiveLine: fmt(worst.active), worstIndex: fmt(worst.index), worstActiveIndex: fmt(worst.activeIndex), worstFolio: fmt(worst.folio), worstInactiveByChapter: byChapter, tintDeltaLstar: fmt(worst.tintDL), headTintDeltaLstar: fmt(worst.headTintDL), fails: fails.slice(0, 10) });
+  const overField = Object.fromEntries(L.map((c) => [c.id, { overField: c.overField ?? null, reach: c.fieldReach ?? null }]));
+  return report("contrastRows", vp.spec, theme, ok, { run, rowsMeasured, worstInactive: fmt(worst.inactive), worstActiveLine: fmt(worst.active), worstIndex: fmt(worst.index), worstActiveIndex: fmt(worst.activeIndex), worstFolio: fmt(worst.folio), glyphP10: Object.fromEntries(Object.entries(worstGlyph).map(([k, v]) => [k, fmt(v)])), worstInactiveByChapter: byChapter, tintDeltaLstar: fmt(worst.tintDL), headTintDeltaLstar: fmt(worst.headTintDL), overField, fails: fails.slice(0, 10) });
+}
+
+/** contrastRows on this page, then again on fresh pages up to CONTRAST_RUNS[spec] (default 1); one summary row */
+async function contrastRuns(page, vp, theme) {
+  const runs = Number(args["contrast-runs"] ?? CONTRAST_RUNS[vp.spec] ?? 1);
+  const rows = [await contrastRows(page, vp, theme, 1)];
+  for (let k = 2; k <= runs; k++) {
+    const { ctx, page: p } = await openPage(vp, theme);
+    try { rows.push(await contrastRows(p, vp, theme, k)); } finally { await ctx.close(); }
+  }
+  if (runs < 2) return rows[0];
+  const min = (f) => Math.min(...rows.map(f).filter((v) => v !== null && Number.isFinite(v)));
+  return report("contrastRowsRuns", vp.spec, theme, rows.every((r) => r.pass === true), { runs, passed: rows.filter((r) => r.pass === true).length, worstInactive: min((r) => r.worstInactive), worstIndex: min((r) => r.worstIndex), worstFolio: min((r) => r.worstFolio), glyphInactive: min((r) => r.glyphP10.inactive), glyphIndex: min((r) => r.glyphP10.index), glyphFolio: min((r) => r.glyphP10.folio), glyphActive: min((r) => r.glyphP10.active), overField: rows[0].overField });
 }
 
 async function accentBudget(page, vp, theme) {
@@ -1071,39 +1184,69 @@ async function titleClearOn(page, vp, theme) {
   await sleep(1500); // the field's gate and deferred birth (idle + 500 ms)
   const has = await page.evaluate(() => !!window.__field);
   const L = await list(page);
-  const c = L.find((x) => x.mode === "pinned");
-  if (!has || !c) return report("titleClearOfPacks", vp.spec, theme, null, { note: !has ? "no jack field at this viewport (the gate: ≥ 640 px, fine pointer)" : "no pinned chapter" });
+  // EVERY chapter whose dial the director placed in a corridor, pinned or flow (review round 3: Education's flow dial
+  // rested on the 7-pack at its section top from 1512 px up, and the check measured only the first pinned chapter)
+  const placed = await page.evaluate(() => [...document.querySelectorAll("[data-chapter]")].filter((el) => el.style.getPropertyValue("--ch-dial-top")).map((el) => el.id));
+  const chapters = L.filter((c) => placed.includes(c.id));
+  if (!has || chapters.length === 0) return report("titleClearOfPacks", vp.spec, theme, null, { note: !has ? "no jack field at this viewport (the gate: ≥ 640 px, fine pointer)" : "no dial placed in a corridor" });
   await page.waitForFunction(() => window.__field.entered, null, { timeout: 40000 });
   await page.evaluate(() => { const j = window.__field; while (j.entranceT < 12) j.step(1 / 60); });
   await page.waitForFunction(() => window.__field.idle, null, { timeout: 120000, polling: 250 });
-  const g = await geoOf(page, c.id);
   const rows = [];
   let worst = Infinity;
-  for (const pin of [0, 0.5, 1]) {
-    await scrollTo(page, g.top + pin * (g.height - g.stageH));
-    await frames(page, 3);
-    await page.evaluate(() => { const j = window.__field; for (let i = 0; i < 60; i++) j.step(1 / 60); });
-    const r = await page.evaluate((cid) => {
-      const t = document.querySelector(`#${cid} .ch-title-text`).getBoundingClientRect();
-      const wheel = document.querySelector(`#${cid} .ch-readout`).getBoundingClientRect();
-      const j = window.__field;
-      const TAN = Math.tan((12.5 * Math.PI) / 180);
-      const w = document.documentElement.clientWidth, h = document.documentElement.clientHeight;
-      let min = Infinity;
-      for (const b of j.bodies()) {
-        const ppu = h / 2 / ((j.camZ - b.z) * TAN);
-        const cx = w / 2 + b.x * ppu, cy = h / 2 - b.y * ppu, r = b.r * ppu;
-        for (const box of [t, wheel]) {
-          const dx = Math.max(box.left - cx, 0, cx - box.right), dy = Math.max(box.top - cy, 0, cy - box.bottom);
-          min = Math.min(min, Math.hypot(dx, dy) - r);
+  for (const c of chapters) {
+    const g = await geoOf(page, c.id);
+    const T = await page.evaluate((cid) => parseFloat(document.getElementById(cid).style.getPropertyValue("--ch-dial-top")), c.id);
+    // pinned: the stage docked, at pins 0, ½, 1. Flow: the section-top landing (INDEX, a hash, the cue), and the
+    // section top at T − 96 and half of it (the dial held at its slot while the list is read); 200 px below the
+    // section top the dial has left with its list (sticky lets it go once the panel's bottom passes the dial's), so
+    // that row is asserted only if the dial is still held there
+    const spots = c.mode === "pinned"
+      ? [0, 0.5, 1].map((pin) => ({ at: `pin ${pin}`, y: g.top + pin * (g.height - g.stageH), must: true }))
+      : [
+          { at: "section top", y: g.top, must: true, landing: true },
+          { at: "section top at T − 96", y: g.top - (T - 96), must: true },
+          { at: "section top at (T − 96) / 2", y: g.top - (T - 96) / 2, must: true },
+          { at: "200 px below the section top", y: g.top + 200, must: false },
+        ];
+    for (const sp of spots) {
+      await scrollTo(page, sp.y);
+      await frames(page, 3);
+      await page.evaluate(() => { const j = window.__field; for (let i = 0; i < 60; i++) j.step(1 / 60); });
+      const r = await page.evaluate((cid) => {
+        const el = document.getElementById(cid);
+        const parts = { folio: el.querySelector(".ch-folio > span:first-child"), rule: el.querySelector(".ch-folio-rule"), title: el.querySelector(".ch-title-text"), readout: el.querySelector(".ch-readout") };
+        const j = window.__field;
+        const TAN = Math.tan((12.5 * Math.PI) / 180);
+        const w = document.documentElement.clientWidth, h = document.documentElement.clientHeight;
+        const clear = {};
+        for (const [k, node] of Object.entries(parts)) {
+          if (!node || getComputedStyle(node).display === "none") continue;
+          const box = node.getBoundingClientRect();
+          if (box.height === 0 || box.bottom < 0 || box.top > h) continue;
+          let min = Infinity;
+          for (const b of j.bodies()) {
+            const ppu = h / 2 / ((j.camZ - b.z) * TAN);
+            const cx = w / 2 + b.x * ppu, cy = h / 2 - b.y * ppu, rr = b.r * ppu;
+            const dx = Math.max(box.left - cx, 0, cx - box.right), dy = Math.max(box.top - cy, 0, cy - box.bottom);
+            min = Math.min(min, Math.hypot(dx, dy) - rr);
+          }
+          clear[k] = +min.toFixed(1);
         }
-      }
-      return { title: [t.left, t.top, t.right, t.bottom].map(Math.round), minClearancePx: +min.toFixed(1), corridor: window.__chapters.list.find((x) => x.id === cid).corridor };
-    }, c.id);
-    worst = Math.min(worst, r.minClearancePx);
-    rows.push({ pin, ...r });
+        const dialTop = el.querySelector(".ch-dial").getBoundingClientRect().top;
+        return { dialTop: Math.round(dialTop), clear, corridor: window.__chapters.list.find((x) => x.id === cid).corridor };
+      }, c.id);
+      const held = c.mode === "pinned" || Math.abs(r.dialTop - T) <= 1.5;
+      const asserted = sp.must || held;
+      const least = Math.min(...Object.values(r.clear));
+      // the landing: the dial must also sit inside the corridor it was given (the cell's reservation reaches it)
+      const inCorridor = !sp.landing || (r.corridor && r.dialTop >= r.corridor.top - 1);
+      if (asserted) worst = Math.min(worst, least);
+      if (!inCorridor) worst = Math.min(worst, -1);
+      rows.push({ id: c.id, mode: c.mode, at: sp.at, dialTopVar: T, ...r, held, asserted, ...(sp.landing ? { inCorridor } : {}) });
+    }
   }
-  return report("titleClearOfPacks", vp.spec, theme, worst >= 0, { worstClearancePx: worst, rows });
+  return report("titleClearOfPacks", vp.spec, theme, worst >= 0, { worstClearancePx: Number.isFinite(worst) ? worst : null, rows });
 }
 
 /** on a FRESH page with the pointer never moved (the field and the rain at their own rest cadence): the chapter
@@ -1156,7 +1299,12 @@ async function rafPlain(vp, theme) {
     rows[name] = { rafCallsPerSec: +((b.raf - a.raf) / secs).toFixed(1), rafExecPerSec: +((b.exec - a.exec) / secs).toFixed(1) };
   }
   await ctx.close();
-  return report("rafPlain", vp.spec, theme, null, { rows, baseline: vp.spec === "1440x900" ? "Spike 0 f4b738f Metal 1440×900 plain URL, mid-page: 120.3 calls/s, 90.3 exec/s" : null });
+  // ASSERTED against Spike 0's base where one exists (1440 × 900 on the real GPU): a later per-frame callback at rest
+  // would pass the director's own zero-callback count and still cost frames. Calls ≤ 121/s everywhere (base 119.9–
+  // 120.7) and executed callbacks ≤ 92/s mid-chapter (base 90.3–90.4); the §6 targets (≤ 99 calls) are PR 4's.
+  const asserted = vp.spec === "1440x900" && ANGLE_NAME === "metal";
+  const ok = Object.values(rows).every((r) => r.rafCallsPerSec <= 121) && rows.midExperience.rafExecPerSec <= 92 && rows.midEducation.rafExecPerSec <= 92;
+  return report("rafPlain", vp.spec, theme, asserted ? ok : null, { rows, budget: asserted ? { callsPerSec: 121, execPerSecMidChapter: 92 } : null, baseline: vp.spec === "1440x900" ? "Spike 0 f4b738f Metal 1440×900 plain URL: top 119.9 calls/s, mid-page 120.3 calls/s and 90.3 exec/s" : null });
 }
 
 async function docHeight(page, vp, theme) {
@@ -1444,10 +1592,9 @@ async function hashLoadCls(vp, theme) {
     const live = r.shifts.filter((x) => !x.input);
     const cls = live.reduce((n, x) => n + x.v, 0);
     const dial = live.filter((x) => x.dial);
-    // Projects is not a chapter until PR 2: on a desktop its category grids still open from height 0 on hydration
-    // (framer's initial → animate, Projects.tsx), ≈ 0.19 at 1440 × 900 once the landing actually reaches
-    // /#projects (f4b738f never did: it ended at scrollY 0). PR 2 removes the collapsibles (OC-F); recorded here.
-    const asserted = !(hash === "#projects" && !vp.mobile);
+    // every load asserted, /#projects included: its category grids used to open from height 0 at hydration (≈ 0.19
+    // at 1440 × 900 once the landing reached /#projects); they render open from the server now (Projects.tsx)
+    const asserted = true;
     if ((asserted && cls > 0.01) || dial.length) ok = false;
     loads[hash] = { cls: +cls.toFixed(4), asserted, entries: live.length, worst: live.length ? { t: live.reduce((a, b) => (b.v > a.v ? b : a)).t, v: +Math.max(...live.map((x) => x.v)).toFixed(4) } : null, dialShifts: dial.length, dialTop: r.dialTop || null, modes: r.modes };
   }
@@ -1584,7 +1731,7 @@ for (const spec of VIEWPORTS) {
         if ((core || spec === "1280x720" || spec === "768x1024t" || spec === "844x390m") && (want("focusFollows") || want("tabLeavesChapter"))) await focusChecks(page, vp, theme);
         if ((CONTRAST.has(spec) || spec === "844x390m") && want("touchTargets")) await touchTargets(page, vp, theme);
         if (CONTRAST.has(spec) && want("flowFillZeroJs")) await flowFillZeroJs(page, vp, theme);
-        if (CONTRAST.has(spec) && want("contrastRows")) await contrastRows(page, vp, theme);
+        if (CONTRAST.has(spec) && want("contrastRows")) await contrastRuns(page, vp, theme);
         if (core && want("glassBlurIntact")) await glassBlurIntact(page, vp, theme);
       }
       if (errors.length) report("pageErrors", spec, theme, false, { errors });
@@ -1599,11 +1746,12 @@ for (const spec of VIEWPORTS) {
       if (want("liveResizes")) await liveResizes(vp, theme).catch((e) => report("harnessError", spec, theme, false, { check: "liveResizes", error: String(e).slice(0, 300) }));
       if (want("liveReduceStopsCanvases")) await liveReduceStopsCanvases(vp, theme).catch((e) => report("harnessError", spec, theme, false, { check: "liveReduceStopsCanvases", error: String(e).slice(0, 300) }));
       if (want("zeroRafMidChapter") && (CORE.has(spec) || spec === "1280x720" || spec === "768x1024t")) await zeroRafMidChapter(vp, theme).catch((e) => report("harnessError", spec, theme, false, { check: "zeroRafMidChapter", error: String(e).slice(0, 300) }));
-      if (want("titleClearOfPacks") && (spec === "1440x900" || spec === "1280x720" || spec === "1920x1080" || spec === "2560x1440")) await titleClearOfPacks(vp, theme).catch((e) => report("harnessError", spec, theme, false, { check: "titleClearOfPacks", error: String(e).slice(0, 300) }));
+      if (want("titleClearOfPacks") && ["1280x720", "1440x900", "1512x982", "1728x1117", "1920x1080", "2560x1440"].includes(spec)) await titleClearOfPacks(vp, theme).catch((e) => report("harnessError", spec, theme, false, { check: "titleClearOfPacks", error: String(e).slice(0, 300) }));
       if (want("rafPlain") && (spec === "1440x900" || spec === "390x844m")) await rafPlain(vp, theme).catch((e) => report("harnessError", spec, theme, false, { check: "rafPlain", error: String(e).slice(0, 300) }));
       if (want("restAtTopIdentical")) await restAtTopIdentical(vp, theme).catch((e) => report("harnessError", spec, theme, false, { check: "restAtTopIdentical", error: String(e).slice(0, 300) }));
       const guard = (name, fn) => (want(name) ? fn().catch((e) => report("harnessError", spec, theme, false, { check: name, error: String(e).slice(0, 300) })) : null);
       await guard("keepPlaceHeightOnly", () => keepPlaceHeightOnly(vp, theme));
+      await guard("markedAfterFlip", () => markedAfterFlip(vp, theme));
       await guard("resizeMidScroll", () => resizeMidScroll(vp, theme));
       await guard("printNeutral", () => printNeutral(vp, theme));
       if (theme === THEMES[0] && (vp.mobile || spec === "1440x900" || spec === "1280x720" || spec === "1920x1080")) await guard("hashLoadCls", () => hashLoadCls(vp, theme));
