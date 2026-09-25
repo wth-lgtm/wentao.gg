@@ -77,7 +77,8 @@
 //   lcpInHero / contexts    the LCP element stays in the hero (never a chapter); WebGL contexts ≤ 3 desktop / 1 phone
 // contrastRows also runs at EXTRA's desktop windows: 1440x700 (both chapters flow), 820x1180 / 1000x800 (the
 // one-column pinned stage over the jack field, fine pointer) and 1024x768 / 1100x800 (two columns, the 14-pack
-// under the numerals), at 1280x720 / 1366x768, and on two touch tablets.
+// under the numerals), at 1280x720 / 1366x768, at 1440x789 / 1470x832 / 1512x982 / 1728x1117 (the raised fill: a disc
+// short of the list, blurred) and 1920x1080 / 2560x1440 (the site's glass again), and on two touch tablets.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -109,10 +110,13 @@ const CORE = new Set(["1440x900", "390x844m"]);
 const EXTRA = ["1440x700", "820x1180", "1000x800", "1024x768", "1100x800"];
 // contrastRows runs at the core sizes, the extras, the matrix's two smallest desktops (the field under the numerals)
 // and two touch tablets (no field: the site's glass must pass there on its own) ...
-const CONTRAST = new Set([...CORE, ...EXTRA, "1280x720", "1366x768", "820x1180t", "1180x820t"]);
+// ... and at the desktops either side of FIELD_UNDER_PX (the raised fill down to 1728 × 1117, the site's glass from
+// 1920 × 1080: a disc short of the list still darkens it through the blur) ...
+const CONTRAST = new Set([...CORE, ...EXTRA, "1280x720", "1366x768", "1440x789", "1470x832", "1512x982", "1728x1117", "1920x1080", "2560x1440", "820x1180t", "1180x820t"]);
 // ... and FIVE times, each on a fresh page (the jacks' jam and the fluid differ run to run), wherever the scene's
-// solve puts a jack under a list (data-over-field): one run in five failing is a failure
-const CONTRAST_RUNS = { "820x1180": 5, "1000x800": 5, "1024x768": 5, "1100x800": 5, "1280x720": 5, "1366x768": 5 };
+// solve puts a jack under a list (data-over-field), at the reference 1440 × 900 and at the first size past the raise
+// (1920 × 1080): one run in five failing is a failure
+const CONTRAST_RUNS = { "820x1180": 5, "1000x800": 5, "1024x768": 5, "1100x800": 5, "1280x720": 5, "1366x768": 5, "1440x789": 5, "1440x900": 5, "1470x832": 5, "1512x982": 5, "1728x1117": 5, "1920x1080": 5 };
 
 const args = Object.fromEntries(process.argv.slice(2).map((a) => { const [k, ...v] = a.replace(/^--/, "").split("="); return [k, v.length ? v.join("=") : true]; }));
 const URL_ = (args.url ?? "http://127.0.0.1:3301/").replace(/\/?$/, "/");
@@ -222,6 +226,8 @@ async function openPage(vp, theme, { hash = "", reduce = REDUCE, extra = "", pla
     const v = Object.fromEntries(String(args["field-fill"]).split(",").map((kv) => kv.split(":")))[theme];
     if (v) await page.addStyleTag({ content: v === "site" ? `.chapter[data-over-field] .ch-panel { --glass-tint: ${theme === "dark" ? "color-mix(in oklab, var(--card) 24%, transparent)" : "color-mix(in oklab, var(--card) 40%, transparent)"} !important; } .chapter[data-over-field][data-mode="flow"] .ch-panel { --glass-tint: var(--chapter-flow-tint) !important; }` : `.chapter[data-over-field] .ch-panel { --glass-tint: color-mix(in oklab, var(--card) ${v}%, transparent) !important; }` });
   }
+  // tuning only: --css-file=PATH adds a stylesheet to every page (a candidate rule measured before it is written)
+  if (args["css-file"]) await page.addStyleTag({ content: fs.readFileSync(String(args["css-file"]), "utf8") });
   if (args["inactive-legend"]) await page.addStyleTag({ content: args["inactive-legend"] === "all" ? `.chapter .ch-sub:not([data-active]) { color: var(--legend) !important; }` : `.light .chapter[data-mode="pinned"] .ch-sub:not([data-active]) { color: var(--legend) !important; }` });
   await page.waitForFunction(() => window.__chapters && window.__chapters.ready && window.__chapters.evaluations > 0, null, { timeout: 30000, polling: 100 });
   await page.evaluate(() => document.fonts.ready);
@@ -1092,7 +1098,9 @@ async function contrastRows(page, vp, theme, run = 1) {
         for (const el of s.querySelectorAll(".ch-panel .ch-name, .ch-panel .ch-role, .ch-panel .ch-line, .ch-panel .ch-index, .ch-folio > span:first-child")) {
           if (el.querySelector(".ch-line")) continue; // a degree wrapper: its own lines are measured
           const r = el.getBoundingClientRect();
-          if (r.width < 2 || r.bottom < 0 || r.top > innerHeight) continue;
+          // text under the top clear band (STAGE_CLEAR.top, 96 px) sits under the fixed W. / INDEX marks and the
+          // progress bar, where nothing is read: the travelling line puts a flow list's folio there at some beats
+          if (r.width < 2 || r.top < 96 || r.top > innerHeight) continue;
           const cs = getComputedStyle(el);
           if (cs.visibility === "hidden") continue;
           const sub = el.closest("[data-sub]");

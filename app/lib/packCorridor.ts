@@ -83,12 +83,23 @@ export function packBoxes(input: Omit<CorridorInput, "x" | "clear">): Rect[] {
 // the field never mounts. So the ChapterDirector asks the scene's own solve: does a solved jack's own disc (the
 // body's radius, no drift pad) reach FIELD_UNDER_PX into the list's box — a pinned list where its stage docks, a
 // flow list anywhere in its column (it passes over the whole field) — and writes data-over-field; app/chapter.css
-// raises that panel's fill (--chapter-field-tint). The reach tracks the light theme's worst numeral on the site's
-// glass: 25 px at 1100 × 800 → 3.75, 17–18 px at 1024 × 768 and 1280 × 720 → 3.8–4.6, 10 px at 1366 × 768 →
-// 4.77 (raised: a thin margin), −4 px at 1440 × 789 → 5.17 and −18 px at 1440 × 900 → 6.37 (the site's glass).
+// raises that panel's fill (--chapter-field-tint).
+//
+// FIELD_UNDER_PX IS NEGATIVE: a disc that stops short of the list still darkens it. The panel's 16 px backdrop blur
+// spreads a jack's glossy black past the disc, and the drift and the pointer carry the bodies further. At the
+// reference 1440 × 900 (reach −18 px) the light theme's grey smudges behind the index column failed 3 runs of 6 on
+// the site's glass (a numeral 3.14, Education's "02" 4.39–4.44, a date line 4.39–4.43; box p90 4.48–4.81), and
+// 1470 × 832 (−25 px) measured 4.57–4.97. So reach alone does not predict contrast near 0. Measured, five fresh runs
+// each in the light theme on the site's glass: 1728 × 1117 (−83 px) still failed its numerals in 3 of 5 (3.90–4.16),
+// and 1920 × 1080 (−125 px) passed all five (numerals 6.48). So from −100 px the panel is raised: 1440 × 789 (−4),
+// 1440 × 900 (−18), 1470 × 832 (−25), 1512 × 982 (−34) and 1728 × 1117 (−83) take --chapter-field-tint, and
+// 1920 × 1080, 2560 × 1440 (−250) and any larger desktop keep the site's glass. The reach along the way: 25 px at
+// 1100 × 800, 17–18 px at 1024 × 768 and 1280 × 720, 10 px at 1366 × 768. verify-motion contrastRows holds every
+// one of these windows at five fresh runs in both themes (CONTRAST_RUNS).
 
-/** px: a solved jack disc reaching this far into a list's box puts the field under its text */
-export const FIELD_UNDER_PX = 1;
+/** px: a solved jack disc reaching this far into a list's box (negative: stopping this short of it) puts the field
+ *  under its text */
+export const FIELD_UNDER_PX = -100;
 
 /** px: how far the deepest disc reaches into `rect` (its radius less the centre's signed distance to the box; ≤ 0: clear) */
 export function discReach(discs: readonly Disc[], rect: Rect): number {
