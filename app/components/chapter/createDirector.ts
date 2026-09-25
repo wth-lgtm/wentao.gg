@@ -205,7 +205,7 @@ class ChapterRuntime {
   }
 
   box(): ChapterBox {
-    return { id: this.id, top: this.geom.pageTop, height: this.geom.height, mode: this.currentMode(), stageHeight: this.geom.stageH, beatTops: this.geom.beatTops, layout: this.layout };
+    return { id: this.id, top: this.geom.pageTop, height: this.geom.height, mode: this.currentMode(), stageHeight: this.geom.stageH, beatTops: this.geom.beatTops, layout: this.layout, listBottom: this.geom.listBottom };
   }
 
   setMode(mode: Mode): void {

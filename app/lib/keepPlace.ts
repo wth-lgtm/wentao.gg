@@ -41,6 +41,9 @@ export interface ChapterBox {
   /** page y of each beat's row */
   beatTops: readonly number[];
   layout: ChapterLayout;
+  /** page y of the list's last row's bottom: a flow list stays engaged (its last row marked) while this is below
+   *  STAGE_CLEAR.top, so a kept row keeps it there */
+  listBottom?: number;
 }
 
 export interface PlaceInput {
@@ -56,8 +59,9 @@ export interface PlaceInput {
 }
 
 export type Place =
-  /** `marked`: the beat is the one on screen (shown), not the row the reading line stands in with */
-  | { kind: "chapter"; id: string; beat: number; mode: ChapterMode; pin: number | null; rowOffset: number; marked: boolean }
+  /** `marked`: the beat is the one on screen (shown), not the row the reading line stands in with; `viewTop`: the
+   *  row's viewport top when the place was taken */
+  | { kind: "chapter"; id: string; beat: number; mode: ChapterMode; pin: number | null; rowOffset: number; marked: boolean; viewTop: number }
   | { kind: "element"; key: string; viewportTop: number }
   | { kind: "none" };
 
@@ -85,7 +89,7 @@ export function snapshotPlace(input: PlaceInput): Place {
   }
   if (c && beat >= 0) {
     const rowTop = (c.beatTops[beat] ?? c.top) - input.scrollY;
-    return { kind: "chapter", id: c.id, beat, mode: c.mode, pin: c.mode === "pinned" ? pinOf(c, input.scrollY) : null, rowOffset: rowTop - input.readingLine, marked };
+    return { kind: "chapter", id: c.id, beat, mode: c.mode, pin: c.mode === "pinned" ? pinOf(c, input.scrollY) : null, rowOffset: rowTop - input.readingLine, marked, viewTop: rowTop };
   }
   if (input.centre) return { kind: "element", key: input.centre.key, viewportTop: input.centre.pageTop - input.scrollY };
   return { kind: "none" };
@@ -118,7 +122,9 @@ export function correctPlace(place: Place, after: AfterInput): number | null {
     // across the line: the marked row (a row held by the reading line's hysteresis may sit up to 24 px below it),
     // a row at or above the line, or a pinned chapter's shown row
     const across = place.marked || place.rowOffset <= 0 || !same;
-    const view = landRow(line + (same ? place.rowOffset : 0), line, across, ch.beatTops[place.beat + 1], rowTop);
+    // and the list's bottom stays below the top clear band, so a flow list still marks the kept row
+    const keepOn = ch.listBottom === undefined ? -Infinity : STAGE_CLEAR.top + LAND_PX - (ch.listBottom - rowTop);
+    const view = landRow(line + (same ? place.rowOffset : 0), line, across, ch.beatTops[place.beat + 1], rowTop, same ? place.viewTop : undefined, keepOn);
     return Math.max(0, rowTop - view);
   }
   const top = after.pageTopOf(place.key);
@@ -131,12 +137,18 @@ export function correctPlace(place: Place, after: AfterInput): number | null {
  * LAND_PX below the line (a px offset larger than the entry's new height is clamped). A row that was
  * still below the line stays at least LAND_PX below it, so nothing lights that was not lit.
  */
-export function landRow(view: number, line: number, across: boolean, nextTop: number | undefined, rowTop: number): number {
+export function landRow(view: number, line: number, across: boolean, nextTop: number | undefined, rowTop: number, was?: number, keepOn = -Infinity): number {
   if (!across) return Math.max(view, line + LAND_PX);
   const hi = line - LAND_PX;
-  // and never above the top clear band (the W. / INDEX marks, STAGE_CLEAR.top): a phone reader with JST 408 px above
-  // a portrait line kept that offset against the landscape line (242 px) and JST landed at −166, its list gone
-  // under the band, nothing marked. The kept row is the one the reader was reading, so it stays in view.
-  const lo = Math.max(STAGE_CLEAR.top, nextTop === undefined ? -Infinity : line - (nextTop - rowTop) + LAND_PX);
+  // THE FLOOR. The kept row never lands higher than the reader had it. A phone reader with JST 408 px above a portrait
+  // line kept that offset against the landscape line (242 px), and JST landed at −166: its list had gone under the
+  // top clear band (the W. / INDEX marks, STAGE_CLEAR.top) and nothing was marked. So a row the reader had in view
+  // stays at or below the band. A row that was already above the band (`was`, its viewport top before the flip:
+  // Education's last row still marked while the list's bottom slides under the band, the reader already in
+  // Projects) is floored where it was, not pulled down to the band. Pulling it down moved Projects' heading 38 to
+  // 169 px on a window drag, a height-only resize or a rotation. `keepOn` keeps the list's bottom below the band,
+  // so the kept row is still marked. `was` is undefined when the row is new to normal flow (from pinned): the band.
+  const floor = was === undefined ? STAGE_CLEAR.top : Math.max(keepOn, Math.min(STAGE_CLEAR.top, was));
+  const lo = Math.max(floor, nextTop === undefined ? -Infinity : line - (nextTop - rowTop) + LAND_PX);
   return Math.min(hi, Math.max(view, Math.min(lo, hi)));
 }

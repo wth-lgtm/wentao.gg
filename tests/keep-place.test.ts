@@ -187,3 +187,31 @@ test("a rotation that would carry the kept row above the top clear band keeps it
   assert.ok(view >= STAGE_CLEAR.top - 0.5 && view <= 242 - LAND_PX + 0.5, `JST's top lands in view, across the line: ${view}`);
   assert.equal(markedAfter(land.beatTops, y, 242), 4);
 });
+
+// THE FLOOR IS WHERE THE READER HAD IT (final review): a flow list stays marked until its bottom slides under the top
+// clear band, so Education's last row is routinely marked with its top already off screen while the reader reads
+// Projects. A resize then must not pull that row down to the band (it moved Projects' heading 38–169 px).
+test("a resize with Education's last row marked above the top clear band keeps the reader where they were", () => {
+  // 1440 × 900 → 1440 × 860 (height only): the line 558 → 533. Education (flow) has UPenn at 2640, CMU at 2780 and its
+  // list's bottom at 2930; the reader has CMU's top at −10 (its list's bottom at 140, just under the band's 96)
+  const ed: ChapterBox = { ...edFlow, beatTops: [2640, 2780], listBottom: 2930 };
+  const scrollY = 2780 + 10;
+  const place = snapshotPlace({ scrollY, viewportH: 900, readingLine: 558, chapters: [exPinned, ed], shown: { experience: -1, education: 1 }, centre: null });
+  assert.equal(place.kind === "chapter" ? `${place.id}:${place.beat}` : place.kind, "education:1");
+  const y = correctPlace(place, { chapters: [exPinned, ed], pageTopOf: () => null, readingLine: 533 })!;
+  assert.equal(Math.round(y), scrollY, "nothing moves: the row stays at −10, not at the band's 96");
+  assert.equal(markedAfter(ed.beatTops, y, 533), 1, "CMU is still the row across the line");
+});
+
+test("a floored row keeps its list's bottom below the top clear band, so the list stays marked", () => {
+  // a rotation (390 × 844 → 844 × 390): the reader has CMU's top at −30 with the list's bottom at 110; landscape
+  // wraps CMU's lines into 100 px, so the same row top would leave the list's bottom at 70, under the band
+  const port: ChapterBox = { id: "education", top: 1500, height: 700, mode: "flow", stageHeight: 844, beatTops: [1640, 1880], layout: EDUCATION_LAYOUT, listBottom: 2020 };
+  const land: ChapterBox = { ...port, top: 1300, stageHeight: 390, beatTops: [1400, 1560], listBottom: 1660 };
+  const place = snapshotPlace({ scrollY: 1880 + 30, viewportH: 844, readingLine: 523, chapters: [port], shown: { education: 1 }, centre: null });
+  const y = correctPlace(place, { chapters: [land], pageTopOf: () => null, readingLine: 242 })!;
+  const bottom = land.listBottom! - Math.round(y);
+  assert.ok(bottom > STAGE_CLEAR.top, `the list's bottom lands at ${bottom}, below the band`);
+  assert.ok(bottom <= STAGE_CLEAR.top + LAND_PX + 1, `and no lower than it needs: ${bottom}`);
+  assert.equal(markedAfter(land.beatTops, y, 242), 1);
+});

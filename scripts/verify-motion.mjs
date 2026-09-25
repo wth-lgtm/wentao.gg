@@ -739,6 +739,35 @@ async function keepPlaceOnResize(vp, theme) {
     rows.push({ place: "below the chapters (Projects' heading)", at900: Math.round(a), at700: Math.round(b), back900: Math.round(c) });
     await ctx.close();
   }
+  // Education's last row still marked while its list's bottom slides under the top clear band, the reader already in
+  // Projects: a resize or a rotation keeps Projects' heading where it was (within the reading line's own shift + 8 px)
+  // and Education still marked. (The kept row was floored at the band and pulled the reader back 38–169 px.)
+  for (const k of [
+    { from: "1440x900", to: [1440, 860] },
+    { from: "1440x700", to: [1300, 700] },
+    { from: "390x844m", to: [844, 390] },
+  ]) {
+    for (const at of [110, 150, 200]) {
+      const { ctx, page } = await openPage(parseVp(k.from), theme);
+      const y = await page.evaluate((b) => { const li = [...document.querySelectorAll("#education li[data-item]")].pop(); return li.getBoundingClientRect().bottom + scrollY - b; }, at);
+      await scrollTo(page, y); await settled(page); await sleep(400);
+      const probe = () => page.evaluate(() => ({
+        h2: document.querySelector("#projects h2").getBoundingClientRect().top,
+        line: Math.round(0.62 * document.documentElement.clientHeight),
+        listBottom: Math.round([...document.querySelectorAll("#education li[data-item]")].pop().getBoundingClientRect().bottom),
+        education: window.__chapters.list.find((c) => c.id === "education").shown,
+      }));
+      const a = await probe();
+      await page.setViewportSize({ width: k.to[0], height: k.to[1] }); await sleep(600); await settled(page);
+      const b = await probe();
+      const moved = Math.round(b.h2 - a.h2);
+      const allowed = Math.abs(b.line - a.line) + 8;
+      const good = Math.abs(moved) <= allowed && (a.education < 0 || b.education === a.education);
+      if (!good) ok = false;
+      rows.push({ place: `Education's list bottom at ${at} px, ${k.from} → ${k.to.join("x")}`, projectsH2Moved: moved, allowed, educationShown: `${a.education} → ${b.education}`, listBottom: `${a.listBottom} → ${b.listBottom}`, good });
+      await ctx.close();
+    }
+  }
   return report("keepPlaceOnResize", vp.spec, theme, ok, { rows });
 }
 
