@@ -25,6 +25,11 @@ const nextConfig: NextConfig = {
       year: "numeric",
       timeZone: "America/Los_Angeles",
     }).format(build),
+    // Review builds (`NEXT_PUBLIC_REVIEW_FLAGS=1 npm run build`, the owner's :3300 review serve) read ?pin= and
+    // expose the reading chapters' ?chapterDebug surface. Always defined here, "" when unset, so the flag is
+    // inlined as a literal in every build: an undefined NEXT_PUBLIC_ variable is NOT inlined (it stays a runtime
+    // process.env read), and the minifier could not drop the review-only code from a production build.
+    NEXT_PUBLIC_REVIEW_FLAGS: process.env.NEXT_PUBLIC_REVIEW_FLAGS === "1" ? "1" : "",
   },
   // Next 16.3 defaults this on: `next dev` (app-info-log.js → generate-agent-files.js)
   // writes AGENTS.md — untracked and absent from .gitignore — plus an `@AGENTS.md`

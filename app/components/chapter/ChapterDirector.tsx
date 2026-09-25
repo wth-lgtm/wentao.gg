@@ -48,6 +48,8 @@ import { getFieldPacks, onFieldPacks } from "../../lib/fieldPresence";
 
 type Mode = ChapterMode;
 const FOLLOW_TAU_MS = BEAT_MS / 3; // the rail head closes a released gap in about one beat
+// Review builds only (NEXT_PUBLIC_REVIEW_FLAGS=1, inlined at build): ?pin= and the ?chapterDebug surface with its
+// callback counters. Every read of it is a build-time constant, so a production build compiles all of it out.
 const REVIEW = process.env.NEXT_PUBLIC_REVIEW_FLAGS === "1";
 
 interface Geometry {
@@ -242,7 +244,7 @@ class ChapterRuntime {
    * owner's target to its commit. `line` is the page's one reading line (the director's, viewport px).
    */
   gate(s: Readonly<ScrollState>, line: number): void {
-    this.stats.callbacks++;
+    if (REVIEW) this.stats.callbacks++;
     const g = this.geom;
     const vh = window.innerHeight;
     let target = -1;
@@ -286,7 +288,7 @@ class ChapterRuntime {
 
   /** RENDER phase: the pinned rail — transform and --pin-progress only, nothing written that did not change */
   private readonly render = () => {
-    this.stats.callbacks++;
+    if (REVIEW) this.stats.callbacks++;
     if (this.mode !== "pinned") return;
     const g = this.geom;
     if (!(g.railLen > 0)) return;
@@ -311,8 +313,7 @@ class ChapterRuntime {
 
   /** a committed step (inside the beat's timeout): attribute writes only */
   private onStep(next: number, prev: number): void {
-    this.stats.callbacks++;
-    this.stats.steps++;
+    if (REVIEW) { this.stats.callbacks++; this.stats.steps++; }
     const a = next >= 0 ? beatToActive(next, this.layout) : null;
     const p = prev >= 0 ? beatToActive(prev, this.layout) : null;
     if (p) {
@@ -391,7 +392,7 @@ function createDirector(): () => void {
   // ONE scroll subscription for the page, held only while some chapter is within a viewport of the screen
   let unsubscribe: (() => void) | null = null;
   let owner: ChapterRuntime | null = null;
-  // the director's own callbacks, for the harness's zero-at-rest count (?chapterDebug)
+  // the director's own callbacks, for the harness's zero-at-rest count (?chapterDebug; review builds only)
   const calls = { scrollFrame: 0, scrollEvent: 0, evaluate: 0, rest: 0, resize: 0, focus: 0, correction: 0 };
   const onNear = () => {
     const any = runtimes.some((rt) => rt.subscribed);
@@ -409,7 +410,7 @@ function createDirector(): () => void {
   // keeps them unless the other is nearer by more than HYSTERESIS_PX. A handover lands on one beat: the old
   // owner clears on the same boundary the new one docks on.
   const onScroll = (s: Readonly<ScrollState>) => {
-    calls.scrollFrame++;
+    if (REVIEW) calls.scrollFrame++;
     if (printing()) return; // print is not a window: nothing relights while the page is laid out for paper
     // the scroll this frame, against the geometry cached before any resize still to be evaluated: where a resize
     // that arrives mid-scroll finds the reader (placeFromCache)
@@ -463,7 +464,7 @@ function createDirector(): () => void {
   let lastH = window.innerHeight;
   let anchorRelease = 0;
   let resizePending = false;
-  const debug = new URLSearchParams(window.location.search).has("chapterDebug");
+  const debug = REVIEW && new URLSearchParams(window.location.search).has("chapterDebug");
   const corrections: unknown[] = [];
   let restTimer: ReturnType<typeof setTimeout> | undefined;
   let restPlace: { place: Place; el: Element | null } | null = null;
@@ -563,7 +564,7 @@ function createDirector(): () => void {
   // the place at the last scroll rest: what a resize restores (by the time a resize event runs, svh units and
   // every wrap have already moved, so the layout on screen can no longer say where the reader was)
   const captureRest = () => {
-    calls.rest++;
+    if (REVIEW) calls.rest++;
     restTimer = undefined;
     if (!ready || disposed || resizePending || indexOpen() || printing()) return;
     // not while a step is pending or held (a jump reads as a fling until the velocity zeroes): the place is the
@@ -574,7 +575,7 @@ function createDirector(): () => void {
     ownScrollY = null;
   };
   const onScrollEvent = () => {
-    calls.scrollEvent++;
+    if (REVIEW) calls.scrollEvent++;
     if (resizePending || printing()) return;
     // a scroll that lands where the director itself just scrolled is its own; any other is the reader's
     const own = ownScrollY !== null && Math.abs(window.scrollY - ownScrollY) < 2;
@@ -618,7 +619,7 @@ function createDirector(): () => void {
   };
 
   const evaluate = () => {
-    calls.evaluate++;
+    if (REVIEW) calls.evaluate++;
     if (disposed || !ready) return;
     if (printing()) { printDeferred = true; return; }
     if (indexOpen()) { pending = true; return; }
@@ -671,13 +672,13 @@ function createDirector(): () => void {
       correct();
       cancelAnimationFrame(anchorRelease);
       anchorRelease = requestAnimationFrame(() => {
-        calls.correction++;
+        if (REVIEW) calls.correction++;
         // a second look after the next layout (late images, fonts), then anchoring comes back and the rest place
         // is taken afresh from the corrected layout
         measureAll();
         correct();
         anchorRelease = requestAnimationFrame(() => {
-          calls.correction++;
+          if (REVIEW) calls.correction++;
           html.style.removeProperty("overflow-anchor");
           // the corrected place stands until the reader's next scroll (the marks re-dock on the next beat)
           if (held.place.kind !== "none" && !readerScrolled) { restPlace = held; restStale = false; }
@@ -715,7 +716,7 @@ function createDirector(): () => void {
   const request = () => { if (ready && !disposed) onFrame("read", evaluate); };
 
   const onResize = () => {
-    calls.resize++;
+    if (REVIEW) calls.resize++;
     if (printing()) return; // the paper's size is not the window's (checked again when printing ends)
     const w = window.innerWidth, h = window.innerHeight;
     // iOS toolbars: a height-only change under TOOLBAR_PX on a coarse pointer moves nothing
@@ -736,7 +737,7 @@ function createDirector(): () => void {
     if (!rt || (rt.mode !== "pinned" && rt.mode !== "flow")) return;
     let visible = false;
     try { visible = t.matches(":focus-visible"); } catch { visible = false; }
-    if (visible) onFrame("setup", () => { calls.focus++; rt.focusBeat(t, readingLine()); });
+    if (visible) onFrame("setup", () => { if (REVIEW) calls.focus++; rt.focusBeat(t, readingLine()); });
   };
 
   // the INDEX overlay sets body.style.overflow = "hidden" (Navigation.tsx): the classic scrollbar goes and

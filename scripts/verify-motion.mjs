@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// The reading chapters' verification harness (DESIGN.md §8 PR 1 "Acceptance", §9). Runs against a production
-// build served on :3301 (`npx next start -p 3301 -H 127.0.0.1`) in system Chrome through playwright-core, on the
+// The reading chapters' verification harness (DESIGN.md §8 PR 1 "Acceptance", §9). Runs against a REVIEW build
+// (`NEXT_PUBLIC_REVIEW_FLAGS=1 npm run build`: its window.__chapters / ?chapterDebug surface compiles out of a
+// production build) served on :3301 (`npx next start -p 3301 -H 127.0.0.1`) in system Chrome through playwright-core, on the
 // real GPU (--angle=metal, the default) or SwiftShader. Every named check prints its own numbers as one JSON line
 // ({check, viewport, theme, pass, ...numbers}), so every headline number in the PR body is backed by a check.
 //
@@ -1127,7 +1128,10 @@ function initialBytes() {
     raw += buf.length; gz += zlib.gzipSync(buf).length; files++;
   }
   const gzKB = +(gz / 1024).toFixed(1);
-  return report("initialBytes", "-", "-", gzKB <= 272, { files, rawKB: +(raw / 1024).toFixed(1), gzKB, budgetKB: 272, baseKB: 264 });
+  // the harness runs against a REVIEW build (its ?chapterDebug surface compiles out of production): say which this
+  // is, so the PR body reports the production number (`npm run build` without the flag) beside it
+  const review = fs.readdirSync(path.join(".next", "static", "chunks")).filter((f) => f.endsWith(".js")).some((f) => fs.readFileSync(path.join(".next", "static", "chunks", f), "utf8").includes("chapterDebug"));
+  return report("initialBytes", "-", "-", review ? null : gzKB <= 272, { build: review ? "review (NEXT_PUBLIC_REVIEW_FLAGS=1): recorded, the budget is asserted on a production build" : "production", files, rawKB: +(raw / 1024).toFixed(1), gzKB, budgetKB: 272, baseKB: 264 });
 }
 
 async function restAtTopPixels() {
