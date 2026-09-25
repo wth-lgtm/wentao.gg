@@ -648,6 +648,12 @@
      and with the marks it had on screen — every rule here neutralises them, in every mode, and !important beats
      the mode rules' specificity without restating each. */
   @media print {
+    /* paper is light whatever the screen's theme: a dark visitor's printout kept the dark tokens (company names
+       #e8e8e2, paler than the secondary lines) and the titles' dark halo smudged their light glyphs */
+    .chapter { --foreground: #0a0a0b; --legend: #52525b; --muted: #626c7a; --border: #dcdce0; }
+    .chapter .ch-title { text-shadow: none !important; }
+    .chapter .ch-item { break-inside: avoid; } /* an entry never splits across pages (UPenn's date line did) */
+    .chapter .ch-readout { display: block !important; } /* the static still's range, in every mode */
     .chapter[data-mode] { height: auto !important; padding: 48px 24px !important; }
     .chapter .ch-stage { position: static !important; height: auto !important; padding: 0 !important; }
     .chapter .ch-grid { height: auto !important; }

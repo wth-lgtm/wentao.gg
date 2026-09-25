@@ -68,9 +68,9 @@ test("the entries' <ol> keeps list semantics in WebKit (role=\"list\")", () => {
   assert.match(chapterTsx, /<ol className="ch-list" role="list">/);
 });
 
-test("print is the static still: the print block neutralises the marks in every mode", () => {
+test("print is the static still on light paper: light tokens, no halo, whole entries, the marks neutral in every mode", () => {
   const p = css.slice(css.indexOf("@media print {"));
-  for (const want of [".chapter .ch-sub { color: var(--legend) !important; }", ".chapter .ch-tick { background: var(--border) !important; }", ".chapter .yw-window { display: none !important; }", ".chapter .yw-range { display: inline !important; }", ".chapter .ch-item::before, .chapter .ch-item::after { display: none !important; }"]) {
+  for (const want of [".chapter { --foreground: #0a0a0b; --legend: #52525b; --muted: #626c7a; --border: #dcdce0; }", ".chapter .ch-title { text-shadow: none !important; }", ".chapter .ch-item { break-inside: avoid; }", ".chapter .ch-sub { color: var(--legend) !important; }", ".chapter .ch-tick { background: var(--border) !important; }", ".chapter .yw-window { display: none !important; }", ".chapter .yw-range { display: inline !important; }", ".chapter .ch-item::before, .chapter .ch-item::after { display: none !important; }"]) {
     assert.ok(p.includes(want), `print block lacks ${want}`);
   }
 });
