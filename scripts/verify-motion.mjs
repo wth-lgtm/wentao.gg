@@ -41,7 +41,7 @@
 //   liveReduceStopsCanvases rain still, field and card unmounted within 1 s of a live Reduce Motion toggle
 //   fluidInPin              the pinned stage's gaps hit-test to the fluid canvas
 //   glassBlurIntact         Metal: the pinned panel's backdrop stays blurred (Spike 0's hf metric vs raw and control)
-//   contrastRows            pixel contrast over the live canvases, inactive ≥ 4.5, active line ≥ 7, index ≥ 4.5, tints ΔL* ≥ 3
+//   contrastRows            pixel contrast over the live canvases, inactive ≥ 4.5, active line ≥ 7, index and folio ≥ 4.5, tints ΔL* ≥ 3
 //   accentBudget            accent-derived paint only inside the active entry (none at all in the static still)
 //   titleClearOfPacks       the pinned title's box against the live jack bodies (window.__field), fresh page at rest
 //   zeroRafMidChapter       at rest mid-chapter the chapter code runs 0 callbacks (rAF recorded, debug URL)
@@ -892,7 +892,7 @@ async function glassBlurIntact(page, vp, theme) {
 /** pixel contrast of every row over the live canvases, at three pins (or three beats in flow) */
 async function contrastRows(page, vp, theme) {
   const L = await list(page);
-  const worst = { inactive: Infinity, active: Infinity, index: Infinity, activeIndex: Infinity, tintDL: Infinity, headTintDL: Infinity };
+  const worst = { inactive: Infinity, active: Infinity, index: Infinity, activeIndex: Infinity, folio: Infinity, tintDL: Infinity, headTintDL: Infinity };
   const byChapter = {};
   const fails = [];
   let rowsMeasured = 0;
@@ -909,19 +909,21 @@ async function contrastRows(page, vp, theme) {
       const boxes = await page.evaluate((cid) => {
         const s = document.getElementById(cid);
         const out = [];
-        for (const el of s.querySelectorAll(".ch-panel .ch-name, .ch-panel .ch-role, .ch-panel .ch-line, .ch-panel .ch-stack, .ch-panel .ch-index")) {
+        for (const el of s.querySelectorAll(".ch-panel .ch-name, .ch-panel .ch-role, .ch-panel .ch-line, .ch-panel .ch-stack, .ch-panel .ch-index, .ch-folio > span:first-child")) {
           if (el.querySelector(".ch-line")) continue; // a degree wrapper: its own lines are measured
           const r = el.getBoundingClientRect();
           if (r.width < 2 || r.bottom < 0 || r.top > innerHeight) continue;
           const cs = getComputedStyle(el);
+          if (cs.visibility === "hidden") continue;
           const sub = el.closest("[data-sub]");
           const item = el.closest("[data-item]");
-          const kind = el.classList.contains("ch-index") ? "index" : sub ? (sub.hasAttribute("data-active") ? "active" : "inactive") : (item.hasAttribute("data-active") ? "activeHead" : "head");
-          out.push({ kind, color: cs.color, rect: { x: r.left, y: r.top, w: r.width, h: r.height }, text: el.textContent.trim().slice(0, 24), activeItem: item.hasAttribute("data-active") });
+          // the chapter's folio numeral ("02") sits in the dial over the live canvases, not on the panel
+          const kind = !item ? "folio" : el.classList.contains("ch-index") ? "index" : sub ? (sub.hasAttribute("data-active") ? "active" : "inactive") : (item.hasAttribute("data-active") ? "activeHead" : "head");
+          out.push({ kind, color: cs.color, rect: { x: r.left, y: r.top, w: r.width, h: r.height }, text: el.textContent.trim().slice(0, 24), activeItem: !!item && item.hasAttribute("data-active") });
         }
         return out;
       }, c.id);
-      await page.evaluate(() => { const s = document.createElement("style"); s.id = "vm-tx"; s.textContent = "[data-chapter] .ch-panel * { color: transparent !important; -webkit-text-fill-color: transparent !important; } [data-chapter] .ch-panel img { opacity: 0 !important; }"; document.head.appendChild(s); });
+      await page.evaluate(() => { const s = document.createElement("style"); s.id = "vm-tx"; s.textContent = "[data-chapter] .ch-panel *, [data-chapter] .ch-folio * { color: transparent !important; -webkit-text-fill-color: transparent !important; text-shadow: none !important; } [data-chapter] .ch-panel img { opacity: 0 !important; }"; document.head.appendChild(s); });
       await frames(page, 2);
       const f = path.join(OUT, `_contrast.png`);
       await page.screenshot({ path: f });
@@ -943,10 +945,10 @@ async function contrastRows(page, vp, theme) {
         const cr = contrast(textY, bgY);
         rowsMeasured++;
         const need = box.kind === "active" ? 7 : 4.5;
-        const key = box.kind === "active" ? "active" : box.kind === "index" ? (box.activeItem ? "activeIndex" : "index") : box.kind === "inactive" ? "inactive" : null;
+        const key = box.kind === "active" ? "active" : box.kind === "index" ? (box.activeItem ? "activeIndex" : "index") : box.kind === "inactive" ? "inactive" : box.kind === "folio" ? "folio" : null;
         if (key) worst[key] = Math.min(worst[key], cr);
         if (key === "inactive") { const k = `${c.id}:${c.mode}`; byChapter[k] = Math.min(byChapter[k] ?? Infinity, +cr.toFixed(2)); }
-        if ((box.kind === "active" || box.kind === "inactive" || box.kind === "index") && cr < need) fails.push({ chapter: c.id, beat: b, kind: box.kind, text: box.text, contrast: +cr.toFixed(2) });
+        if ((box.kind === "active" || box.kind === "inactive" || box.kind === "index" || box.kind === "folio") && cr < need) fails.push({ chapter: c.id, beat: b, kind: box.kind, text: box.text, contrast: +cr.toFixed(2) });
       }
       // the tints' visibility: the SAME box (the active line; the active head row's right end, clear of the logo
       // and the link) with its tint on and off, text hidden, the rain's wrapper hidden for these two shots (its
@@ -988,7 +990,7 @@ async function contrastRows(page, vp, theme) {
   }
   const fmt = (v) => (Number.isFinite(v) ? +v.toFixed(2) : null);
   const ok = fails.length === 0 && (worst.tintDL === Infinity || worst.tintDL >= 3) && (worst.headTintDL === Infinity || worst.headTintDL >= 3);
-  return report("contrastRows", vp.spec, theme, ok, { rowsMeasured, worstInactive: fmt(worst.inactive), worstActiveLine: fmt(worst.active), worstIndex: fmt(worst.index), worstActiveIndex: fmt(worst.activeIndex), worstInactiveByChapter: byChapter, tintDeltaLstar: fmt(worst.tintDL), headTintDeltaLstar: fmt(worst.headTintDL), fails: fails.slice(0, 10) });
+  return report("contrastRows", vp.spec, theme, ok, { rowsMeasured, worstInactive: fmt(worst.inactive), worstActiveLine: fmt(worst.active), worstIndex: fmt(worst.index), worstActiveIndex: fmt(worst.activeIndex), worstFolio: fmt(worst.folio), worstInactiveByChapter: byChapter, tintDeltaLstar: fmt(worst.tintDL), headTintDeltaLstar: fmt(worst.headTintDL), fails: fails.slice(0, 10) });
 }
 
 async function accentBudget(page, vp, theme) {

@@ -74,7 +74,9 @@
     font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
     font-size: 0.75rem;
     letter-spacing: 0.25em;
-    color: var(--muted);
+    /* --legend, as the in-panel numerals: the folio stays in the pinned or sticky dial for the whole chapter, and
+       the muted 12 px numeral measured 4.17–4.42:1 over the light theme's rain and jacks */
+    color: var(--legend);
   }
   .ch-folio-rule {
     display: block;
