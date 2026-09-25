@@ -347,6 +347,11 @@
      links sit mid-phrase ("Master of Science in Robotics …") and read as plain text without it. */
   .ch-text-link {
     position: relative;
+    /* 3 px of room each side for the inset focus ring (the rule at the bottom), taken back by the margin so no line
+       moves: the ring cut through the first and last glyphs ("U…a" of "University of Pennsylvania", "P…A" of
+       "Philadelphia, PA") in both themes */
+    padding-inline: 3px;
+    margin-inline: -3px;
     color: inherit;
     text-decoration-line: underline;
     text-decoration-thickness: 1px;
@@ -702,7 +707,8 @@
 
 /* Unlayered on purpose: the globals' `*:focus-visible` ring (outline-offset 2px) is unlayered, so it beats any
    layered rule. .glass clips (overflow), and a ring 2 px outside a link at the panel's edge was never painted
-   (Experience.tsx's old card, E18): inside the panel every ring is drawn inset. */
+   (Experience.tsx's old card, E18): inside the panel every ring is drawn inset — the ↗ icon links within their
+   28 px box, the text links within the 3 px of inline padding they carry for it (above), clear of their glyphs. */
 .ch-panel a:focus-visible {
   outline-offset: -2px;
   border-radius: 6px;
