@@ -43,8 +43,8 @@ import { getFieldPacks, onFieldPacks } from "../../lib/fieldPresence";
 //   timeout: attribute writes only, no layout read. The pinned rail's fill (transform only) and --pin-progress
 //   are written in the render phase, the head clamped to the next uncommitted row. At rest nothing is pending.
 //
-//   TITLES in the corridor between the jack packs (packCorridor.ts, O3), and keyboard focus inside a pinned
-//   chapter scrolled to its row's beat in the next frame (E10).
+//   TITLES in the corridor between the jack packs (packCorridor.ts, O3), and keyboard focus inside a chapter
+//   scrolled so its row is the marked one in the next frame (E10): pinned, to its beat; flow, onto the reading line.
 
 type Mode = ChapterMode;
 const FOLLOW_TAU_MS = BEAT_MS / 3; // the rail head closes a released gap in about one beat
@@ -327,17 +327,29 @@ class ChapterRuntime {
     }
   }
 
-  /** a keyboard focus inside a pinned chapter: scroll to that row's beat (SETUP phase, after the browser's own focus scroll) */
-  focusBeat(target: HTMLElement): void {
-    if (this.mode !== "pinned") return;
+  /**
+   * A keyboard focus inside the chapter (SETUP phase, after the browser's own focus scroll): scroll so the focused
+   * row is the one marked — pinned, to the middle of its beat's slot; flow, its row just past the reading line
+   * (`line`), so the entry that lights is the one the focus ring is in. Smooth within three beats, instant beyond.
+   */
+  focusBeat(target: HTMLElement, line: number): void {
+    if (this.mode !== "pinned" && this.mode !== "flow") return;
     const sub = target.closest<HTMLElement>("[data-beat]");
     const item = target.closest<HTMLElement>("[data-item]");
     const beat = sub ? Number(sub.dataset.beat) : item ? beatOf(Number(item.dataset.item), 0, this.layout) : -1;
     if (beat < 0 || beat === this.commit.shown) return;
     const g = this.geom;
-    const y = Math.round(g.pageTop + pinAtBeat(beat, this.layout) * Math.max(0, g.height - g.stageH));
+    let y: number;
+    if (this.mode === "pinned") {
+      y = g.pageTop + pinAtBeat(beat, this.layout) * Math.max(0, g.height - g.stageH);
+    } else {
+      const top = g.beatTops[beat];
+      if (top === undefined) return;
+      const maxY = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+      y = Math.min(maxY, Math.max(0, top - line + 12));
+    }
     const far = this.commit.shown < 0 || Math.abs(beat - this.commit.shown) > 3;
-    window.scrollTo({ top: y, behavior: far ? "instant" : "smooth" });
+    window.scrollTo({ top: Math.round(y), behavior: far ? "instant" : "smooth" });
   }
 
   dispose(): void {
@@ -678,15 +690,17 @@ function createDirector(): () => void {
     request();
   };
 
-  // keyboard focus in a pinned chapter: next frame's setup phase, after the browser's own scroll-into-view
+  // keyboard focus in a pinned or flow chapter: next frame's setup phase, after the browser's own scroll-into-view,
+  // so the lit entry is the one the focus ring is in (in flow the reading line alone once lit whichever row the
+  // browser's focus scroll happened to park there). Mouse focus never scrolls.
   const onFocusIn = (e: FocusEvent) => {
     const t = e.target;
     if (!(t instanceof HTMLElement)) return;
     const rt = runtimes.find((r) => r.el.contains(t));
-    if (!rt || rt.mode !== "pinned") return;
+    if (!rt || (rt.mode !== "pinned" && rt.mode !== "flow")) return;
     let visible = false;
     try { visible = t.matches(":focus-visible"); } catch { visible = false; }
-    if (visible) onFrame("setup", () => rt.focusBeat(t));
+    if (visible) onFrame("setup", () => rt.focusBeat(t, readingLine()));
   };
 
   // the INDEX overlay sets body.style.overflow = "hidden" (Navigation.tsx): the classic scrollbar goes and
