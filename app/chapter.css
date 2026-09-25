@@ -68,7 +68,7 @@
     gap: 12px;
     margin: 0 0 12px;
     font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
-    font-size: 12px;
+    font-size: 0.75rem;
     letter-spacing: 0.25em;
     color: var(--muted);
   }
@@ -132,7 +132,7 @@
     padding: 20px 18px 20px 16px;
   }
   @media (min-width: 640px) {
-    .ch-panel { padding: 24px 24px 24px 24px; }
+    .ch-panel { padding: clamp(24px, 1.25vw, 32px); } /* 24 px up to a 1920 px window, 32 px at 2560 */
   }
 
   .ch-body {
@@ -192,10 +192,15 @@
     background: var(--border);
   }
 
-  /* An entry: its dot on the rail, its head row, its line(s). */
+  /* An entry: its dot on the rail, its head row, its line(s).
+     THE LIST'S TYPE is in rem, so a visitor's larger default font size reaches it (the base's rem utilities did;
+     bandFits re-measures and flows a list that no longer fits), and it grows with the window, capped: every size
+     below holds its old value up to a ≈ 1,620 px window and reaches its cap near 1,900–2,000 px, so a 2560 × 1440
+     screen gets a panel that fills more of its stage instead of an island of 13 px text. Row spacing follows the
+     window's height the same way (unchanged at ≤ 909 px tall). */
   .ch-item {
     position: relative;
-    padding-block: 10px;
+    padding-block: clamp(10px, 1.1svh, 18px);
   }
   .ch-head {
     position: relative;
@@ -219,7 +224,7 @@
     flex: none;
     width: 1.6rem;
     font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
-    font-size: 12px;
+    font-size: clamp(0.75rem, 0.74vw, 0.875rem);
     letter-spacing: 0.08em;
     font-variant-numeric: tabular-nums;
     line-height: 28px; /* centred on the logo's 28 px */
@@ -248,12 +253,12 @@
   }
   .ch-name {
     margin: 0;
-    font-size: 17px;
+    font-size: clamp(1.0625rem, 1.05vw, 1.3125rem);
     color: var(--foreground);
     overflow-wrap: anywhere;
   }
   .ch-role {
-    font-size: 15px;
+    font-size: clamp(0.9375rem, 0.925vw, 1.125rem);
     color: var(--foreground); /* was the accent (OC-F): the accent is spent once per viewport */
   }
   .ch-link {
@@ -308,16 +313,16 @@
   }
   .ch-line {
     display: block;
-    font-size: 13px;
+    font-size: clamp(0.8125rem, 0.8vw, 0.9375rem);
     line-height: 1.5;
   }
   .ch-line + .ch-line { margin-top: 2px; }
-  .ch-line-strong { color: var(--foreground); font-size: 14px; font-weight: 500; }
+  .ch-line-strong { color: var(--foreground); font-size: clamp(0.875rem, 0.86vw, 1rem); font-weight: 500; }
   .ch-stack {
     display: block;
     margin-top: 3px;
     font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
-    font-size: 12px;
+    font-size: clamp(0.75rem, 0.74vw, 0.875rem);
     line-height: 1.5;
     letter-spacing: 0;
     overflow-wrap: anywhere; /* wraps, never truncated (O12) */
