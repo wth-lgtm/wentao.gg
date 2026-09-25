@@ -70,6 +70,11 @@ export default function JackField() {
     let cancelled = false;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     let idleId: number | undefined;
+    // The gate has passed: publish the composition the field will be born with NOW, before the deferred birth
+    // (idle + 500 ms), so the reading chapters' titles are placed in the corridor between the packs at their
+    // first placement — on a hard load of /#experience the title used to drop ≈ 234 px 0.7 s after load, a
+    // layout shift. Withdrawn if the gate closes before (or after) the birth.
+    publishFieldPacks(fieldPacks(window.innerWidth, window.innerHeight, packVariantFromSearch(window.location.search)));
     const init = () => {
       if (cancelled) return;
       setPacks(fieldPacks(window.innerWidth, window.innerHeight, packVariantFromSearch(window.location.search)));
@@ -84,6 +89,7 @@ export default function JackField() {
       cancelled = true;
       if (idleId !== undefined) window.cancelIdleCallback(idleId);
       clearTimeout(timeoutId);
+      publishFieldPacks(null);
     };
   }, [reduced]);
 
@@ -115,10 +121,11 @@ export default function JackField() {
     };
   }, [born, rig]);
 
-  // The composition, for the reading chapters' title corridor (fieldPresence.ts → the ChapterDirector): the
-  // packs while the scene is mounted, null otherwise. Publishes only; changes nothing here.
+  // The composition, for the reading chapters' title corridor (fieldPresence.ts → the ChapterDirector): published
+  // at the gate (above), confirmed at the birth (the same composition unless the window changed in between), and
+  // withdrawn when the gate closes or the scene unmounts. Publishes only; changes nothing here.
   useEffect(() => {
-    publishFieldPacks(born && !reduced ? packs : null);
+    if (born && !reduced) publishFieldPacks(packs);
   }, [born, reduced, packs]);
   useEffect(() => () => publishFieldPacks(null), []);
 
