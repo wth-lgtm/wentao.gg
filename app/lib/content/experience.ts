@@ -1,6 +1,7 @@
 // 02 Experience, as data (moved out of Experience.tsx, every string byte-identical to f4b738f;
 // tests/content.test.ts holds them). The site lists each role as its company, its job title, its dates and its
-// location, plus the role's stack line where the data has one. No detailed bullets: the owner, 2026-09-24 —
+// location, and nothing else: `technologies` stays here as data (the resume's stack line), but Experience.tsx
+// does not render it. No detailed bullets: the owner, 2026-09-24 —
 // "for the bullet points we can keep them empty for now. We just need to list the individual experiences and
 // job titles because the detailed bullet points are going to be reflected on my actual PDF resume, not on
 // here." The one description line the old card carried (Mercor's) is gone with the rest; it stays in git

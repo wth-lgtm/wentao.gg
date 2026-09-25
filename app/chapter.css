@@ -386,7 +386,7 @@
      the viewport's top edge, under the 74 px marks band, its ring touching the progress bar. */
   .chapter a { scroll-margin-block: 96px 40px; }
 
-  /* the entry's line(s): dates · location, the stack, a degree. In --legend, the site's measured token for small
+  /* the entry's line(s): dates · location, a degree. In --legend, the site's measured token for small
      secondary text, not --muted: over the live canvases (the fluid's dye under the glass) muted lines measured
      3.4:1 dark and 3.8:1 light in a flow panel, and needed a 90 % light fill pinned; legend lines pass on the
      site's own glass (OC-T, globals.css). Still additive: the active line flips to --foreground on its tint. */
@@ -414,15 +414,6 @@
   /* a date, a place: never split (the line breaks at its " · ", which carries a no-break space before the dot) */
   .ch-nowrap { white-space: nowrap; }
   .ch-line-strong { color: var(--foreground); font-size: clamp(0.875rem, 0.86vw, 1rem); font-weight: 500; }
-  .ch-stack {
-    display: block;
-    margin-top: 3px;
-    font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
-    font-size: clamp(0.75rem, 0.74vw, 0.875rem);
-    line-height: 1.5;
-    letter-spacing: 0;
-    overflow-wrap: anywhere; /* wraps, never truncated (O12) */
-  }
   .ch-degree + .ch-degree { margin-top: 8px; }
 
   /* ---------------------------------------------------------------------------------------------------------

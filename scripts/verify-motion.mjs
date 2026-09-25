@@ -316,7 +316,7 @@ async function layoutSane(page, vp, theme, label = "layoutSane") {
         // clipped text: the painted glyphs (a Range over the text, not the box — hit areas overhang on purpose)
         // must lie inside the panel (list text) or the viewport (the title), and nothing may sit in an
         // overflow-hidden box narrower than its text
-        for (const el of s.querySelectorAll(".ch-name, .ch-role, .ch-line, .ch-stack, .ch-index, .ch-title-text")) {
+        for (const el of s.querySelectorAll(".ch-name, .ch-role, .ch-line, .ch-index, .ch-title-text")) {
           const range = document.createRange();
           range.selectNodeContents(el);
           const r = range.getBoundingClientRect();
@@ -993,7 +993,7 @@ async function contrastRows(page, vp, theme, run = 1) {
       const boxes = await page.evaluate((cid) => {
         const s = document.getElementById(cid);
         const out = [];
-        for (const el of s.querySelectorAll(".ch-panel .ch-name, .ch-panel .ch-role, .ch-panel .ch-line, .ch-panel .ch-stack, .ch-panel .ch-index, .ch-folio > span:first-child")) {
+        for (const el of s.querySelectorAll(".ch-panel .ch-name, .ch-panel .ch-role, .ch-panel .ch-line, .ch-panel .ch-index, .ch-folio > span:first-child")) {
           if (el.querySelector(".ch-line")) continue; // a degree wrapper: its own lines are measured
           const r = el.getBoundingClientRect();
           if (r.width < 2 || r.bottom < 0 || r.top > innerHeight) continue;

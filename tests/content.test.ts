@@ -53,6 +53,13 @@ test("no detailed bullets (owner, 2026-09-24): no role carries a description, no
   }
 });
 
+test("an Experience entry is its company, job title, dates and location (owner decision #2): the stack stays data, never rendered", () => {
+  const src = fs.readFileSync(path.join(import.meta.dirname, "..", "app/components/Experience.tsx"), "utf8");
+  assert.ok(!/role\.technologies/.test(src), "Experience.tsx renders role.technologies");
+  assert.ok(!src.includes("ch-stack"), "Experience.tsx renders a stack line");
+  for (const k of ["role.company", "role.title", "role.period", "role.location"]) assert.ok(src.includes(k), `Experience.tsx no longer renders ${k}`);
+});
+
 test("layouts are derived from the data: one beat per entry (5 roles, 2 schools); the pinned chapter heights follow", () => {
   assert.deepEqual([...EXPERIENCE_LAYOUT], [1, 1, 1, 1, 1]);
   assert.deepEqual([...EDUCATION_LAYOUT], [1, 1]);

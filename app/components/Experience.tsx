@@ -5,8 +5,10 @@ import { EXPERIENCE, EXPERIENCE_LAYOUT } from "../lib/content/experience";
 import { yearsFor } from "../lib/yearWheel";
 
 // 02 Experience — a reading chapter (DESIGN §4.3), pinned by default (OC-P). Each role is one entry and one
-// beat: its head row (numeral, logo, company, job title, the company link) and its line (dates · location, then
-// the stack where the data has one). The collapsible cards, their chevrons and the ±60 px scroll zigzag are gone
+// beat: its head row (numeral, logo, company, job title, the company link) and its line (dates · location). That is
+// the whole entry (owner decision #2: "we just need to list the individual experiences and job titles"): the
+// stack line is not rendered either — it stays in the data (content/experience.ts) and in git history, and the PDF
+// resume carries it. The collapsible cards, their chevrons and the ±60 px scroll zigzag are gone
 // (OC-F; the zigzag was the last template motion on the site); the job title moves from the accent to the
 // foreground, because inside a chapter the accent belongs to the active entry alone. A server component: the
 // list is complete HTML before any JavaScript, and the page's ChapterDirector lights it.
@@ -40,17 +42,14 @@ const entries: ChapterEntry[] = EXPERIENCE.map((role) => ({
       )}
     </>
   ),
-  // Lines break only AFTER a separator: a no-break space before each "·" (SEP), and the period and the place each
-  // unbroken, so a wrapped stack never starts a line with "·" and a phone never leaves "NY" alone on a line.
+  // The line breaks only AFTER its separator: a no-break space before the "·" (SEP), and the period and the place
+  // each unbroken, so a phone never starts a line with "·" or leaves "NY" alone on one.
   lines: [
-    <>
-      <span className="ch-line">
-        <span className="ch-nowrap">{role.period}</span>
-        {SEP}
-        <span className="ch-nowrap">{role.location}</span>
-      </span>
-      {role.technologies.length > 0 && <span className="ch-stack">{role.technologies.join(SEP)}</span>}
-    </>,
+    <span key="when" className="ch-line">
+      <span className="ch-nowrap">{role.period}</span>
+      {SEP}
+      <span className="ch-nowrap">{role.location}</span>
+    </span>,
   ],
 }));
 
