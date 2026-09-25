@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { useTheme } from "./ThemeProvider";
+import { useSiteMotion } from "./SiteMotion";
 import { PACKS_WIDE, fieldPacks, packVariantFromSearch, type Pack } from "../lib/fieldPacks";
 import { createPointerRig } from "../lib/pointerRig";
 
@@ -49,6 +50,9 @@ export default function JackField() {
   const [awake, setAwake] = useState(true);
   const [accentHex, setAccentHex] = useState("#3b82f6");
   const { resolvedTheme } = useTheme();
+  // The LIVE reduced-motion answer (SiteMotion): Reduce Motion turned on with the page open unmounts the scene
+  // (and its WebGL context) at the render below; turned off again, the gate re-runs and the field is born anew.
+  const { reduced } = useSiteMotion();
   // Mutated in place, read by the scene's frame loop — no re-render per pointer move.
   const rig = useMemo(() => createPointerRig(), []);
 
@@ -57,6 +61,7 @@ export default function JackField() {
   // week count once: a change would be a new world and a new entrance.
   useEffect(() => {
     if (
+      reduced ||
       window.innerWidth < 640 ||
       !window.matchMedia("(hover: hover) and (pointer: fine)").matches ||
       window.matchMedia("(prefers-reduced-motion: reduce)").matches
@@ -79,7 +84,7 @@ export default function JackField() {
       if (idleId !== undefined) window.cancelIdleCallback(idleId);
       clearTimeout(timeoutId);
     };
-  }, []);
+  }, [reduced]);
 
   // Tab hidden → the frameloop is "never": no render, no step. The layer is always on screen
   // otherwise, so this is the field's one visibility gate.
@@ -119,7 +124,7 @@ export default function JackField() {
     return () => { live = false; };
   }, [resolvedTheme]);
 
-  if (!born) return null;
+  if (!born || reduced) return null;
   return (
     <div aria-hidden className="fixed inset-0 z-10 pointer-events-none">
       <JackFieldScene packs={packs} accent={accentHex} theme={resolvedTheme} visible={awake} rig={rig} />

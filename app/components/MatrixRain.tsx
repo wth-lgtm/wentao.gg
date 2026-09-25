@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { useTheme } from "./ThemeProvider";
+import { useSiteMotion } from "./SiteMotion";
 
 // Original "digital rain", spanning the full page and tuned to the site (accent blue,
 // crisp — not retro/pixelated). Each column is a CONTINUOUS trail: a bright leading
@@ -32,6 +33,10 @@ function parseColor(v: string): [number, number, number] {
 export default function MatrixRain() {
   const { resolvedTheme } = useTheme();
   const light = resolvedTheme === "light";
+  // The LIVE reduced-motion answer (SiteMotion): turning Reduce Motion on with the page open re-runs the
+  // effect below, which cancels the loop and paints the one still frame — the rain follows the setting
+  // within a frame instead of on the next load.
+  const { reduced } = useSiteMotion();
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -42,7 +47,7 @@ export default function MatrixRain() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const reduce = reduced || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const cs = getComputedStyle(document.documentElement);
     const [ar, ag, ab] = parseColor(cs.getPropertyValue("--accent") || "#3b82f6");
     // On dark, the head is the brightest glyph (near-white); on white that vanishes, so
@@ -180,7 +185,7 @@ export default function MatrixRain() {
       ro.disconnect();
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [light]);
+  }, [light, reduced]);
 
   return (
     <div

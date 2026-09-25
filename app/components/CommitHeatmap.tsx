@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import dynamic from "next/dynamic";
-import { motion, useMotionValue, useSpring, useTransform, useReducedMotion } from "framer-motion";
+import { motion, useMotionValue, useSpring, useTransform } from "framer-motion";
 import { GitCommit, Code, Github, Flame, Zap } from "lucide-react";
 import { useTheme } from "./ThemeProvider";
+import { useSiteMotion } from "./SiteMotion";
 import { buildDayWindow, currentStreak, utcDayKey, type CommitDay } from "../lib/githubStats";
 import { levelFor } from "../lib/commitLevel";
 import { SEED, jacksForWeeks } from "../lib/connectorJacks";
@@ -95,7 +96,10 @@ export default function SiteStats() {
   const [blockW, setBlockW] = useState<number | null>(null);
   const [sceneShown, setSceneShown] = useState(false);
   const [accentHex, setAccentHex] = useState("#3b82f6");
-  const reduceMotion = useReducedMotion() ?? false;
+  // The LIVE policy, not framer's mount-latched useReducedMotion(): Reduce Motion turned on with the page open
+  // takes use3D false below, which unmounts the card's scene (its WebGL context goes with it) and swaps the
+  // CSS-3D board for the flat grid; the tilt below is gated at its binding site for the same reason (E16).
+  const { reduced: reduceMotion } = useSiteMotion();
   const { resolvedTheme } = useTheme();
 
   // Background canvas, three stages observed on the card (the column itself only exists once
@@ -441,7 +445,7 @@ export default function SiteStats() {
                         aria-label={boardLabel}
                       >
                         <motion.div
-                          style={{ width: boardW, height: boardH, position: "relative", transformStyle: "preserve-3d", rotateX, rotateY }}
+                          style={{ width: boardW, height: boardH, position: "relative", transformStyle: "preserve-3d", rotateX: reduceMotion ? BASE_TILT_X : rotateX, rotateY: reduceMotion ? BASE_ROT_Y : rotateY }}
                         >
                           {weeks.map((week, weekIndex) =>
                             week.map((day, dayIndex) => {
