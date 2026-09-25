@@ -16,9 +16,9 @@ import type { Rect } from "../../lib/fieldLayout";
 import { getFieldPacks, onFieldPacks } from "../../lib/fieldPresence";
 
 // THE ONE DIRECTOR of the reading chapters (DESIGN §4.2.3, E1). Created once on the home page by ChapterDirector.tsx,
-// which loads this module on mount, out of the page's first chunk (CSS owns the first paint, and the director's first
-// act waits for document.fonts.ready anyway). It owns every chapter's mode and drives the marks, imperatively, with
-// no React state:
+// which starts fetching this module as soon as it evaluates, as its own chunk outside the page's first bundle (CSS
+// owns the first paint, and the director's first act waits for document.fonts.ready anyway). It owns every chapter's
+// mode and drives the marks, imperatively, with no React state:
 //
 //   MODE. After document.fonts.ready it writes data-mode = pinned | flow | static on every [data-chapter] —
 //   static when motion is not allowed (reduced motion or forced colours, read LIVE), flow when the window fails
@@ -414,7 +414,12 @@ interface DirectorDebug {
   readonly corrections: unknown[];
 }
 
-export function createDirector(): () => void {
+export interface DirectorOptions {
+  /** true once the reader has given any input (wheel, touch, key, pointer), watched from before this module loaded */
+  readerMoved?: () => boolean;
+}
+
+export function createDirector(opts: DirectorOptions = {}): () => void {
   const html = document.documentElement;
   // ONE scroll subscription for the page, held only while some chapter is within a viewport of the screen
   let unsubscribe: (() => void) | null = null;
@@ -513,7 +518,9 @@ export function createDirector(): () => void {
   // mid-glide (measured: /#education stopped 9 px down). Only on a fresh navigation: a reload or Back restores
   // the reader's own position, which wins.
   const navType = (performance.getEntriesByType?.("navigation")[0] as PerformanceNavigationTiming | undefined)?.type ?? "navigate";
-  let landHash: string | null = navType === "navigate" && window.location.hash.length > 1 ? decodeURIComponent(window.location.hash.slice(1)) : null;
+  // (A reader who moved before this module arrived — ChapterDirector.tsx watches from its own first evaluation — has
+  // already chosen where to be.)
+  let landHash: string | null = navType === "navigate" && window.location.hash.length > 1 && !opts.readerMoved?.() ? decodeURIComponent(window.location.hash.slice(1)) : null;
 
   const indexOpen = () => document.body.style.overflow === "hidden";
 
