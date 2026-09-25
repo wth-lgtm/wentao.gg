@@ -393,6 +393,7 @@ function createDirector(): () => void {
   // keeps them unless the other is nearer by more than HYSTERESIS_PX. A handover lands on one beat: the old
   // owner clears on the same boundary the new one docks on.
   const onScroll = (s: Readonly<ScrollState>) => {
+    if (printing()) return; // print is not a window: nothing relights while the page is laid out for paper
     // the scroll this frame, against the geometry cached before any resize still to be evaluated: where a resize
     // that arrives mid-scroll finds the reader (placeFromCache)
     if (!resizePending) liveY = s.y;
@@ -412,6 +413,16 @@ function createDirector(): () => void {
 
   const pinMq = matchMedia(PIN_QUERY);
   const coarseMq = matchMedia("(pointer: coarse)");
+  // PRINT IS NOT A WINDOW. Under print media PIN_QUERY ("screen and …") stops matching, and an evaluation would
+  // flip every chapter to flow, relight the marks against the paper layout and, on the way back, correct the
+  // reader's place (a print round trip moved a reader from mid-Experience to Education). While printing
+  // (beforeprint/afterprint, or print media emulated) nothing evaluates, relights or takes a rest place; the
+  // print CSS neutralises whatever marks were on screen, and afterwards one evaluation runs with no correction
+  // unless the window itself changed.
+  const printMq = matchMedia("print");
+  let printEvent = false;
+  let printDeferred = false;
+  const printing = () => printEvent || printMq.matches;
   // THE reading line, one for the page: the flow gates, keep-your-place and the focus scroll all read it, and it
   // is re-measured on every evaluation (every resize the director accepts), so a height-only resize on a desktop
   // moves it with the window while iOS's toolbars do not (createReadingLine). The flow rail's CSS fill sits on
@@ -536,7 +547,7 @@ function createDirector(): () => void {
   // every wrap have already moved, so the layout on screen can no longer say where the reader was)
   const captureRest = () => {
     restTimer = undefined;
-    if (!ready || disposed || resizePending || indexOpen()) return;
+    if (!ready || disposed || resizePending || indexOpen() || printing()) return;
     // not while a step is pending or held (a jump reads as a fling until the velocity zeroes): the place is the
     // entry the reader will see marked, so wait for it
     if (runtimes.some((rt) => rt.commit.pending || rt.commit.held)) { restTimer = setTimeout(captureRest, 120); return; }
@@ -545,7 +556,7 @@ function createDirector(): () => void {
     ownScrollY = null;
   };
   const onScrollEvent = () => {
-    if (resizePending) return;
+    if (resizePending || printing()) return;
     // a scroll that lands where the director itself just scrolled is its own; any other is the reader's
     const own = ownScrollY !== null && Math.abs(window.scrollY - ownScrollY) < 2;
     if (!own) { ownScrollY = null; restStale = true; readerScrolled = true; }
@@ -589,6 +600,7 @@ function createDirector(): () => void {
 
   const evaluate = () => {
     if (disposed || !ready) return;
+    if (printing()) { printDeferred = true; return; }
     if (indexOpen()) { pending = true; return; }
     pending = false;
     evaluations++;
@@ -681,6 +693,7 @@ function createDirector(): () => void {
   const request = () => { if (ready && !disposed) onFrame("read", evaluate); };
 
   const onResize = () => {
+    if (printing()) return; // the paper's size is not the window's (checked again when printing ends)
     const w = window.innerWidth, h = window.innerHeight;
     // iOS toolbars: a height-only change under TOOLBAR_PX on a coarse pointer moves nothing
     if (coarseMq.matches && w === lastW && Math.abs(h - lastH) < TOOLBAR_PX) return;
@@ -712,6 +725,19 @@ function createDirector(): () => void {
   const main = document.querySelector("main");
   if (main) ro.observe(main);
   for (const rt of runtimes) { ro.observe(rt.el); ro.observe(rt.panel); ro.observe(rt.dial); }
+
+  const resumeFromPrint = () => {
+    if (printing()) return;
+    const deferred = printDeferred;
+    printDeferred = false;
+    if (window.innerWidth !== lastW || window.innerHeight !== lastH) onResize();
+    else if (deferred) request();
+  };
+  const onBeforePrint = () => { printEvent = true; };
+  const onAfterPrint = () => { printEvent = false; resumeFromPrint(); };
+  window.addEventListener("beforeprint", onBeforePrint);
+  window.addEventListener("afterprint", onAfterPrint);
+  printMq.addEventListener("change", resumeFromPrint);
 
   window.addEventListener("resize", onResize);
   window.addEventListener("scroll", onScrollEvent, { passive: true });
@@ -756,6 +782,9 @@ function createDirector(): () => void {
     disposed = true;
     cancelAnimationFrame(anchorRelease);
     clearTimeout(restTimer);
+    window.removeEventListener("beforeprint", onBeforePrint);
+    window.removeEventListener("afterprint", onAfterPrint);
+    printMq.removeEventListener("change", resumeFromPrint);
     window.removeEventListener("resize", onResize);
     window.removeEventListener("scroll", onScrollEvent);
     for (const t of inputs) window.removeEventListener(t, cancelLanding);

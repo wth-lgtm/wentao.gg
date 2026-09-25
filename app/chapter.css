@@ -579,15 +579,28 @@
   }
 
   /* ---------------------------------------------------------------------------------------------------------
-     Print: the static still, whatever the mode */
+     Print: the static still, whatever the mode. The director never evaluates while printing (print is not a
+     window: PIN_QUERY's `screen and` would flip every chapter and relight marks), so a chapter prints in the mode
+     and with the marks it had on screen — every rule here neutralises them, in every mode, and !important beats
+     the mode rules' specificity without restating each. */
   @media print {
-    .chapter[data-mode] { height: auto; padding: 48px 24px; }
-    .chapter:is([data-mode="pinned"], [data-mode="flow"]) .ch-stage { position: static; height: auto; padding: 0; }
-    .chapter:is([data-mode="pinned"], [data-mode="flow"]) .ch-dial { position: static; margin: 0; }
+    .chapter[data-mode] { height: auto !important; padding: 48px 24px !important; }
+    .chapter .ch-stage { position: static !important; height: auto !important; padding: 0 !important; }
+    .chapter .ch-grid { height: auto !important; }
+    .chapter .ch-dial { position: static !important; margin: 0 !important; }
     .ch-rail-fill, .ch-rail-sticky { display: none !important; }
-    .chapter[data-mode] .ch-head::before, .chapter[data-mode] .ch-head::after, .chapter[data-mode] .ch-sub::before,
-    .chapter[data-mode] .ch-item::before, .chapter[data-mode] .ch-item::after { display: none; }
+    .chapter .ch-rail-track { background: var(--border) !important; }
+    .chapter .ch-head::before, .chapter .ch-head::after, .chapter .ch-sub::before,
+    .chapter .ch-item::before, .chapter .ch-item::after { display: none !important; }
+    .chapter .ch-sub { color: var(--muted) !important; }
+    .chapter .ch-index { color: var(--legend) !important; }
+    .chapter .ch-link { color: var(--muted) !important; }
+    .chapter .ch-tick { background: var(--border) !important; }
+    .chapter .ch-dot { background: var(--border) !important; transform: scale(0.6) !important; }
+    .chapter .yw-window { display: none !important; }
+    .chapter .yw-range { display: inline !important; }
   }
+
 }
 
 /* Unlayered on purpose: the globals' `*:focus-visible` ring (outline-offset 2px) is unlayered, so it beats any
