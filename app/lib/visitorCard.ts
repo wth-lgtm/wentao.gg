@@ -140,6 +140,17 @@ export function isPrivateIp(ip: string): boolean {
 }
 
 /**
+ * The IP the card prints: the edge cookie's (instant) when it is public, else the one the
+ * lookup saw, else nothing — the row then reads "hidden". It used to fall back to the
+ * cookie's value even when that was private, so a localhost visit whose lookups all failed
+ * printed "127.0.0.1" on a card whose rule is that it never shows one.
+ */
+export function displayIp(cookieIp: string, lookupIp: string): string {
+  if (!isPrivateIp(cookieIp)) return cookieIp;
+  return isPrivateIp(lookupIp) ? "" : lookupIp;
+}
+
+/**
  * The region out of the edge cookie's "City, Region, Country 🇺🇸" (proxy.ts), so the
  * first paint can already say "California" before /api/geo answers. Only a three-part
  * string has a region in the middle; anything else says nothing rather than guessing.

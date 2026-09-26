@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import {
   FIELDS,
   countryName,
+  displayIp,
   flagFromCode,
   formatCoords,
   ipPieces,
@@ -80,6 +81,13 @@ test("isPrivateIp: loopback and private ranges are never shown", () => {
   for (const ip of ["", "::1", "127.0.0.1", "10.1.2.3", "192.168.0.4", "172.16.0.1", "172.31.9.9", "fe80::1", "fd00::2"])
     assert.ok(isPrivateIp(ip), ip);
   for (const ip of ["203.0.113.42", "172.32.0.1", "2001:db8::1", "8.8.8.8"]) assert.ok(!isPrivateIp(ip), ip);
+});
+
+test("displayIp: the cookie's public IP, else the lookup's, never a private one", () => {
+  assert.equal(displayIp("203.0.113.42", "198.51.100.7"), "203.0.113.42"); // the instant one wins
+  assert.equal(displayIp("::1", "198.51.100.7"), "198.51.100.7"); // localhost: the lookup's
+  assert.equal(displayIp("127.0.0.1", ""), ""); // every lookup failed: "hidden", not 127.0.0.1
+  assert.equal(displayIp("", "10.0.0.2"), "");
 });
 
 test("regionFromLocation: the edge cookie's middle part, or nothing", () => {

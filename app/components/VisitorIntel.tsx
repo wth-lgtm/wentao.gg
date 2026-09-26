@@ -7,9 +7,9 @@ import ScrambleText from "./ScrambleText";
 import { getVisitorData, type VisitorData } from "./visitorData";
 import { HOME, formatDistance, greatCircleKm, isLatLon } from "../lib/telemetry";
 import {
+  displayIp,
   formatCoords,
   ipPieces,
-  isPrivateIp,
   orgLine,
   placeLines,
   regionFromLocation,
@@ -166,9 +166,9 @@ export default function VisitorIntel() {
   const lon = api?.lon ?? data?.lon ?? null;
   const isp = api?.isp ?? "";
   const org = orgLine(isp, api?.org ?? "");
-  // Prefer a public IP: on localhost the cookie holds ::1, so fall back to the geo IP.
-  const cookieIp = data?.ip ?? "";
-  const ip = !isPrivateIp(cookieIp) ? cookieIp : api?.ip || cookieIp || "";
+  // Prefer a public IP: on localhost the cookie holds ::1, so fall back to the geo IP —
+  // and to nothing ("hidden") rather than ever printing a private one.
+  const ip = displayIp(data?.ip ?? "", api?.ip ?? "");
   const hasFix = lat !== null && lon !== null;
   // A city-LEVEL result (not just a country) counts as "detected".
   const hasCity = !!city;
