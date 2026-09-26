@@ -1,9 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { HOME, formatDistance, greatCircleKm } from "../app/lib/telemetry";
 
 import {
   CAPTIONS,
+  spokenDistance,
+  spokenDistanceRow,
+  spokenSummary,
+  withArticle,
   FIELDS,
   countryName,
   displayIp,
@@ -90,6 +95,39 @@ test("CAPTIONS: every state names all four lookups and says nothing is stored", 
   assert.ok(Math.max(...lens) - Math.min(...lens) <= 8, `lengths ${lens}`);
   // Each is one line of a 457 px card at 17 px (measured in place ≤ 421 px of 423): ≤ 54 code points.
   for (const [state, text] of Object.entries(CAPTIONS)) assert.ok([...text].length <= 54, `${state} is ${[...text].length} code points`);
+});
+
+test("spokenSummary: one plain sentence for a screen reader, in every state", () => {
+  const km = (lat: number, lon: number) => greatCircleKm(HOME, { lat, lon });
+  assert.equal(
+    spokenSummary({ state: "found", city: "London", region: "England", cc: "GB", km: km(51.5074, -0.1278) }),
+    "You're browsing from near London, England, United Kingdom, about 5,350 miles from Wentao in San Francisco."
+  );
+  assert.equal(
+    spokenSummary({ state: "found", city: "Tokyo", region: "Tokyo", cc: "JP", km: km(35.6762, 139.6503) }),
+    `You're browsing from near Tokyo, Japan, about ${formatDistance(km(35.6762, 139.6503), "JP")!.replace(" KM AWAY", "")} kilometres from Wentao in San Francisco.`
+  );
+  assert.equal(
+    spokenSummary({ state: "found", city: "Oakland", region: "California", cc: "US", km: 12 }),
+    "You're browsing from near Oakland, California, United States, in the same area as Wentao."
+  );
+  // A country-only fix: no city invented, no distance to a centroid.
+  assert.equal(spokenSummary({ state: "found", city: "", region: "", cc: "US", km: 2100 }), "You're browsing from somewhere in the United States.");
+  assert.equal(spokenSummary({ state: "looking", city: "", region: "", cc: "", km: null }), "Looking up where you're browsing from.");
+  assert.match(spokenSummary({ state: "none", city: "", region: "", cc: "", km: null }), /couldn't be worked out.*Nothing is stored/);
+});
+
+test("spokenDistance: the row as it is heard, with the card's rounding", () => {
+  assert.equal(spokenDistance(8610, "GB"), "5,350 miles");
+  assert.equal(spokenDistance(8610, "DE"), "8,610 kilometres");
+  assert.equal(spokenDistance(10, "US"), "same");
+  assert.equal(spokenDistance(NaN, "US"), null);
+  assert.equal(spokenDistanceRow(8610, "GB"), "5,350 miles away");
+  assert.equal(spokenDistanceRow(10, "US"), "in the same area as Wentao");
+  assert.equal(withArticle("United States"), "the United States");
+  assert.equal(withArticle("Netherlands"), "the Netherlands");
+  assert.equal(withArticle("Cayman Islands"), "the Cayman Islands");
+  assert.equal(withArticle("Japan"), "Japan");
 });
 
 test("isPrivateIp: loopback and private ranges are never shown", () => {

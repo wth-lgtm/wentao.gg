@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useId, useRef, useState } from "react";
 import { useReducedMotion } from "framer-motion";
 import LocatorMap from "./LocatorMap";
 import ScrambleText from "./ScrambleText";
@@ -15,6 +15,8 @@ import {
   orgLine,
   placeLines,
   regionFromLocation,
+  spokenDistanceRow,
+  spokenSummary,
   visibility,
   type CaptionState,
 } from "../lib/visitorCard";
@@ -133,7 +135,8 @@ export default function VisitorIntel() {
   const [probing, setProbing] = useState(false);
   const [count, setCount] = useState<number | null>(null);
   const [locatedFor, setLocatedFor] = useState("");
-  const cardRef = useRef<HTMLDivElement>(null);
+  const cardRef = useRef<HTMLElement>(null);
+  const statusId = useId();
 
   // The map yields height, so the card and the CTA under it fit a short window (1366 × 657,
   // the most common laptop window, and 1280 × 633). The map's height limit is CSS
@@ -210,8 +213,8 @@ export default function VisitorIntel() {
   // of a state the visitor has never been to. An approximate PIN is honest; an approximate
   // number stated to the kilometre is not. Without a city this keeps its em dash.
   const fix = { lat: lat as number, lon: lon as number };
-  const distance =
-    hasCity && isLatLon(fix) ? formatDistance(greatCircleKm(HOME, fix), cc) : null;
+  const km = hasCity && isLatLon(fix) ? greatCircleKm(HOME, fix) : null;
+  const distance = km === null ? null : formatDistance(km, cc);
   const coords = formatCoords(lat, lon);
   const stillLooking = data === null || probing;
 
@@ -237,9 +240,13 @@ export default function VisitorIntel() {
   // chain below it. The caption names the lookups in every state (CAPTIONS, visitorCard.ts):
   // by the time this renders, the visitor's IP is already on its way to them.
   const captionState: CaptionState = place ? "found" : stillLooking ? "looking" : "none";
+  // The one sentence a screen reader hears first (the map is aria-hidden, the rows are terse).
+  const summary = spokenSummary({ state: captionState, city, region, cc, km });
 
   return (
-    <div ref={cardRef} className="vcard glass rounded-2xl p-(--vc-pad)">
+    // A labelled region: its name is the status line ("WHERE YOU'RE AT"), and it opens with a
+    // plain sentence. No aria-live: the page keeps its single live region.
+    <section ref={cardRef} aria-labelledby={statusId} className="vcard glass rounded-2xl p-(--vc-pad)">
       {/* Status, and (laptop up) the fix it's reporting. The kicker never breaks; if the
           worst-case coordinates don't fit beside it (a 1024 window), they drop to a line below. */}
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 font-mono text-[length:var(--vc-label)] uppercase leading-snug tracking-[0.14em] text-legend">
@@ -248,12 +255,14 @@ export default function VisitorIntel() {
           {/* No .text-legible halo: the glass already separates it from the rain, and a 24 px
               text-shadow grows a text's paint rect ~5× — enough to make this line's 1.5 s
               flip a late largest-contentful-paint candidate ahead of the hero's own text. */}
-          <span className="whitespace-nowrap">{header}</span>
+          <span id={statusId} className="whitespace-nowrap">{header}</span>
         </span>
         <span className={`shrink-0 tabular-nums tracking-[0.04em] ${visibility("coords", "inline")}`}>
           {coords ?? <span aria-hidden>{"◎"}</span>}
         </span>
       </div>
+
+      <p className="sr-only">{summary}</p>
 
       {/* The whole world, the pin, and a hairline home (LocatorMap). */}
       <div className="mt-(--vc-gap-map)">
@@ -263,7 +272,7 @@ export default function VisitorIntel() {
       {/* Readout: the place leads, the network follows. */}
       <dl className="mt-(--vc-gap-dl) grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-4 gap-y-(--vc-gap-row)">
         <div className="contents">
-          <dt className={LABEL}>NEAR</dt>
+          <Label short="NEAR" full="Near" />
           {/* break-word only as the last resort, for one name longer than the whole column
               ("Llanfairpwllgwyngyll" at 26 px in a 277 px tablet card): it wraps at spaces first. */}
           {/* Always two lines, from the first paint: the second holds an em dash until the
@@ -279,13 +288,14 @@ export default function VisitorIntel() {
                 {stillLooking ? "triangulating…" : "classified \u{1F575}\u{FE0F}"}
               </span>
             )}
+            {place?.sub && <span className="sr-only">, </span>}
             <span className="mt-(--vc-gap-sub) block text-balance text-[length:var(--vc-meta)] leading-(--vc-lh) text-legend">
-              {place?.sub ?? "—"}
+              {place?.sub ?? <span aria-hidden="true">—</span>}
             </span>
           </dd>
         </div>
         <div className="contents">
-          <dt className={LABEL}>IP</dt>
+          <Label short="IP" full="IP address" />
           <dd className={`${VALUE} font-semibold text-accent`}>
             {ip ? (
               // An IPv6 address breaks only after a colon, never inside a group; the pieces
@@ -304,16 +314,16 @@ export default function VisitorIntel() {
         {/* Always rendered, like DIST: an em dash holds the row until /api/geo names the ISP
             (and stays for a fallback provider, which has none). */}
         <div className="contents">
-          <dt className={LABEL}>ISP</dt>
-          <dd className={`${VALUE} text-foreground`}>{isp || <span className="text-legend">—</span>}</dd>
+          <Label short="ISP" full="Internet provider" />
+          <dd className={`${VALUE} text-foreground`}>{isp || <Dash spoken="not known" />}</dd>
         </div>
         {/* Always rendered too. The org is known only once /api/geo answers, and a row that
             appeared then grew the card after the name had painted (the whole of the hero's
             late layout shift on a laptop). An em dash says "nothing beyond the ISP": no org,
             or one that repeats the ISP (orgLine). */}
         <div className={visibility("org", "contents")}>
-          <dt className={LABEL}>ORG</dt>
-          <dd className={`${VALUE} text-foreground`}>{org || <span className="text-legend">—</span>}</dd>
+          <Label short="ORG" full="Organisation" />
+          <dd className={`${VALUE} text-foreground`}>{org || <Dash spoken={stillLooking ? "not known" : "none beyond the provider"} />}</dd>
         </div>
         {/* How far Wentao is from you — derived from the fix already in hand, so no extra
             network and nothing new collected. Phrased from his side ("… AWAY") so it reads
@@ -323,8 +333,17 @@ export default function VisitorIntel() {
             em dash once the probe is finished and empty — a gauge that reads "resolving"
             forever is a broken gauge. */}
         <div className="contents">
-          <dt className={LABEL}>DIST</dt>
-          <dd className={`${VALUE} text-foreground`}>{distance ?? <span className="text-legend">—</span>}</dd>
+          <Label short="DIST" full="Distance from Wentao" />
+          <dd className={`${VALUE} text-foreground`}>
+            {distance && km !== null ? (
+              <>
+                <span aria-hidden="true">{distance}</span>
+                <span className="sr-only">{spokenDistanceRow(km, cc)}</span>
+              </>
+            ) : (
+              <Dash spoken="not known" />
+            )}
+          </dd>
         </div>
       </dl>
 
@@ -359,6 +378,27 @@ export default function VisitorIntel() {
           </span>
         ))}
       </p>
-    </div>
+    </section>
+  );
+}
+
+// A row label: the terse caps for the eye ("ISP", "DIST"), the words for a screen reader,
+// which would otherwise read the abbreviations letter by letter.
+function Label({ short, full }: { short: string; full: string }) {
+  return (
+    <dt className={LABEL}>
+      <span aria-hidden="true">{short}</span>
+      <span className="sr-only">{full}</span>
+    </dt>
+  );
+}
+
+// An empty value: an em dash for the eye, a few words for a screen reader.
+function Dash({ spoken }: { spoken: string }) {
+  return (
+    <span className="text-legend">
+      <span aria-hidden="true">—</span>
+      <span className="sr-only">{spoken}</span>
+    </span>
   );
 }

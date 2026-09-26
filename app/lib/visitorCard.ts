@@ -1,3 +1,5 @@
+import { formatDistance } from "./telemetry";
+
 // The visitor card's content rules, as pure functions the card renders and the tests hold.
 // The card's one job is to tell a visitor where they are browsing from, at a glance: the
 // PLACE leads (city large, then region and country), the network facts follow, and the
@@ -188,3 +190,45 @@ export const CAPTIONS: Record<CaptionState, string> = {
   found: "via ip-api, ipinfo, ipwho or geojs\u00A0— nothing\u00A0stored\u00A0\u{1F91D}",
   none: "ip-api, ipinfo, ipwho, geojs: no dice\u00A0— nothing\u00A0stored",
 };
+
+// ── What a screen reader hears ───────────────────────────────────────────────────────
+// The map is decoration (aria-hidden) and the readout is terse label/value pairs, so the card
+// opens with ONE plain sentence saying where the visitor is. It is not a live region (the page
+// keeps its single one); it is read when the reader reaches the card.
+
+/** "5,350 miles" / "8,610 kilometres" / "same" (the same metro), with formatDistance's rounding. */
+export function spokenDistance(km: number, cc: string): string | null {
+  const label = formatDistance(km, cc);
+  if (!label) return null;
+  if (!/\d/.test(label)) return "same";
+  const m = label.match(/^([\d,]+) (MI|KM) AWAY$/);
+  return m ? `${m[1]} ${m[2] === "MI" ? "miles" : "kilometres"}` : null;
+}
+
+export type SummaryInput = { state: CaptionState; city: string; region: string; cc: string; km: number | null };
+/** The card's sentence for assistive tech, in each state. */
+export function spokenSummary({ state, city, region, cc, km }: SummaryInput): string {
+  if (state === "looking") return "Looking up where you're browsing from.";
+  if (state === "none") return "Your location couldn't be worked out from your IP address. Nothing is stored.";
+  const c = city.trim();
+  const r = region.trim();
+  const country = countryName(cc);
+  if (!c) return country ? `You're browsing from somewhere in ${withArticle(country)}.` : "Looking up where you're browsing from.";
+  const place = [c, r && r.toLowerCase() !== c.toLowerCase() ? r : "", country].filter(Boolean).join(", ");
+  const d = km === null ? null : spokenDistance(km, cc);
+  if (d === "same") return `You're browsing from near ${place}, in the same area as Wentao.`;
+  return d ? `You're browsing from near ${place}, about ${d} from Wentao in San Francisco.` : `You're browsing from near ${place}.`;
+}
+
+/** The DIST row as it should be heard: "5,350 miles away", not "5,350 M I away". */
+export function spokenDistanceRow(km: number, cc: string): string | null {
+  const d = spokenDistance(km, cc);
+  return d === "same" ? "in the same area as Wentao" : d ? `${d} away` : null;
+}
+
+// "the United States", "the Netherlands", but "Japan": the article English puts before a
+// country's name, for the few names that take one.
+const THE = /^(United |Czech Republic|Dominican Republic|Central African Republic)|( Islands|Netherlands|Philippines|Bahamas|Gambia|Maldives|Comoros|Seychelles)$/;
+export function withArticle(country: string): string {
+  return THE.test(country) ? `the ${country}` : country;
+}

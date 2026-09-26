@@ -2,7 +2,7 @@
 // measured, with the lookups mocked. Runs against a production build served on `PORT`
 // (default 3301):
 //
-//   node scripts/verify-card.mjs [port] [check]      check: fit | shift | all (default all)
+//   node scripts/verify-card.mjs [port] [check]      check: fit | shift | a11y | all (default all)
 //
 // fit   At the short laptops (1280 × 633, 1366 × 657, 1280 × 720 — the most common laptop
 //       windows) and around them, with a London readout, a long ISP and org, and an IPv6
@@ -16,6 +16,11 @@
 //       the first frame to 4 s, and the page's total layout shift stays under the base
 //       build's (820 × 1180 0.017, 1024 × 768 0.027, 1440 × 900 0.015; with reduced motion,
 //       1024 × 768 0.042 — the base measured by the round-2 review).
+//
+// a11y  The card is a region named by its status line, and a screen reader's first line in it
+//       is one plain sentence saying where the visitor is ("You're browsing from near London,
+//       England, United Kingdom, about 5,350 miles from Wentao in San Francisco."); the row
+//       labels and the distance are spoken as words; the card adds no aria-live region.
 //
 // Every readout is invented: documentation-range IPs (RFC 5737 / 3849) and made-up
 // carriers, so a screenshot or a log line never holds a real visitor's IP, ISP or city.
@@ -111,6 +116,22 @@ if (only === "all" || only === "shift") {
     (drift <= 1 ? pass : fail)("shift", `${tag}: the name's layout y moved ${drift} px over ${r.ys.length} frames`);
     if (run.base !== null) (r.cls < run.base ? pass : fail)("shift", `${tag}: layout shift ${r.cls.toFixed(4)} (base ${run.base})`);
     else pass("shift", `${tag}: layout shift ${r.cls.toFixed(4)} (recorded)`);
+    await ctx.close();
+  }
+}
+
+// ── a11y ───────────────────────────────────────────────────────────────────────────────
+if (only === "all" || only === "a11y") {
+  for (const [w, h] of [[1440, 900], [390, 844]]) {
+    const { ctx, page } = await open(w, h, { touch: w < 768 });
+    await page.waitForTimeout(2500);
+    const snap = await page.locator("[data-hero-card] section").ariaSnapshot();
+    const live = await page.evaluate(() => document.querySelectorAll("[data-hero-card] [aria-live]").length);
+    const tag = `${w}x${h}`;
+    (/^- region "WHERE YOU'RE AT"/.test(snap) ? pass : fail)("a11y", `${tag}: the card is a region named by its status`);
+    (snap.includes("paragraph: You're browsing from near London, England, United Kingdom, about 5,350 miles from Wentao in San Francisco.") ? pass : fail)("a11y", `${tag}: the sentence`);
+    (snap.includes("term: Internet provider") && snap.includes("definition: 5,350 miles away") ? pass : fail)("a11y", `${tag}: labels and distance spoken as words`);
+    (live === 0 ? pass : fail)("a11y", `${tag}: no aria-live in the card (${live})`);
     await ctx.close();
   }
 }
