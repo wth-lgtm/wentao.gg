@@ -31,9 +31,9 @@
 // around it — so the rain behind the card doesn't read as extra dots on the map.
 
 import dynamic from "next/dynamic";
-import { useSyncExternalStore } from "react";
+import { useSyncExternalStore, type CSSProperties } from "react";
 import { preload } from "react-dom";
-import { MAP_ASPECT_CSS, TREATMENTS, type MapTreatment } from "./map/frames";
+import { MAP_ASPECT, MAP_ASPECT_CSS, TREATMENTS, type MapTreatment } from "./map/frames";
 
 export const DEFAULT_TREATMENT: MapTreatment = "outline";
 
@@ -59,7 +59,8 @@ export default function LocatorMap({ lat, lon, reduce }: { lat: number | null; l
       data-map={treatment}
       aria-hidden="true"
       className="vc-map relative overflow-hidden rounded-xl bg-background/80 ring-1 ring-border/60"
-      style={{ aspectRatio: MAP_ASPECT_CSS[treatment] }}
+      // --vc-aspect: the map's height limit on short windows is set as a width (globals.css).
+      style={{ aspectRatio: MAP_ASPECT_CSS[treatment], "--vc-aspect": MAP_ASPECT[treatment].toFixed(4) } as CSSProperties}
     >
       {treatment === "outline" && (
         <>

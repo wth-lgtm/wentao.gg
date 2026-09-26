@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useReducedMotion } from "framer-motion";
 import LocatorMap from "./LocatorMap";
 import ScrambleText from "./ScrambleText";
@@ -121,8 +121,8 @@ async function fetchGeo(signal: AbortSignal): Promise<ApiGeo | null> {
 // The card's type is one ramp of CSS variables on .vcard (globals.css "VISITOR CARD"): the
 // chapters' scale row for row (DESIGN-3D §1.8) — labels are the category kicker, every data
 // row and the caption are meta, the city a rung above role.
-const LABEL = "font-mono uppercase tracking-[0.08em] text-legend text-[length:var(--vc-label)] leading-snug";
-const VALUE = "min-w-0 font-mono text-[length:var(--vc-meta)] leading-snug [overflow-wrap:break-word]";
+const LABEL = "font-mono uppercase tracking-[0.08em] text-legend text-[length:var(--vc-label)] leading-(--vc-lh)";
+const VALUE = "min-w-0 font-mono text-[length:var(--vc-meta)] leading-(--vc-lh) [overflow-wrap:break-word]";
 
 export default function VisitorIntel() {
   const reduce = useReducedMotion() ?? false;
@@ -131,6 +131,30 @@ export default function VisitorIntel() {
   const [probing, setProbing] = useState(false);
   const [count, setCount] = useState<number | null>(null);
   const [locatedFor, setLocatedFor] = useState("");
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  // The map yields height, so the card and the CTA under it fit a short window (1366 × 657,
+  // the most common laptop window, and 1280 × 633). The map's height limit is CSS
+  // (globals.css "VISITOR CARD": the window, less the hero's top padding, the CTA and
+  // --vc-rest); this measures --vc-rest, the card's height without the map. That number
+  // doesn't depend on the map (every row is as wide as the card), so a long ISP or an IPv6
+  // address shrinks the map by exactly the lines it adds, and a short readout keeps the
+  // whole-width map. It changes only when the rows or the window do; nothing runs at rest.
+  useEffect(() => {
+    const card = cardRef.current;
+    const map = card?.querySelector<HTMLElement>("[data-map]");
+    if (!card || !map || typeof ResizeObserver === "undefined") return;
+    let last = -1;
+    const ro = new ResizeObserver(() => {
+      const rest = card.offsetHeight - map.offsetHeight;
+      if (rest !== last) {
+        last = rest;
+        card.style.setProperty("--vc-rest", `${rest}px`);
+      }
+    });
+    ro.observe(card);
+    return () => ro.disconnect();
+  }, []);
 
   // Read the visitor cookie for an instant first-paint hint, then always resolve via the
   // geo chain — /api/geo (ip-api) is more accurate than Vercel's edge geo and is the only
@@ -213,7 +237,7 @@ export default function VisitorIntel() {
   const caption = CAPTIONS[place ? "found" : stillLooking ? "looking" : "none"];
 
   return (
-    <div className="vcard glass rounded-2xl p-4 sm:p-5">
+    <div ref={cardRef} className="vcard glass rounded-2xl p-(--vc-pad)">
       {/* Status, and (laptop up) the fix it's reporting. The kicker never breaks; if the
           worst-case coordinates don't fit beside it (a 1024 window), they drop to a line below. */}
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 font-mono text-[length:var(--vc-label)] uppercase leading-snug tracking-[0.14em] text-legend">
@@ -230,30 +254,30 @@ export default function VisitorIntel() {
       </div>
 
       {/* The whole world, the pin, and a hairline home (LocatorMap). */}
-      <div className="mt-3">
+      <div className="mt-(--vc-gap-map)">
         <LocatorMap lat={lat} lon={lon} reduce={reduce} />
       </div>
 
       {/* Readout: the place leads, the network follows. */}
-      <dl className="mt-4 grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-4 gap-y-2">
+      <dl className="mt-(--vc-gap-dl) grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-4 gap-y-(--vc-gap-row)">
         <div className="contents">
           <dt className={LABEL}>NEAR</dt>
           {/* break-word only as the last resort, for one name longer than the whole column
               ("Llanfairpwllgwyngyll" at 26 px in a 277 px tablet card): it wraps at spaces first. */}
-          <dd className="min-w-0 [overflow-wrap:break-word]">
+          <dd className="vc-place min-w-0 [overflow-wrap:break-word]">
             {place ? (
               <>
-                <span className="block text-balance text-[length:var(--vc-head)] font-semibold leading-tight tracking-[-0.01em] text-foreground">
+                <span className="block text-balance text-[length:var(--vc-head)] font-semibold leading-(--vc-lh-head) tracking-[-0.01em] text-foreground">
                   {place.head}
                 </span>
                 {place.sub && (
-                  <span className="mt-1 block text-balance text-[length:var(--vc-meta)] leading-snug text-legend">
+                  <span className="mt-(--vc-gap-sub) block text-balance text-[length:var(--vc-meta)] leading-(--vc-lh) text-legend">
                     {place.sub}
                   </span>
                 )}
               </>
             ) : (
-              <span className="block text-[length:var(--vc-head)] leading-tight text-legend">
+              <span className="block text-[length:var(--vc-head)] leading-(--vc-lh-head) text-legend">
                 {stillLooking ? "triangulating…" : "classified \u{1F575}\u{FE0F}"}
               </span>
             )}
@@ -301,14 +325,14 @@ export default function VisitorIntel() {
         </div>
       </dl>
 
-      <div className="my-3.5 h-px bg-border/70" />
+      <div className="my-(--vc-gap-rule) h-px bg-border/70" />
 
       {/* Live counter — the fun fact. Counts VISITS, not people, so the copy says "peeks"
           rather than "of you": a repeat visitor moves this number, and claiming otherwise
           would be a small lie on a card whose whole appeal is that it tells you the truth.
           A null count (no database, an error) hides the line (D-0036). */}
       {count !== null && (
-        <p className="mb-1.5 text-[length:var(--vc-meta)] leading-snug text-foreground">
+        <p className="vc-peeks mb-(--vc-gap-peeks) text-[length:var(--vc-meta)] text-foreground">
           <span className="text-accent">{"✦"}</span>{" "}
           <span className="font-mono font-semibold tabular-nums text-accent">{count.toLocaleString()}</span>{" "}
           peeks and counting {"\u{1F440}"}
@@ -316,7 +340,7 @@ export default function VisitorIntel() {
       )}
 
       {/* The honesty contract: who is asked, and that nothing is kept. In every state. */}
-      <p className="text-pretty text-[length:var(--vc-caption)] leading-normal text-legend">{caption}</p>
+      <p className="vc-caption text-pretty text-[length:var(--vc-caption)] text-legend">{caption}</p>
     </div>
   );
 }

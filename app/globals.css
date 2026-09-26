@@ -1719,6 +1719,58 @@ input:focus {
 @media (max-height: 500px) {
   .vcard { --vc-label: 14px; --vc-head: 24px; --vc-meta: 15px; --vc-caption: 15px; }
 }
+/* SPACING, and SHORT WINDOWS. On a window under 800 tall from 768 up (1366 × 657, the most
+   common laptop window; 1280 × 633; 1280 × 720; 900 × 700), the card and the CTA under it
+   must fit the screen: the card starts at the hero's 80 px top padding, and the CTA hangs
+   16 + 54 px below it (HeroClient.tsx); with 8 px to spare, the card may be at most
+   100svh − 158px tall.
+   Two things pay for the type:
+   - the rhythm tightens: 16 px padding, 8 px around the map, 6 px between rows and around
+     the rule, line
+     heights of 1.3 (rows), 1.15 (the city) and 1.35 (the caption), and the city shares its
+     line with the region when both fit;
+   - the MAP YIELDS HEIGHT: its height is capped at 100svh − 158px − --vc-rest, where
+     --vc-rest is the card's height without the map, measured live (VisitorIntel.tsx). It
+     is set as a width (height × aspect) so the whole world keeps its shape, centred, and
+     it never goes under 240 px wide, the map on a 320 px phone. A London-length readout
+     keeps the full-width map even at 1280 × 633; a long ISP and a long org, or an IPv6
+     address, give up exactly the lines they add. Tall windows never reach the cap. The fallback --vc-rest
+     is the measured first-paint readout, so the server HTML already fits. */
+.vcard {
+  --vc-pad: 16px;
+  --vc-gap-map: 12px;
+  --vc-gap-dl: 16px;
+  --vc-gap-row: 8px;
+  --vc-gap-sub: 4px;
+  --vc-gap-rule: 14px;
+  --vc-gap-peeks: 6px;
+  --vc-lh: 1.375;
+  --vc-lh-head: 1.25;
+  --vc-lh-cap: 1.5;
+}
+@media (min-width: 640px) {
+  .vcard { --vc-pad: 20px; }
+}
+@media (min-width: 768px) and (max-height: 799px) {
+  .vcard {
+    --vc-pad: 16px; --vc-gap-map: 8px; --vc-gap-dl: 8px; --vc-gap-row: 6px; --vc-gap-sub: 0px;
+    --vc-gap-rule: 6px; --vc-gap-peeks: 3px; --vc-lh: 1.3; --vc-lh-head: 1.15; --vc-lh-cap: 1.35;
+  }
+  /* The city and its region share a line when both fit ("London  England, United Kingdom"),
+     like a dateline; a long pair wraps to the stacked form by itself. */
+  .vcard .vc-place { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 0.6em; }
+}
+/* The card's two paragraphs take their line height here, unlayered: the global `p { line-height:
+   1.7 }` is unlayered too, and an unlayered rule beats any layered leading-* utility, so the
+   peeks line and the caption had been setting at 1.7 whatever the card asked for. */
+.vcard .vc-peeks { line-height: var(--vc-lh); }
+.vcard .vc-caption { line-height: var(--vc-lh-cap); }
+@media (min-width: 768px) {
+  .vcard .vc-map {
+    width: min(100%, max(240px, calc((100svh - 158px - var(--vc-rest, 280px)) * var(--vc-aspect))));
+    margin-inline: auto;
+  }
+}
 .light .vcard {
   --vc-land: color-mix(in srgb, var(--foreground) 46%, transparent);
   --vc-land-2: color-mix(in srgb, var(--foreground) 28%, transparent);
