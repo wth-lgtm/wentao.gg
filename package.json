@@ -9,6 +9,7 @@
     "lint": "eslint",
     "test": "node --import tsx --test 'tests/**/*.test.ts'",
     "check": "npm run build",
+    "gen:world": "node --import tsx scripts/gen-world.ts",
     "postinstall": "patch-package"
   },
   "dependencies": {
