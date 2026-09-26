@@ -26,7 +26,10 @@ export type Field =
 // The first class a field appears on; it stays on every wider class.
 export const FIELDS: Record<Field, ScreenClass> = {
   status: "P",
-  coords: "T", // on a phone the kicker and the coordinates cannot share one line at 14 px
+  // Laptops and up. Below 1024 the card is at most 383 px wide (a phone, or the hero's 5/12
+  // column on a tablet), where the kicker and the worst case ("33.9°S 151.2°E") cannot share
+  // one line.
+  coords: "LS",
   map: "P",
   city: "P",
   place: "P",

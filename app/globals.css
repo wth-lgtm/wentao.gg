@@ -1657,20 +1657,32 @@ input:focus {
 }
 
 /* ===== VISITOR CARD (VisitorIntel.tsx, app/components/map/*) =====
-   One type ramp for the card, stepped at the same classes as the chapters' scale
-   (DESIGN-3D §1.8: phones meta ≥ 15, laptop and up 16–19; the headline a rung above):
-                 P (375/390/430)          T 768+   LS 1024+   DS 1440+   XL 1920+
-     label       14                       14       14         15         16
-     headline    clamp(22, 6vw, 24)       24       24         26         28
-     meta        clamp(15, 4.1vw, 16)     16       16         17         18
-     caption     15                       15       15         16         16
-   The map's land/sea/graticule tints are foreground mixes, so both themes follow the
-   tokens and the light theme reads as ink on paper rather than grey on white. */
+   The card's type IS the chapters' scale (DESIGN-3D §1.8), row for row, at the same screen
+   classes (§1.1): P < 768 ≤ T < 1024 ≤ LS/LT < 1440 ≤ DS/DT; XL is ≥ 1920 AND ≥ 800 tall;
+   S/T = short/tall (h < 800 / ≥ 800); L = any width at h ≤ 500 (a phone on its side).
+     status line, labels (mono caps)      = the category kicker (phones: the index numeral)
+     data rows, place line, peeks, caption = meta
+     the city                             = a rung above role, under name: role + 5 (XL + 4),
+                                            and on phones ≥ 24, the phone floor for a name
+                   P (375 / 390 / 430)              L    T    LS   LT   DS   DT   XL
+     label         14                               14   14   16   16   16   17   18
+     city          clamp(24, 6.4vw, 26) 24/25/26    24   24   26   28   28   30   32
+     meta, caption clamp(15, 4.1vw, 17) 15.4/16/17  15   15   17   18   18   19   20
+   One exception, T: the hero keeps its locked side-by-side composition there, so the card
+   sits in the 5/12 column, 277–383 px wide — NARROWER than a phone's card (327–382). A card
+   that narrow sets like the narrowest phone card: the phone row at its floor, as L does (the
+   tablet row's 16 px kicker and 18 px meta would wrap every row and the status line in
+   three). Everything else clears the binding floors: laptop and up meta ≥ 16 (and the kicker
+   16); phones meta ≥ 15, a name ≥ 24.
+   tests/visitor-card.test.ts evaluates these media queries at each class's reference windows
+   and holds them to §1.8.
+   The map's land/rule tints are foreground mixes, so both themes follow the tokens and the
+   light theme reads as ink on paper rather than grey on white. */
 .vcard {
   --vc-label: 14px;
-  --vc-head: clamp(22px, 6vw, 24px);
-  --vc-meta: clamp(15px, 4.1vw, 16px);
-  --vc-caption: 15px;
+  --vc-head: clamp(24px, 6.4vw, 26px);
+  --vc-meta: clamp(15px, 4.1vw, 17px);
+  --vc-caption: clamp(15px, 4.1vw, 17px);
   --vc-land: color-mix(in srgb, var(--foreground) 54%, transparent);
   --vc-land-2: color-mix(in srgb, var(--foreground) 34%, transparent);
   --vc-land-3: color-mix(in srgb, var(--foreground) 18%, transparent);
@@ -1679,21 +1691,40 @@ input:focus {
      as the same land. */
   --vc-dot: color-mix(in srgb, var(--foreground) 80%, transparent);
 }
+/* T: the phone row at its floor (the card is in the 5/12 column; see above) */
+@media (min-width: 768px) {
+  .vcard { --vc-head: 24px; --vc-meta: 15px; --vc-caption: 15px; }
+}
+/* LS (short laptops) */
+@media (min-width: 1024px) {
+  .vcard { --vc-label: 16px; --vc-head: 26px; --vc-meta: 17px; --vc-caption: 17px; }
+}
+/* LT */
+@media (min-width: 1024px) and (min-height: 800px) {
+  .vcard { --vc-head: 28px; --vc-meta: 18px; --vc-caption: 18px; }
+}
+/* DS */
+@media (min-width: 1440px) {
+  .vcard { --vc-head: 28px; --vc-meta: 18px; --vc-caption: 18px; }
+}
+/* DT */
+@media (min-width: 1440px) and (min-height: 800px) {
+  .vcard { --vc-label: 17px; --vc-head: 30px; --vc-meta: 19px; --vc-caption: 19px; }
+}
+/* XL (a 1920 window under 800 tall stays DS) */
+@media (min-width: 1920px) and (min-height: 800px) {
+  .vcard { --vc-label: 18px; --vc-head: 32px; --vc-meta: 20px; --vc-caption: 20px; }
+}
+/* L: a phone on its side, at any width — the phone row at its floor */
+@media (max-height: 500px) {
+  .vcard { --vc-label: 14px; --vc-head: 24px; --vc-meta: 15px; --vc-caption: 15px; }
+}
 .light .vcard {
   --vc-land: color-mix(in srgb, var(--foreground) 46%, transparent);
   --vc-land-2: color-mix(in srgb, var(--foreground) 28%, transparent);
   --vc-land-3: color-mix(in srgb, var(--foreground) 14%, transparent);
   --vc-rule: color-mix(in srgb, var(--foreground) 12%, transparent);
   --vc-dot: color-mix(in srgb, var(--foreground) 66%, transparent);
-}
-@media (min-width: 768px) {
-  .vcard { --vc-head: 24px; --vc-meta: 16px; }
-}
-@media (min-width: 1440px) {
-  .vcard { --vc-label: 15px; --vc-head: 26px; --vc-meta: 17px; --vc-caption: 16px; }
-}
-@media (min-width: 1920px) {
-  .vcard { --vc-label: 16px; --vc-head: 28px; --vc-meta: 18px; }
 }
 
 /* OUTLINE's land and grid: static images (public/map/*.svg) used as MASKS, so the colour is

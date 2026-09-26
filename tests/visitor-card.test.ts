@@ -97,13 +97,14 @@ test("regionFromLocation: the edge cookie's middle part, or nothing", () => {
   assert.equal(regionFromLocation("Oakland, California, United States", "Berkeley"), "");
 });
 
-test("FIELDS: every fact about you is on every screen; only the coordinates wait for a tablet", () => {
+test("FIELDS: every fact about you is on every screen; only the coordinates wait for a laptop", () => {
   const classes: ScreenClass[] = ["P", "T", "LS", "DS", "XL"];
   const always: Field[] = ["status", "map", "city", "place", "ip", "isp", "org", "dist", "peeks", "caption"];
   for (const f of always) for (const c of classes) assert.ok(shownOn(f, c), `${f} on ${c}`);
-  // The coordinates can't share the kicker's line on a phone; tablets and up show them.
-  assert.ok(!shownOn("coords", "P"), "coords dropped on phones");
-  for (const c of classes.slice(1)) assert.ok(shownOn("coords", c), `coords on ${c}`);
+  // The coordinates can't share the kicker's line in a card under 384 px (phones, and the
+  // tablet's 5/12 column); laptops and up show them.
+  for (const c of ["P", "T"] as ScreenClass[]) assert.ok(!shownOn("coords", c), `coords dropped on ${c}`);
+  for (const c of classes.slice(2)) assert.ok(shownOn("coords", c), `coords on ${c}`);
   // A field, once shown, stays shown on every wider class.
   for (const f of Object.keys(FIELDS) as Field[]) {
     const seen = classes.map((c) => shownOn(f, c));
@@ -111,35 +112,39 @@ test("FIELDS: every fact about you is on every screen; only the coordinates wait
   }
   // The classes the card renders are literal Tailwind classes (the scanner sees them).
   assert.equal(visibility("org", "contents"), "contents"); // an every-class row keeps its display
-  assert.equal(visibility("coords", "inline"), "hidden md:inline");
+  assert.equal(visibility("coords", "inline"), "hidden lg:inline");
   assert.equal(visibility("ip"), "block");
 });
 
 // ── The type ramp (globals.css "VISITOR CARD") against the site scale ──────────────
-// DESIGN-3D §1.8: phones meta ≥ 15 px; laptop and up meta 16–19; the headline a rung above.
-function ramp(): Record<string, Record<string, string>> {
+// The card's type is the chapters' scale (DESIGN-3D §1.8) row for row, at the scale's own
+// screen classes (§1.1), height included. The CSS is evaluated here as a browser would: the
+// base .vcard block, then every `@media (…) { .vcard { … } }` whose conditions hold at the
+// window, in source order.
+type Win = [number, number];
+function cardVars(w: number, h: number): Record<string, string> {
   const css = readFileSync("app/globals.css", "utf8");
-  const out: Record<string, Record<string, string>> = {};
-  const grab = (key: string, body: string) => {
-    out[key] = { ...(out[key] ?? {}) };
-    for (const m of body.matchAll(/--vc-(label|head|meta|caption):\s*([^;]+);/g)) out[key][m[1]] = m[2].trim();
+  const section = css.slice(css.indexOf("/* ===== VISITOR CARD"));
+  const out: Record<string, string> = {};
+  const grab = (body: string) => {
+    for (const m of body.matchAll(/--vc-([a-z-]+):\s*([^;]+);/g)) out[m[1]] = m[2].trim();
   };
-  const base = css.match(/\n\.vcard \{([^}]*)\}/);
+  const base = section.match(/\n\.vcard \{([^}]*)\}/);
   assert.ok(base, ".vcard block");
-  grab("P", base[1]);
-  for (const [bp, key] of [["768px", "T"], ["1440px", "DS"], ["1920px", "XL"]] as const) {
-    const m = css.match(new RegExp(`@media \\(min-width: ${bp}\\) \\{\\s*\\.vcard \\{([^}]*)\\}`));
-    assert.ok(m, `.vcard at ${bp}`);
-    grab(key, m[1]);
+  grab(base[1]);
+  for (const m of section.matchAll(/@media ([^{]+)\{\s*\.vcard \{([^}]*)\}\s*\}/g)) {
+    const conds = m[1].trim().split(/\s+and\s+/);
+    const holds = conds.every((c) => {
+      const q = c.match(/^\((min|max)-(width|height):\s*(\d+)px\)$/);
+      assert.ok(q, `unparsed media condition ${c}`);
+      const v = q[2] === "width" ? w : h;
+      return q[1] === "min" ? v >= +q[3] : v <= +q[3];
+    });
+    if (holds) grab(m[2]);
   }
-  // Each class inherits what it doesn't restate.
-  out.T = { ...out.P, ...out.T };
-  out.LS = { ...out.T };
-  out.DS = { ...out.LS, ...out.DS };
-  out.XL = { ...out.DS, ...out.XL };
   return out;
 }
-// A value in px at a viewport width: "17px" or "clamp(15px, 4.1vw, 16px)".
+// A value in px at a viewport width: "17px" or "clamp(15px, 4.1vw, 17px)".
 function px(v: string, vw: number): number {
   const c = v.match(/^clamp\((\d+(?:\.\d+)?)px,\s*(\d+(?:\.\d+)?)vw,\s*(\d+(?:\.\d+)?)px\)$/);
   if (c) return Math.min(+c[3], Math.max(+c[1], (+c[2] * vw) / 100));
@@ -147,29 +152,93 @@ function px(v: string, vw: number): number {
   assert.ok(p, `unparsed size ${v}`);
   return +p[1];
 }
+function type(w: number, h: number) {
+  const v = cardVars(w, h);
+  return { label: px(v.label, w), head: px(v.head, w), meta: px(v.meta, w), caption: px(v.caption, w) };
+}
 
-test("type ramp: phones (375 / 390 / 430) clear the floors", () => {
-  const r = ramp().P;
-  for (const vw of [375, 390, 430]) {
-    assert.ok(px(r.meta, vw) >= 15, `meta ${px(r.meta, vw)} at ${vw}`);
-    assert.ok(px(r.caption, vw) >= 15, `caption at ${vw}`);
-    assert.ok(px(r.label, vw) >= 14, `label at ${vw}`);
-    assert.ok(px(r.head, vw) >= 22 && px(r.head, vw) > px(r.meta, vw) + 5, `headline a rung above meta at ${vw}`);
+// §1.1, in its order: L by height first, then width, then short/tall.
+type Cls = "P" | "L" | "T" | "LS" | "LT" | "DS" | "DT" | "XL";
+function screenClass(w: number, h: number): Cls {
+  if (h <= 500) return "L";
+  if (w < 768) return "P";
+  if (w < 1024) return "T";
+  if (w < 1440) return h < 800 ? "LS" : "LT";
+  if (w < 1920) return h < 800 ? "DS" : "DT";
+  return h >= 800 ? "XL" : "DS";
+}
+const clampPx = (lo: number, vw: number, hi: number) => (w: number) => Math.min(hi, Math.max(lo, (vw * w) / 100));
+// §1.8, transcribed (px). `kicker` is the category kicker (mono caps; phones have none, and
+// use the index numeral's 14).
+const SCALE: Record<Cls, { kicker: number; meta: (w: number) => number; role: (w: number) => number; name: (w: number) => number }> = {
+  P: { kicker: 14, meta: clampPx(15, 4.1, 17), role: clampPx(18, 4.9, 20), name: clampPx(26, 7.2, 31) },
+  L: { kicker: 14, meta: () => 15, role: () => 18, name: () => 26 },
+  T: { kicker: 16, meta: () => 18, role: () => 23, name: () => 38 },
+  LS: { kicker: 16, meta: () => 17, role: () => 21, name: () => 36 },
+  LT: { kicker: 16, meta: () => 18, role: () => 23, name: () => 40 },
+  DS: { kicker: 16, meta: () => 18, role: () => 23, name: () => 42 },
+  DT: { kicker: 17, meta: () => 19, role: () => 25, name: () => 46 },
+  XL: { kicker: 18, meta: () => 20, role: () => 28, name: () => 48 },
+};
+// Each class's reference windows (§1.1), plus the short laptops the review measured.
+const WINDOWS: Win[] = [
+  [360, 800], [375, 667], [390, 844], [430, 932],
+  [844, 390], [932, 430],
+  [768, 1024], [820, 1180], [900, 700],
+  [1024, 768], [1280, 720], [1280, 633], [1366, 657],
+  [1280, 800], [1180, 820], [1024, 1366],
+  [1440, 789],
+  [1440, 900], [1512, 982], [1728, 1117],
+  [1920, 1080], [2560, 1440], [1920, 780],
+];
+const r1 = (n: number) => Math.round(n * 10) / 10;
+
+test("type ramp: labels are the kicker row, data rows and the caption the meta row, at every class", () => {
+  for (const [w, h] of WINDOWS) {
+    const cls = screenClass(w, h);
+    const t = type(w, h);
+    const s = SCALE[cls];
+    // T's one exception: the card is in the hero's 5/12 column there (277–383 px, narrower
+    // than a phone's card), so it takes the phone row at its floor, as L does.
+    const row = cls === "T" ? SCALE.L : s;
+    assert.equal(t.label, row.kicker, `${w}x${h} (${cls}) label`);
+    assert.equal(r1(t.meta), r1(row.meta(w)), `${w}x${h} (${cls}) meta`);
+    assert.equal(t.caption, t.meta, `${w}x${h} (${cls}) caption = meta`);
   }
 });
 
-test("type ramp: laptop and up sit in 16–19 for meta, and never shrink as the screen grows", () => {
-  const all = ramp();
-  const at: [ScreenClass, number][] = [["T", 768], ["LS", 1280], ["DS", 1440], ["XL", 1920]];
-  for (const [cls, vw] of at.slice(1)) {
-    const m = px(all[cls].meta, vw);
-    assert.ok(m >= 16 && m <= 19, `${cls} meta ${m}`);
-    assert.ok(px(all[cls].head, vw) >= 24, `${cls} headline`);
+test("type ramp: the city sits a rung above role and under name, and clears 24 on phones", () => {
+  for (const [w, h] of WINDOWS) {
+    const cls = screenClass(w, h);
+    const t = type(w, h);
+    const s = SCALE[cls === "T" ? "L" : cls]; // T takes the phone row at its floor (see above)
+    assert.ok(t.head > s.role(w) + 3 && t.head < s.name(w), `${w}x${h} (${cls}) city ${t.head} vs role ${s.role(w)} / name ${s.name(w)}`);
+    if (cls === "P" || cls === "L" || cls === "T") assert.ok(t.head >= 24, `${w}x${h} city ${t.head} under the phone name floor`);
   }
-  let prev = { label: 0, head: 0, meta: 0, caption: 0 };
-  for (const [cls, vw] of [["P", 430] as [ScreenClass, number], ...at]) {
-    const cur = { label: px(all[cls].label, vw), head: px(all[cls].head, vw), meta: px(all[cls].meta, vw), caption: px(all[cls].caption, vw) };
-    for (const k of Object.keys(cur) as (keyof typeof cur)[]) assert.ok(cur[k] >= prev[k], `${k} shrinks at ${cls}`);
-    prev = cur;
+});
+
+test("type ramp: the binding floors (laptop and up meta ≥ 16, kicker ≥ 16; phones meta ≥ 15)", () => {
+  for (const [w, h] of WINDOWS) {
+    const cls = screenClass(w, h);
+    const t = type(w, h);
+    if (cls === "P" || cls === "L" || cls === "T") {
+      assert.ok(t.meta >= 15 && t.caption >= 15, `${w}x${h} phone-row meta ${t.meta}`);
+      assert.ok(t.label >= 14, `${w}x${h} phone label ${t.label}`);
+    } else {
+      for (const k of ["meta", "caption", "label"] as const) assert.ok(t[k] >= 16, `${w}x${h} (${cls}) ${k} ${t[k]}`);
+    }
+  }
+});
+
+test("type ramp: never shrinks as the card widens, at a fixed height", () => {
+  // The card NARROWS once, from a 430 phone (382 px) to a 768 tablet's 5/12 column (277 px),
+  // so the phone and tablet runs are checked separately; from the tablet up it only grows.
+  for (const h of [633, 720, 900, 1080]) for (const run of [[360, 375, 390, 430], [768, 900, 1023, 1024, 1280, 1440, 1920, 2560]]) {
+    let prev = { label: 0, head: 0, meta: 0, caption: 0 };
+    for (const w of run) {
+      const cur = type(w, h);
+      for (const k of Object.keys(cur) as (keyof typeof cur)[]) assert.ok(cur[k] >= prev[k], `${k} shrinks at ${w}x${h}`);
+      prev = cur;
+    }
   }
 });

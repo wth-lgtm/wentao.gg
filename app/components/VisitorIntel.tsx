@@ -117,8 +117,9 @@ async function fetchGeo(signal: AbortSignal): Promise<ApiGeo | null> {
   return coordsOnly;
 }
 
-// The card's type is one ramp of CSS variables on .vcard (globals.css "VISITOR CARD"),
-// stepped with the chapters' scale: a label, a headline a rung up, meta rows, a caption.
+// The card's type is one ramp of CSS variables on .vcard (globals.css "VISITOR CARD"): the
+// chapters' scale row for row (DESIGN-3D §1.8) — labels are the category kicker, every data
+// row and the caption are meta, the city a rung above role.
 const LABEL = "font-mono uppercase tracking-[0.08em] text-legend text-[length:var(--vc-label)] leading-snug";
 const VALUE = "min-w-0 font-mono text-[length:var(--vc-meta)] leading-snug [overflow-wrap:break-word]";
 
@@ -217,14 +218,15 @@ export default function VisitorIntel() {
 
   return (
     <div className="vcard glass rounded-2xl p-4 sm:p-5">
-      {/* Status, and (tablet up) the fix it's reporting */}
-      <div className="flex items-baseline justify-between gap-3 font-mono text-[length:var(--vc-label)] uppercase leading-snug tracking-[0.14em] text-legend">
+      {/* Status, and (laptop up) the fix it's reporting. The kicker never breaks; if the
+          worst-case coordinates don't fit beside it (a 1024 window), they drop to a line below. */}
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 font-mono text-[length:var(--vc-label)] uppercase leading-snug tracking-[0.14em] text-legend">
         <span className="flex min-w-0 items-center gap-2">
           <span aria-hidden>{"\u{1F4CD}"}</span>
           {/* No .text-legible halo: the glass already separates it from the rain, and a 24 px
               text-shadow grows a text's paint rect ~5× — enough to make this line's 1.5 s
               flip a late largest-contentful-paint candidate ahead of the hero's own text. */}
-          <span>{header}</span>
+          <span className="whitespace-nowrap">{header}</span>
         </span>
         <span className={`shrink-0 tabular-nums tracking-[0.04em] ${visibility("coords", "inline")}`}>
           {coords ?? <span aria-hidden>{"◎"}</span>}
@@ -240,7 +242,9 @@ export default function VisitorIntel() {
       <dl className="mt-4 grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-4 gap-y-2">
         <div className="contents">
           <dt className={LABEL}>NEAR</dt>
-          <dd className="min-w-0">
+          {/* break-word only as the last resort, for one name longer than the whole column
+              ("Llanfairpwllgwyngyll" at 26 px in a 277 px tablet card): it wraps at spaces first. */}
+          <dd className="min-w-0 [overflow-wrap:break-word]">
             {place ? (
               <>
                 <span className="block text-balance text-[length:var(--vc-head)] font-semibold leading-tight tracking-[-0.01em] text-foreground">
