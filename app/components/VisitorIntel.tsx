@@ -7,6 +7,7 @@ import ScrambleText from "./ScrambleText";
 import { getVisitorData, type VisitorData } from "./visitorData";
 import { HOME, formatDistance, greatCircleKm, isLatLon } from "../lib/telemetry";
 import {
+  CAPTIONS,
   displayIp,
   formatCoords,
   ipPieces,
@@ -207,14 +208,9 @@ export default function VisitorIntel() {
       : "OFF THE GRID";
 
   // The old caption ("no logs, just vibes") was true about THIS site and silent about the
-  // chain below it: resolving the city hands the visitor's IP to ip-api and, when that comes
-  // back thin, to ipinfo / ipwho.is / geojs. A card whose whole appeal is that it tells you
-  // the truth has to name them.
-  const caption = place
-    ? "ip-api, ipinfo, ipwho or geojs resolved that\u00A0— nothing stored here\u00A0\u{1F91D}"
-    : stillLooking
-      ? "reading the tea leaves…"
-      : "your city's playing hard to get — nice privacy \u{1F576}\u{FE0F}";
+  // chain below it. The caption names the lookups in every state (CAPTIONS, visitorCard.ts):
+  // by the time this renders, the visitor's IP is already on its way to them.
+  const caption = CAPTIONS[place ? "found" : stillLooking ? "looking" : "none"];
 
   return (
     <div className="vcard glass rounded-2xl p-4 sm:p-5">
@@ -319,8 +315,8 @@ export default function VisitorIntel() {
         </p>
       )}
 
-      {/* The honesty contract: who resolved it, and that nothing is kept. Never dropped. */}
-      <p className="text-[length:var(--vc-caption)] leading-normal text-legend">{caption}</p>
+      {/* The honesty contract: who is asked, and that nothing is kept. In every state. */}
+      <p className="text-pretty text-[length:var(--vc-caption)] leading-normal text-legend">{caption}</p>
     </div>
   );
 }

@@ -171,3 +171,17 @@ export function regionFromLocation(location: string, city: string): string {
     .filter(Boolean);
   return parts.length === 3 && parts[0] === city.trim() ? parts[1] : "";
 }
+
+// ── The caption: the honesty contract ────────────────────────────────────────────────
+// Resolving the city hands the visitor's IP to ip-api (via /api/geo) and, when that comes back
+// thin, to ipinfo, ipwho.is and geojs straight from the browser. So the caption names them in
+// EVERY state, not only once a place is showing: while the lookups are running, and when all
+// four came back empty (they were still asked). Each state is the same shape and about the same
+// length, so the card doesn't change height when one replaces another, and the found state fits
+// one line of a 1280-wide laptop's card.
+export type CaptionState = "looking" | "found" | "none";
+export const CAPTIONS: Record<CaptionState, string> = {
+  looking: "asking ip-api, ipinfo, ipwho or geojs\u00A0— nothing\u00A0stored\u00A0\u{1FAD6}",
+  found: "via ip-api, ipinfo, ipwho or geojs\u00A0— nothing\u00A0stored\u00A0\u{1F91D}",
+  none: "ip-api, ipinfo, ipwho and geojs: no dice\u00A0— nothing\u00A0stored\u00A0\u{1F576}\u{FE0F}",
+};

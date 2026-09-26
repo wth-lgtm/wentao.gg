@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import {
+  CAPTIONS,
   FIELDS,
   countryName,
   displayIp,
@@ -75,6 +76,20 @@ test("orgLine: only when it names something the ISP doesn't", () => {
   assert.equal(orgLine("Example Telecom K.K.", "example telecom kk"), null);
   assert.equal(orgLine("Zayo Bandwidth", "Mercor.io Corporation"), "Mercor.io Corporation");
   assert.equal(orgLine("Zayo Bandwidth", "  "), null);
+});
+
+test("CAPTIONS: every state names all four lookups and says nothing is stored", () => {
+  for (const [state, text] of Object.entries(CAPTIONS)) {
+    for (const p of ["ip-api", "ipinfo", "ipwho", "geojs"]) assert.ok(text.includes(p), `${state} names ${p}`);
+    assert.ok(text.includes("nothing\u00A0stored"), `${state} says nothing is stored`);
+    // The dash is tied to the word before it, so no line ever starts with "—".
+    assert.ok(!/ —/.test(text) && text.includes("\u00A0—"), `${state}: the dash never starts a line`);
+  }
+  // One shape, about one length: swapping states doesn't change the card's height.
+  const lens = Object.values(CAPTIONS).map((t) => [...t].length);
+  assert.ok(Math.max(...lens) - Math.min(...lens) <= 8, `lengths ${lens}`);
+  // The found state is the short one: one line of a 457 px card at 17 px.
+  assert.ok([...CAPTIONS.found].length <= 54, `found is ${[...CAPTIONS.found].length} characters`);
 });
 
 test("isPrivateIp: loopback and private ranges are never shown", () => {
