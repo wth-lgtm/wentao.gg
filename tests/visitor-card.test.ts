@@ -88,8 +88,8 @@ test("CAPTIONS: every state names all four lookups and says nothing is stored", 
   // One shape, about one length: swapping states doesn't change the card's height.
   const lens = Object.values(CAPTIONS).map((t) => [...t].length);
   assert.ok(Math.max(...lens) - Math.min(...lens) <= 8, `lengths ${lens}`);
-  // The found state is the short one: one line of a 457 px card at 17 px.
-  assert.ok([...CAPTIONS.found].length <= 54, `found is ${[...CAPTIONS.found].length} characters`);
+  // Each is one line of a 457 px card at 17 px (measured in place ≤ 421 px of 423): ≤ 54 code points.
+  for (const [state, text] of Object.entries(CAPTIONS)) assert.ok([...text].length <= 54, `${state} is ${[...text].length} code points`);
 });
 
 test("isPrivateIp: loopback and private ranges are never shown", () => {

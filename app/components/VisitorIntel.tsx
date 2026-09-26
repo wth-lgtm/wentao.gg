@@ -8,6 +8,7 @@ import { getVisitorData, type VisitorData } from "./visitorData";
 import { HOME, formatDistance, greatCircleKm, isLatLon } from "../lib/telemetry";
 import {
   CAPTIONS,
+  CAPTION_STATES,
   displayIp,
   formatCoords,
   ipPieces,
@@ -15,6 +16,7 @@ import {
   placeLines,
   regionFromLocation,
   visibility,
+  type CaptionState,
 } from "../lib/visitorCard";
 
 // A browser-side geo lookup used as a FALLBACK when Vercel's edge geo headers come back
@@ -234,7 +236,7 @@ export default function VisitorIntel() {
   // The old caption ("no logs, just vibes") was true about THIS site and silent about the
   // chain below it. The caption names the lookups in every state (CAPTIONS, visitorCard.ts):
   // by the time this renders, the visitor's IP is already on its way to them.
-  const caption = CAPTIONS[place ? "found" : stillLooking ? "looking" : "none"];
+  const captionState: CaptionState = place ? "found" : stillLooking ? "looking" : "none";
 
   return (
     <div ref={cardRef} className="vcard glass rounded-2xl p-(--vc-pad)">
@@ -264,23 +266,22 @@ export default function VisitorIntel() {
           <dt className={LABEL}>NEAR</dt>
           {/* break-word only as the last resort, for one name longer than the whole column
               ("Llanfairpwllgwyngyll" at 26 px in a 277 px tablet card): it wraps at spaces first. */}
-          <dd className="vc-place min-w-0 [overflow-wrap:break-word]">
+          {/* Always two lines, from the first paint: the second holds an em dash until the
+              region lands (and stays one for a country-only fix), so the answer fills the
+              card's height instead of growing it. */}
+          <dd className="min-w-0 [overflow-wrap:break-word]">
             {place ? (
-              <>
-                <span className="block text-balance text-[length:var(--vc-head)] font-semibold leading-(--vc-lh-head) tracking-[-0.01em] text-foreground">
-                  {place.head}
-                </span>
-                {place.sub && (
-                  <span className="mt-(--vc-gap-sub) block text-balance text-[length:var(--vc-meta)] leading-(--vc-lh) text-legend">
-                    {place.sub}
-                  </span>
-                )}
-              </>
+              <span className="block text-balance text-[length:var(--vc-head)] font-semibold leading-(--vc-lh-head) tracking-[-0.01em] text-foreground">
+                {place.head}
+              </span>
             ) : (
               <span className="block text-[length:var(--vc-head)] leading-(--vc-lh-head) text-legend">
                 {stillLooking ? "triangulating…" : "classified \u{1F575}\u{FE0F}"}
               </span>
             )}
+            <span className="mt-(--vc-gap-sub) block text-balance text-[length:var(--vc-meta)] leading-(--vc-lh) text-legend">
+              {place?.sub ?? "—"}
+            </span>
           </dd>
         </div>
         <div className="contents">
@@ -300,18 +301,20 @@ export default function VisitorIntel() {
             )}
           </dd>
         </div>
-        {isp && (
-          <div className="contents">
-            <dt className={LABEL}>ISP</dt>
-            <dd className={`${VALUE} text-foreground`}>{isp}</dd>
-          </div>
-        )}
-        {org && (
-          <div className={visibility("org", "contents")}>
-            <dt className={LABEL}>ORG</dt>
-            <dd className={`${VALUE} text-foreground`}>{org}</dd>
-          </div>
-        )}
+        {/* Always rendered, like DIST: an em dash holds the row until /api/geo names the ISP
+            (and stays for a fallback provider, which has none). */}
+        <div className="contents">
+          <dt className={LABEL}>ISP</dt>
+          <dd className={`${VALUE} text-foreground`}>{isp || <span className="text-legend">—</span>}</dd>
+        </div>
+        {/* Always rendered too. The org is known only once /api/geo answers, and a row that
+            appeared then grew the card after the name had painted (the whole of the hero's
+            late layout shift on a laptop). An em dash says "nothing beyond the ISP": no org,
+            or one that repeats the ISP (orgLine). */}
+        <div className={visibility("org", "contents")}>
+          <dt className={LABEL}>ORG</dt>
+          <dd className={`${VALUE} text-foreground`}>{org || <span className="text-legend">—</span>}</dd>
+        </div>
         {/* How far Wentao is from you — derived from the fix already in hand, so no extra
             network and nothing new collected. Phrased from his side ("… AWAY") so it reads
             as him telling you where he stands rather than the site pointing at you.
@@ -330,17 +333,32 @@ export default function VisitorIntel() {
       {/* Live counter — the fun fact. Counts VISITS, not people, so the copy says "peeks"
           rather than "of you": a repeat visitor moves this number, and claiming otherwise
           would be a small lie on a card whose whole appeal is that it tells you the truth.
-          A null count (no database, an error) hides the line (D-0036). */}
-      {count !== null && (
-        <p className="vc-peeks mb-(--vc-gap-peeks) text-[length:var(--vc-meta)] text-foreground">
-          <span className="text-accent">{"✦"}</span>{" "}
-          <span className="font-mono font-semibold tabular-nums text-accent">{count.toLocaleString()}</span>{" "}
-          peeks and counting {"\u{1F440}"}
-        </p>
-      )}
+          A null count (no database, an error) shows nothing (D-0036), but the line's height
+          is held from the first paint by an invisible six-digit twin in the same grid cell,
+          so the count arriving ~1.4 s in fills the line instead of pushing the card. */}
+      <p className="vc-peeks mb-(--vc-gap-peeks) grid text-[length:var(--vc-meta)] text-foreground">
+        <span aria-hidden="true" className="invisible [grid-area:1/1]">
+          {"✦"} <span className="font-mono font-semibold">000,000</span> peeks and counting {"\u{1F440}"}
+        </span>
+        {count !== null && (
+          <span className="[grid-area:1/1]">
+            <span className="text-accent">{"✦"}</span>{" "}
+            <span className="font-mono font-semibold tabular-nums text-accent">{count.toLocaleString()}</span>{" "}
+            peeks and counting {"\u{1F440}"}
+          </span>
+        )}
+      </p>
 
-      {/* The honesty contract: who is asked, and that nothing is kept. In every state. */}
-      <p className="vc-caption text-pretty text-[length:var(--vc-caption)] text-legend">{caption}</p>
+      {/* The honesty contract: who is asked, and that nothing is kept. In every state. All
+          three states sit in one grid cell, the two not showing invisible (and hidden from
+          assistive tech), so the caption is as tall as its tallest state from the first paint. */}
+      <p className="vc-caption grid text-pretty text-[length:var(--vc-caption)] text-legend">
+        {CAPTION_STATES.map((k) => (
+          <span key={k} aria-hidden={k === captionState ? undefined : true} className={k === captionState ? "[grid-area:1/1]" : "invisible [grid-area:1/1]"}>
+            {CAPTIONS[k]}
+          </span>
+        ))}
+      </p>
     </div>
   );
 }

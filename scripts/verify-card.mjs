@@ -2,13 +2,20 @@
 // measured, with the lookups mocked. Runs against a production build served on `PORT`
 // (default 3301):
 //
-//   node scripts/verify-card.mjs [port] [check]      check: fit | all (default all)
+//   node scripts/verify-card.mjs [port] [check]      check: fit | shift | all (default all)
 //
 // fit   At the short laptops (1280 × 633, 1366 × 657, 1280 × 720 — the most common laptop
 //       windows) and around them, with a London readout, a long ISP and org, and an IPv6
 //       address: the "Get in touch" button's bottom is inside the viewport, and the card,
 //       the name, the split-flap, the button and the scroll arrow don't overlap. No
 //       horizontal scroll.
+//
+// shift With the lookups answering late (/api/geo at 900 ms, /api/visit at 1400 ms, as the
+//       review mocked them), the card's growth must not move the hero: the name's LAYOUT
+//       position (offsetTop, so the entrance transform doesn't count) stays within 1 px from
+//       the first frame to 4 s, and the page's total layout shift stays under the base
+//       build's (820 × 1180 0.017, 1024 × 768 0.027, 1440 × 900 0.015; with reduced motion,
+//       1024 × 768 0.042 — the base measured by the round-2 review).
 //
 // Every readout is invented: documentation-range IPs (RFC 5737 / 3849) and made-up
 // carriers, so a screenshot or a log line never holds a real visitor's IP, ISP or city.
@@ -69,6 +76,41 @@ if (only === "all" || only === "fit") {
     (ctaIn ? pass : fail)("fit", `${tag}: CTA bottom ${Math.round(r.cta?.b)} of ${r.vh}; card ${Math.round(r.card.b - r.card.y)} tall, map ${Math.round(r.map.r - r.map.x)} wide`);
     (r.overlaps.length ? fail : pass)("fit", `${tag}: overlaps ${r.overlaps.join(", ") || "none"}`);
     (r.overflowX ? fail : pass)("fit", `${tag}: horizontal overflow ${r.overflowX}`);
+    await ctx.close();
+  }
+}
+
+// ── shift ──────────────────────────────────────────────────────────────────────────────
+if (only === "all" || only === "shift") {
+  const RUNS = [
+    { w: 820, h: 1180, touch: true, base: 0.017 },
+    { w: 1024, h: 768, base: 0.027 },
+    { w: 1440, h: 900, base: 0.015 },
+    { w: 1024, h: 768, base: 0.042, reduce: true },
+    { w: 390, h: 844, touch: true, base: null },
+  ];
+  for (const run of RUNS) {
+    const init = () => {
+      window.__cls = 0;
+      window.__h1 = [];
+      new PerformanceObserver((l) => { for (const e of l.getEntries()) if (!e.hadRecentInput) window.__cls += e.value; }).observe({ type: "layout-shift", buffered: true });
+      const layoutY = (el) => { let y = 0; for (let n = el; n; n = n.offsetParent) y += n.offsetTop; return y; };
+      const tick = () => {
+        const h1 = document.querySelector("[data-hero-h1]");
+        if (h1) window.__h1.push(layoutY(h1));
+        if (performance.now() < 4000) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    };
+    const { ctx, page } = await open(run.w, run.h, { touch: run.touch, geoDelay: 900, visitDelay: 1400, init });
+    if (run.reduce) await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.waitForTimeout(4500);
+    const r = await page.evaluate(() => ({ cls: window.__cls, ys: window.__h1 }));
+    const tag = `${run.w}x${run.h}${run.touch ? " touch" : ""}${run.reduce ? " reduced-motion" : ""}`;
+    const drift = Math.max(...r.ys) - Math.min(...r.ys);
+    (drift <= 1 ? pass : fail)("shift", `${tag}: the name's layout y moved ${drift} px over ${r.ys.length} frames`);
+    if (run.base !== null) (r.cls < run.base ? pass : fail)("shift", `${tag}: layout shift ${r.cls.toFixed(4)} (base ${run.base})`);
+    else pass("shift", `${tag}: layout shift ${r.cls.toFixed(4)} (recorded)`);
     await ctx.close();
   }
 }

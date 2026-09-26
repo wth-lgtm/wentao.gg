@@ -36,9 +36,9 @@ export const FIELDS: Record<Field, ScreenClass> = {
   ip: "P",
   isp: "P",
   // Every class. Often the most striking fact on the card (a company's name on office Wi-Fi,
-  // "Mercor.io Corporation" behind "Zayo Bandwidth"), and orgLine already drops the row when
-  // it repeats the ISP, the usual case on mobile data, so it only costs a line when it says
-  // something new.
+  // "Mercor.io Corporation" behind "Zayo Bandwidth"). The row is always there, like ISP and
+  // DIST, so the card's height is final from the first paint; when orgLine finds nothing the
+  // ISP doesn't already say, it reads "—".
   org: "P",
   dist: "P",
   peeks: "P",
@@ -122,7 +122,7 @@ export function ipPieces(ip: string): string[] {
   return ip.split(/(?<=:)/);
 }
 
-/** The ORG row: only when it names something the ISP row doesn't. */
+/** The ORG row's value: only when it names something the ISP row doesn't (else "—"). */
 export function orgLine(isp: string, org: string): string | null {
   const o = org.trim();
   if (!o) return null;
@@ -177,11 +177,14 @@ export function regionFromLocation(location: string, city: string): string {
 // thin, to ipinfo, ipwho.is and geojs straight from the browser. So the caption names them in
 // EVERY state, not only once a place is showing: while the lookups are running, and when all
 // four came back empty (they were still asked). Each state is the same shape and about the same
-// length, so the card doesn't change height when one replaces another, and the found state fits
-// one line of a 1280-wide laptop's card.
+// length, and the card reserves the tallest of the three from the first paint (VisitorIntel), so
+// it doesn't change height when one replaces another. All three fit one line of a 1280-wide
+// laptop's card at 17 px (measured in place: 409 / 421 / 420 px of 423), where the short-window
+// budget is tightest; the emoji is the found state's alone, the width the others don't have.
 export type CaptionState = "looking" | "found" | "none";
+export const CAPTION_STATES: readonly CaptionState[] = ["looking", "found", "none"];
 export const CAPTIONS: Record<CaptionState, string> = {
-  looking: "asking ip-api, ipinfo, ipwho or geojs\u00A0— nothing\u00A0stored\u00A0\u{1FAD6}",
+  looking: "asking ip-api, ipinfo, ipwho, geojs\u00A0— nothing\u00A0stored",
   found: "via ip-api, ipinfo, ipwho or geojs\u00A0— nothing\u00A0stored\u00A0\u{1F91D}",
-  none: "ip-api, ipinfo, ipwho and geojs: no dice\u00A0— nothing\u00A0stored\u00A0\u{1F576}\u{FE0F}",
+  none: "ip-api, ipinfo, ipwho, geojs: no dice\u00A0— nothing\u00A0stored",
 };
