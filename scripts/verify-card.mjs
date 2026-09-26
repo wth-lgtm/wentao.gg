@@ -2,7 +2,7 @@
 // measured, with the lookups mocked. Runs against a production build served on `PORT`
 // (default 3301):
 //
-//   node scripts/verify-card.mjs [port] [check]      check: fit | shift | a11y | all (default all)
+//   node scripts/verify-card.mjs [port] [check]      check: fit | shift | a11y | pointer | all (default all)
 //
 // fit   At the short laptops (1280 × 633, 1366 × 657, 1280 × 720 — the most common laptop
 //       windows) and around them, with a London readout, a long ISP and org, and an IPv6
@@ -21,6 +21,11 @@
 //       is one plain sentence saying where the visitor is ("You're browsing from near London,
 //       England, United Kingdom, about 5,350 miles from Wentao in San Francisco."); the row
 //       labels and the distance are spoken as words; the card adds no aria-live region.
+//
+// pointer With a mouse (no touch), the fluid owns every empty point around the card: beside the
+//       "Get in touch" button on its row, beside and above the card. The card and the button
+//       themselves take the pointer. At 600 × 900 (a phone-width window, the button's row in
+//       flow inside the card's wrapper), 768 × 1024, 900 × 700, 1024 × 768 and 1440 × 900.
 //
 // Every readout is invented: documentation-range IPs (RFC 5737 / 3849) and made-up
 // carriers, so a screenshot or a log line never holds a real visitor's IP, ISP or city.
@@ -132,6 +137,38 @@ if (only === "all" || only === "a11y") {
     (snap.includes("paragraph: You're browsing from near London, England, United Kingdom, about 5,350 miles from Wentao in San Francisco.") ? pass : fail)("a11y", `${tag}: the sentence`);
     (snap.includes("term: Internet provider") && snap.includes("definition: 5,350 miles away") ? pass : fail)("a11y", `${tag}: labels and distance spoken as words`);
     (live === 0 ? pass : fail)("a11y", `${tag}: no aria-live in the card (${live})`);
+    await ctx.close();
+  }
+}
+
+// ── pointer ────────────────────────────────────────────────────────────────────────────
+if (only === "all" || only === "pointer") {
+  for (const [w, h] of [[600, 900], [768, 1024], [900, 700], [1024, 768], [1440, 900]]) {
+    const { ctx, page } = await open(w, h);
+    await page.waitForTimeout(2500);
+    const r = await page.evaluate(() => {
+      const fluid = document.querySelector("canvas.fixed");
+      const card = document.querySelector("[data-hero-card] .vcard").getBoundingClientRect();
+      const btn = document.querySelector("[data-hero-card] a[href='#connect']").getBoundingClientRect();
+      const probe = (x, y) => {
+        if (x < 2 || y < 2 || x > innerWidth - 2 || y > innerHeight - 2) return "offscreen";
+        const el = document.elementFromPoint(x, y);
+        return el === fluid ? "fluid" : el?.closest(".vcard") ? "card" : el?.closest("a[href='#connect']") ? "button" : `${el?.tagName}.${String(el?.className?.baseVal ?? el?.className ?? "").slice(0, 30)}`;
+      };
+      return {
+        // the empty side of the button's row: right of it where it is left-aligned (below lg),
+        // left of it where it sits at the card's right edge (lg and up)
+        besideButton: probe(btn.left - card.left > card.right - btn.right ? btn.left - 40 : btn.right + 40, btn.top + btn.height / 2),
+        rightOfCard: probe(card.right + 16, card.top + card.height / 2),
+        aboveCard: probe(card.left + card.width / 2, card.top - 12),
+        onCard: probe(card.left + card.width / 2, card.top + card.height / 2),
+        onButton: probe(btn.left + btn.width / 2, btn.top + btn.height / 2),
+      };
+    });
+    const tag = `${w}x${h}`;
+    for (const k of ["besideButton", "rightOfCard", "aboveCard"]) (r[k] === "fluid" || r[k] === "offscreen" ? pass : fail)("pointer", `${tag}: ${k} → ${r[k]}`);
+    (r.onCard === "card" ? pass : fail)("pointer", `${tag}: onCard → ${r.onCard}`);
+    (r.onButton === "button" ? pass : fail)("pointer", `${tag}: onButton → ${r.onButton}`);
     await ctx.close();
   }
 }

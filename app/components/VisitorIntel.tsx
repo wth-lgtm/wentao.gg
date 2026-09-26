@@ -246,7 +246,7 @@ export default function VisitorIntel() {
   return (
     // A labelled region: its name is the status line ("WHERE YOU'RE AT"), and it opens with a
     // plain sentence. No aria-live: the page keeps its single live region.
-    <section ref={cardRef} aria-labelledby={statusId} className="vcard glass rounded-2xl p-(--vc-pad)">
+    <section ref={cardRef} aria-labelledby={statusId} className="vcard glass pointer-events-auto rounded-2xl p-(--vc-pad)">
       {/* Status, and (laptop up) the fix it's reporting. The kicker never breaks; if the
           worst-case coordinates don't fit beside it (a 1024 window), they drop to a line below. */}
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 font-mono text-[length:var(--vc-label)] uppercase leading-snug tracking-[0.14em] text-legend">

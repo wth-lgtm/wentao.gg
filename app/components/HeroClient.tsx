@@ -36,10 +36,13 @@ export default function HeroAnimations({ children }: { children: ReactNode }) {
           around both. The card fits the 5/12 column (277 px at 768) with its own type row
           (globals.css "VISITOR CARD") rather than re-composing the hero around it.
           data-hero-card is the rect the jack field keeps half-clear while it is on screen
-          (JackFieldScene.tsx). The rail passes the pointer through and only the card takes it,
-          so the empty rail above and below a card shorter than the name stays the fluid's. */}
+          (JackFieldScene.tsx). Only the card and the button take the pointer (.vcard and the
+          button carry pointer-events-auto); the rail and this wrapper pass it through, so the
+          empty rail around the card and the strip beside the button stay the fluid's — on a
+          phone-width window with a mouse the button's row is inside this wrapper, and a
+          pointer-events-auto wrapper caught it there. */}
       <div className="md:col-span-5 pointer-events-none">
-        <div data-hero-card className="pointer-events-auto relative mx-auto w-full max-w-sm md:mx-0 md:max-w-none">
+        <div data-hero-card className="pointer-events-none relative mx-auto w-full max-w-sm md:mx-0 md:max-w-none">
           <VisitorIntel />
           {/* The CTA's row spans the card's width but only the button takes the pointer: the
               rest of that strip is empty hero space, and it belongs to the fluid. On laptops the
