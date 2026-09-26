@@ -1655,3 +1655,140 @@ input:focus {
      now, so there is nothing left here to reduce. */
   .hl-pos-caret { transition: none; }
 }
+
+/* ===== VISITOR CARD (VisitorIntel.tsx, app/components/map/*) =====
+   One type ramp for the card, stepped at the same classes as the chapters' scale
+   (DESIGN-3D §1.8: phones meta ≥ 15, laptop and up 16–19; the headline a rung above):
+                 P (375/390/430)          T 768+   LS 1024+   DS 1440+   XL 1920+
+     label       14                       14       14         15         16
+     headline    clamp(22, 6vw, 24)       24       24         26         28
+     meta        clamp(15, 4.1vw, 16)     16       16         17         18
+     caption     15                       15       15         16         16
+   The map's land/sea/graticule tints are foreground mixes, so both themes follow the
+   tokens and the light theme reads as ink on paper rather than grey on white. */
+.vcard {
+  --vc-label: 14px;
+  --vc-head: clamp(22px, 6vw, 24px);
+  --vc-meta: clamp(15px, 4.1vw, 16px);
+  --vc-caption: 15px;
+  --vc-land: color-mix(in srgb, var(--foreground) 54%, transparent);
+  --vc-land-2: color-mix(in srgb, var(--foreground) 34%, transparent);
+  --vc-land-3: color-mix(in srgb, var(--foreground) 18%, transparent);
+  --vc-sea: color-mix(in srgb, var(--foreground) 5%, transparent);
+  --vc-rule: color-mix(in srgb, var(--foreground) 12%, transparent);
+  /* A dot covers ~a third of its cell, so dots need more ink than a filled shape to read
+     as the same land. */
+  --vc-dot: color-mix(in srgb, var(--foreground) 80%, transparent);
+}
+.light .vcard {
+  --vc-land: color-mix(in srgb, var(--foreground) 46%, transparent);
+  --vc-land-2: color-mix(in srgb, var(--foreground) 28%, transparent);
+  --vc-land-3: color-mix(in srgb, var(--foreground) 14%, transparent);
+  --vc-sea: color-mix(in srgb, var(--foreground) 4%, transparent);
+  --vc-rule: color-mix(in srgb, var(--foreground) 12%, transparent);
+  --vc-dot: color-mix(in srgb, var(--foreground) 66%, transparent);
+}
+@media (min-width: 768px) {
+  .vcard { --vc-head: 24px; --vc-meta: 16px; }
+}
+@media (min-width: 1440px) {
+  .vcard { --vc-label: 15px; --vc-head: 26px; --vc-meta: 17px; --vc-caption: 16px; }
+}
+@media (min-width: 1920px) {
+  .vcard { --vc-label: 16px; --vc-head: 28px; --vc-meta: 18px; }
+}
+
+/* The pin: a flat accent disc on a background-coloured keyline (so it reads over dots and
+   land alike), a translucent range disc, and one ring that pings twice and stops — zero
+   frames at rest. Sized in px, not map units, so it is the same pin on a phone and a
+   1920 monitor. Nothing glows (ESCAPEMENT law 3): no blur, no shadow spread. */
+.vc-pin,
+.vc-home {
+  position: absolute;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+.vc-pin > span,
+.vc-home > span {
+  position: absolute;
+  left: 0;
+  top: 0;
+  translate: -50% -50%;
+}
+.vc-pin {
+  animation: vc-drop 0.4s cubic-bezier(0.2, 1.4, 0.4, 1) 0.1s both;
+}
+.vc-pin-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 9999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--background);
+}
+.vc-pin-range {
+  width: 26px;
+  height: 26px;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.vc-pin-ping {
+  width: 26px;
+  height: 26px;
+  border-radius: 9999px;
+  border: 1.5px solid var(--accent);
+  opacity: 0;
+  animation: vc-ping 1.7s var(--ease-entrance) 0.5s 2 both;
+}
+.vc-home > span {
+  width: 8px;
+  height: 8px;
+  rotate: 45deg;
+  background: var(--accent);
+  box-shadow: 0 0 0 1.5px var(--background);
+  opacity: 0.85;
+}
+.vc-home {
+  animation: vc-fade 0.3s var(--ease-entrance) 0.3s both;
+}
+.vc-tether {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: vc-draw 0.6s var(--ease-entrance) 0.3s forwards;
+}
+@keyframes vc-drop {
+  from { transform: translateY(-8px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+@keyframes vc-ping {
+  0% { transform: scale(0.4); opacity: 0.8; }
+  100% { transform: scale(2.6); opacity: 0; }
+}
+@keyframes vc-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes vc-draw {
+  to { stroke-dashoffset: 0; }
+}
+/* The still photograph: everything at its settled state, no ring. */
+@media (prefers-reduced-motion: reduce) {
+  .vc-pin, .vc-home { animation: none; }
+  .vc-pin-ping { display: none; }
+  .vc-tether { animation: none; stroke-dashoffset: 0; }
+}
+/* The globe draws its pin in SVG units (the disc is radius 1), so it fades in rather than
+   dropping 8 px — 8 units would be four globes. */
+.vc-gpin {
+  animation: vc-fade 0.3s var(--ease-entrance) both;
+}
+.vc-gping {
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: vc-ping 1.7s var(--ease-entrance) 0.2s 2 both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .vc-gpin { animation: none; }
+  .vc-gping { display: none; }
+}

@@ -1,11 +1,20 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { useReducedMotion } from "framer-motion";
 import LocatorMap from "./LocatorMap";
 import ScrambleText from "./ScrambleText";
 import { getVisitorData, type VisitorData } from "./visitorData";
 import { HOME, formatDistance, greatCircleKm, isLatLon } from "../lib/telemetry";
+import {
+  formatCoords,
+  ipPieces,
+  isPrivateIp,
+  orgLine,
+  placeLines,
+  regionFromLocation,
+  visibility,
+} from "../lib/visitorCard";
 
 // A browser-side geo lookup used as a FALLBACK when Vercel's edge geo headers come back
 // thin (common for VPNs / mobile carriers / IPv6 — you get an IP but no city). The visitor
@@ -14,8 +23,8 @@ import { HOME, formatDistance, greatCircleKm, isLatLon } from "../lib/telemetry"
 // browser, which is why the card's caption names them.
 interface ApiGeo {
   ip: string;
-  location: string;
   city: string;
+  region: string;
   isp: string; // carrier / ASN (e.g. "Zayo Bandwidth")
   org: string; // end-customer org (e.g. "Mercor.io Corporation")
   cc: string; // ISO country code — picks miles vs kilometres for the DIST row
@@ -23,31 +32,7 @@ interface ApiGeo {
   lon: number | null;
 }
 
-function flagFromCode(cc: unknown): string {
-  if (typeof cc !== "string" || cc.length !== 2) return "";
-  return String.fromCodePoint(
-    ...[...cc.toUpperCase()].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65)
-  );
-}
-
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
-
-// Loopback / private-range IPs (e.g. ::1 on localhost) — don't display these; prefer the
-// public IP the geo provider sees.
-function isPrivateIp(ip: string): boolean {
-  return (
-    !ip ||
-    ip === "::1" ||
-    ip === "0.0.0.0" ||
-    ip.startsWith("127.") ||
-    ip.startsWith("10.") ||
-    ip.startsWith("192.168.") ||
-    /^172\.(1[6-9]|2\d|3[01])\./.test(ip) ||
-    ip.startsWith("fe80") ||
-    ip.startsWith("fc") ||
-    ip.startsWith("fd")
-  );
-}
 
 interface RawGeo {
   ip: string;
@@ -99,15 +84,18 @@ const GEO_PROVIDERS: {
 ];
 
 function toApiGeo(r: RawGeo): ApiGeo {
-  const city = r.city.trim();
-  // City + region only; the flag conveys the country, so we skip the (long) country name
-  // to keep the line short on mobile.
-  const parts = [city, r.region].filter((p) => p && p.trim());
-  const flag = flagFromCode(r.cc);
-  const location = parts.length ? `${parts.join(", ")}${flag ? ` ${flag}` : ""}` : "";
   const fix =
     Number.isFinite(r.lat) && Number.isFinite(r.lon) && !(r.lat === 0 && r.lon === 0);
-  return { ip: r.ip, location, city, isp: r.isp, org: r.org, cc: r.cc, lat: fix ? r.lat : null, lon: fix ? r.lon : null };
+  return {
+    ip: r.ip,
+    city: r.city.trim(),
+    region: r.region.trim(),
+    isp: r.isp,
+    org: r.org,
+    cc: r.cc,
+    lat: fix ? r.lat : null,
+    lon: fix ? r.lon : null,
+  };
 }
 
 async function fetchGeo(signal: AbortSignal): Promise<ApiGeo | null> {
@@ -129,13 +117,19 @@ async function fetchGeo(signal: AbortSignal): Promise<ApiGeo | null> {
   return coordsOnly;
 }
 
+
+// The card's type is one ramp of CSS variables on .vcard (globals.css "VISITOR CARD"),
+// stepped with the chapters' scale: a label, a headline a rung up, meta rows, a caption.
+const LABEL = "font-mono uppercase tracking-[0.08em] text-legend text-[length:var(--vc-label)] leading-snug";
+const VALUE = "min-w-0 font-mono text-[length:var(--vc-meta)] leading-snug [overflow-wrap:break-word]";
+
 export default function VisitorIntel() {
   const reduce = useReducedMotion() ?? false;
   const [data, setData] = useState<VisitorData | null>(null);
   const [api, setApi] = useState<ApiGeo | null>(null);
   const [probing, setProbing] = useState(false);
   const [count, setCount] = useState<number | null>(null);
-  const [located, setLocated] = useState(false);
+  const [locatedFor, setLocatedFor] = useState("");
 
   // Read the visitor cookie for an instant first-paint hint, then always resolve via the
   // geo chain — /api/geo (ip-api) is more accurate than Vercel's edge geo and is the only
@@ -167,22 +161,22 @@ export default function VisitorIntel() {
   // Prefer the resolved lookup (ip-api-grade) over the cookie hint; the cookie is just the
   // instant placeholder until /api/geo answers.
   const hasApiCity = !!api?.city;
-  const location = hasApiCity ? api!.location : data?.location || api?.location || "";
   const city = (hasApiCity ? api!.city : data?.city || "").trim();
+  const region = hasApiCity ? api!.region : regionFromLocation(data?.location ?? "", data?.city ?? "") || api?.region || "";
   const lat = api?.lat ?? data?.lat ?? null;
   const lon = api?.lon ?? data?.lon ?? null;
   const isp = api?.isp ?? "";
-  const org = api?.org ?? "";
+  const org = orgLine(isp, api?.org ?? "");
   // Prefer a public IP: on localhost the cookie holds ::1, so fall back to the geo IP.
   const cookieIp = data?.ip ?? "";
   const ip = !isPrivateIp(cookieIp) ? cookieIp : api?.ip || cookieIp || "";
   const hasFix = lat !== null && lon !== null;
-  // A city-LEVEL result (not just a country) counts as "detected"; a bare country reads as
-  // "classified".
+  // A city-LEVEL result (not just a country) counts as "detected".
   const hasCity = !!city;
   // Prefer the provider's country, but fall back to the edge cookie — otherwise a US or GB
   // visitor is shown kilometres for as long as /api/geo takes to answer.
   const cc = api?.cc || data?.cc || "";
+  const place = placeLines(city, region, cc);
   // Gated on a CITY-level fix, not merely on having coordinates. When Vercel can't resolve
   // a city it still returns lat/lon — a COUNTRY CENTROID (for the US, rural Kansas) — and
   // gating on `hasFix` turned that into a confident "2,160 KM AWAY" measured to the middle
@@ -191,18 +185,18 @@ export default function VisitorIntel() {
   const fix = { lat: lat as number, lon: lon as number };
   const distance =
     hasCity && isLatLon(fix) ? formatDistance(greatCircleKm(HOME, fix), cc) : null;
+  const coords = formatCoords(lat, lon);
   const stillLooking = data === null || probing;
 
-  // Flip the header once the zoom has settled.
+  // Flip the header once the map has had its moment (the pin drops at ~0.5 s, the globe
+  // settles by 1.6 s). Set from the timer, never synchronously in the effect.
+  const fixKey = hasFix ? `${lat},${lon}` : "";
   useEffect(() => {
-    if (!hasFix) return;
-    if (reduce) {
-      setLocated(true);
-      return;
-    }
-    const t = setTimeout(() => setLocated(true), 1500);
+    if (!fixKey || reduce) return;
+    const t = setTimeout(() => setLocatedFor(fixKey), 1500);
     return () => clearTimeout(t);
-  }, [hasFix, reduce]);
+  }, [fixKey, reduce]);
+  const located = hasFix && (reduce || locatedFor !== "");
 
   const header = hasFix
     ? located
@@ -212,69 +206,86 @@ export default function VisitorIntel() {
       ? "LOCATING YOU…"
       : "OFF THE GRID";
 
-  const cityDisplay = hasCity
-    ? location
-    : stillLooking
-      ? "triangulating…"
-      : "classified \u{1F575}\u{FE0F}";
-
   // The old caption ("no logs, just vibes") was true about THIS site and silent about the
   // chain below it: resolving the city hands the visitor's IP to ip-api and, when that comes
   // back thin, to ipinfo / ipwho.is / geojs. A card whose whole appeal is that it tells you
   // the truth has to name them.
-  const caption = hasCity
-    ? "ip-api, ipinfo, ipwho or geojs resolved that — nothing stored here \u{1F91D}"
+  const caption = place
+    ? "ip-api, ipinfo, ipwho or geojs resolved that\u00A0— nothing stored here\u00A0\u{1F91D}"
     : stillLooking
       ? "reading the tea leaves…"
       : "your city's playing hard to get — nice privacy \u{1F576}\u{FE0F}";
 
   return (
-    <div className="glass rounded-2xl p-4 sm:p-5 font-mono">
-      {/* Header */}
-      <div className="mb-3 flex items-center justify-between text-[11px] uppercase tracking-[0.16em] text-muted">
-        <span className="flex items-center gap-1.5">
+    <div className="vcard glass rounded-2xl p-4 sm:p-5">
+      {/* Status, and (tablet up) the fix it's reporting */}
+      <div className="flex items-baseline justify-between gap-3 font-mono text-[length:var(--vc-label)] uppercase leading-snug tracking-[0.14em] text-legend">
+        <span className="flex min-w-0 items-center gap-2">
           <span aria-hidden>{"\u{1F4CD}"}</span>
           <span className="text-legible">{header}</span>
         </span>
-        <span aria-hidden className="text-muted/40">
-          {"◎"}
+        <span className={`shrink-0 tabular-nums tracking-[0.04em] ${visibility("coords", "inline")}`}>
+          {coords ?? <span aria-hidden>{"◎"}</span>}
         </span>
       </div>
 
-      {/* Dotted world map → zoom to pin (drag / scroll / ⌖ to explore). Height scales with
-          the viewport so the card stays compact on short screens. */}
-      <div className="mb-3 h-[clamp(92px,13vh,140px)] overflow-hidden rounded-xl bg-background/40 ring-1 ring-border/60">
-        <LocatorMap lat={lat} lon={lon} />
+      {/* The whole world, the pin, and a hairline home (LocatorMap). */}
+      <div className="mt-3">
+        <LocatorMap lat={lat} lon={lon} reduce={reduce} />
       </div>
 
-      {/* Readout */}
-      <dl className="space-y-1.5 text-xs">
-        <div className="flex items-baseline gap-3">
-          <dt className="w-9 shrink-0 text-legend">IP</dt>
-          <dd className="min-w-0 break-all font-semibold text-accent">
+      {/* Readout: the place leads, the network follows. */}
+      <dl className="mt-4 grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-4 gap-y-2">
+        <div className="contents">
+          <dt className={LABEL}>NEAR</dt>
+          <dd className="min-w-0">
+            {place ? (
+              <>
+                <span className="block text-balance text-[length:var(--vc-head)] font-semibold leading-tight tracking-[-0.01em] text-foreground">
+                  {place.head}
+                </span>
+                {place.sub && (
+                  <span className="mt-1 block text-balance text-[length:var(--vc-meta)] leading-snug text-legend">
+                    {place.sub}
+                  </span>
+                )}
+              </>
+            ) : (
+              <span className="block text-[length:var(--vc-head)] leading-tight text-legend">
+                {stillLooking ? "triangulating…" : "classified \u{1F575}\u{FE0F}"}
+              </span>
+            )}
+          </dd>
+        </div>
+        <div className="contents">
+          <dt className={LABEL}>IP</dt>
+          <dd className={`${VALUE} font-semibold text-accent`}>
             {ip ? (
-              <ScrambleText text={ip} scrambleSpeed={18} revealSpeed={14} />
+              // An IPv6 address breaks only after a colon, never inside a group; the pieces
+              // rejoin byte-identical, so selecting the row still copies the address.
+              ipPieces(ip).map((piece, i) => (
+                <Fragment key={i}>
+                  <ScrambleText text={piece} scrambleSpeed={18} revealSpeed={14} />
+                  <wbr />
+                </Fragment>
+              ))
             ) : (
               <span className="font-normal text-legend">hidden {"\u{1F575}\u{FE0F}"}</span>
             )}
           </dd>
         </div>
         {isp && (
-          <div className="flex items-baseline gap-3">
-            <dt className="w-9 shrink-0 text-legend">ISP</dt>
-            <dd className="min-w-0 break-words text-foreground/85">{isp}</dd>
+          <div className="contents">
+            <dt className={LABEL}>ISP</dt>
+            <dd className={`${VALUE} text-foreground`}>{isp}</dd>
           </div>
         )}
-        {org && org !== isp && (
-          <div className="flex items-baseline gap-3">
-            <dt className="w-9 shrink-0 text-legend">ORG</dt>
-            <dd className="min-w-0 break-words text-foreground/85">{org}</dd>
+        {org && (
+          <div className={visibility("org", "contents")}>
+            <dt className={LABEL}>ORG</dt>
+            <dd className={`${VALUE} text-foreground`}>{org}</dd>
           </div>
         )}
-        <div className="flex items-baseline gap-3">
-          <dt className="w-9 shrink-0 text-legend">NEAR</dt>
-          <dd className="min-w-0 break-words text-foreground/85">{cityDisplay}</dd>
-        </div>
         {/* How far Wentao is from you — derived from the fix already in hand, so no extra
             network and nothing new collected. Phrased from his side ("… AWAY") so it reads
             as him telling you where he stands rather than the site pointing at you.
@@ -282,34 +293,28 @@ export default function VisitorIntel() {
             geo answer lands IN it instead of shoving the card around. It also stays an
             em dash once the probe is finished and empty — a gauge that reads "resolving"
             forever is a broken gauge. */}
-        <div className="flex items-baseline gap-3">
-          <dt className="w-9 shrink-0 text-legend">DIST</dt>
-          <dd className="min-w-0 text-foreground/85">
-            {distance ?? (
-              <span className="text-legend">—</span>
-            )}
-          </dd>
+        <div className="contents">
+          <dt className={LABEL}>DIST</dt>
+          <dd className={`${VALUE} text-foreground`}>{distance ?? <span className="text-legend">—</span>}</dd>
         </div>
       </dl>
 
-      {/* Divider */}
-      <div className="my-2.5 h-px bg-border/70" />
+      <div className="my-3.5 h-px bg-border/70" />
 
       {/* Live counter — the fun fact. Counts VISITS, not people, so the copy says "peeks"
           rather than "of you": a repeat visitor moves this number, and claiming otherwise
-          would be a small lie on a card whose whole appeal is that it tells you the truth. */}
+          would be a small lie on a card whose whole appeal is that it tells you the truth.
+          A null count (no database, an error) hides the line (D-0036). */}
       {count !== null && (
-        <p className="text-xs leading-relaxed text-foreground/80">
+        <p className="mb-1.5 text-[length:var(--vc-meta)] leading-snug text-foreground">
           <span className="text-accent">{"✦"}</span>{" "}
-          <span className="font-semibold tabular-nums text-accent">
-            {count.toLocaleString()}
-          </span>{" "}
+          <span className="font-mono font-semibold tabular-nums text-accent">{count.toLocaleString()}</span>{" "}
           peeks and counting {"\u{1F440}"}
         </p>
       )}
 
-      {/* Disarming caption */}
-      <p className="mt-2 text-[11px] text-legend">{caption}</p>
+      {/* The honesty contract: who resolved it, and that nothing is kept. Never dropped. */}
+      <p className="text-[length:var(--vc-caption)] leading-normal text-legend">{caption}</p>
     </div>
   );
 }
