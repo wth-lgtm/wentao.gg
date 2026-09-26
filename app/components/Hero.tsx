@@ -1,6 +1,7 @@
 import { ArrowDown } from "lucide-react";
 import HeroAnimations from "./HeroClient";
 import NameCaustic from "./NameCaustic";
+import WorldMap from "./map/WorldMap";
 import { HERO_NAME, HERO_NAME_METRICS } from "./heroName";
 
 export default function Hero() {
@@ -15,7 +16,9 @@ export default function Hero() {
           className="relative z-20 animate-fade-in-up"
           style={{ animationDelay: "0.1s", opacity: 0, animationFillMode: "forwards" }}
         >
-          <HeroAnimations>
+          {/* worldMap: the visitor card's world, drawn here on the server and handed down as
+              a slot, so its land is in the HTML and in no client bundle (map/WorldMap.tsx). */}
+          <HeroAnimations worldMap={<WorldMap />}>
             {/* LCP element: static heading in server HTML, visible instantly.
                 Now a real <h1>. The comments here have called this "the heading" since
                 it was written, but the markup was a <span>, so the document served

@@ -1,9 +1,9 @@
 "use client";
 
-// OUTLINE's marks: the pin, the tether home and the home diamond, over the land and the grid
-// that LocatorMap already painted in the server HTML (two static masks, public/map/*.svg,
-// baked by scripts/gen-world.ts). Only this layer waits for JavaScript: it needs the fix,
-// and it projects with the same mapProjection.equalEarthFrame the images were baked to.
+// OUTLINE's marks: the pin, the tether home and the home diamond, over the land, the sea and
+// the graticule already in the server HTML (map/WorldMap.tsx, a server component). Only this
+// layer waits for JavaScript: it needs the fix, and it projects with the same
+// mapProjection.equalEarthFrame the land was baked to.
 
 import { memo, useMemo } from "react";
 import { OUTLINE_FRAME } from "./frames";

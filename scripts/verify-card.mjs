@@ -2,7 +2,7 @@
 // measured, with the lookups mocked. Runs against a production build served on `PORT`
 // (default 3301):
 //
-//   node scripts/verify-card.mjs [port] [check]      check: fit | shift | a11y | pointer | all (default all)
+//   node scripts/verify-card.mjs [port] [check]      check: fit | shift | a11y | pointer | paint | all (default all)
 //
 // fit   At the short laptops (1280 × 633, 1366 × 657, 1280 × 720 — the most common laptop
 //       windows) and around them, with a London readout, a long ISP and org, and an IPv6
@@ -26,6 +26,14 @@
 //       "Get in touch" button on its row, beside and above the card. The card and the button
 //       themselves take the pointer. At 600 × 900 (a phone-width window, the button's row in
 //       flow inside the card's wrapper), 768 × 1024, 900 × 700, 1024 × 768 and 1440 × 900.
+//
+// paint The world map's land is in the server HTML (on the card's first frame, with no
+//       JavaScript), and the card never becomes the page's largest contentful paint: at a
+//       phone, a tablet, a short laptop and a desktop the LCP element is the hero's own text,
+//       painted with the first paint (a map drawn as an image outsized it, at 2.5 s on slow 4G).
+//       The element is the hero's "San Francisco" line today: the h1 starts at opacity 0 for
+//       its entrance, and an element that first paints invisible is not an LCP candidate —
+//       the same on the base build; this check holds the card out of the race.
 //
 // Every readout is invented: documentation-range IPs (RFC 5737 / 3849) and made-up
 // carriers, so a screenshot or a log line never holds a real visitor's IP, ISP or city.
@@ -169,6 +177,32 @@ if (only === "all" || only === "pointer") {
     for (const k of ["besideButton", "rightOfCard", "aboveCard"]) (r[k] === "fluid" || r[k] === "offscreen" ? pass : fail)("pointer", `${tag}: ${k} → ${r[k]}`);
     (r.onCard === "card" ? pass : fail)("pointer", `${tag}: onCard → ${r.onCard}`);
     (r.onButton === "button" ? pass : fail)("pointer", `${tag}: onButton → ${r.onButton}`);
+    await ctx.close();
+  }
+}
+
+// ── paint ──────────────────────────────────────────────────────────────────────────────
+if (only === "all" || only === "paint") {
+  const html = await (await fetch(`${BASE}/`)).text();
+  const at = html.indexOf('data-map="outline"');
+  const svgEnd = html.indexOf("</svg>", at);
+  const land = at > 0 && svgEnd > at && (html.slice(at, svgEnd).match(/<path /g) ?? []).length === 3 && html.slice(at, svgEnd).includes('<path d="M350 426');
+  (land ? pass : fail)("paint", `server HTML: the outline's land is drawn inside [data-map] (${Math.round(html.length / 1024)} KB of HTML)`);
+  for (const [w, h, touch] of [[390, 844, true], [768, 1024, true], [1280, 633, false], [1440, 900, false]]) {
+    const init = () => {
+      window.__lcp = null;
+      window.__fcp = null;
+      new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__lcp = e; }).observe({ type: "largest-contentful-paint", buffered: true });
+      new PerformanceObserver((l) => { for (const e of l.getEntries()) if (e.name === "first-contentful-paint") window.__fcp = e.startTime; }).observe({ type: "paint", buffered: true });
+    };
+    const { ctx, page } = await open(w, h, { touch, init });
+    await page.waitForTimeout(3000);
+    const r = await page.evaluate(() => {
+      const e = window.__lcp?.element;
+      return e ? { inCard: !!e.closest("[data-hero-card]"), inHero: !!e.closest("#about, header, nav, [class*='top-[4.5rem]']"), what: `${e.tagName} "${(e.textContent || "").trim().slice(0, 20)}"`, t: Math.round(window.__lcp.startTime), fcp: Math.round(window.__fcp ?? -1) } : null;
+    });
+    const ok = r && !r.inCard && r.inHero && r.t - r.fcp <= 100;
+    (ok ? pass : fail)("paint", `${w}x${h}: LCP ${r?.what ?? "none"} at ${r?.t} ms (FCP ${r?.fcp} ms)${r?.inCard ? " — INSIDE THE CARD" : ""}`);
     await ctx.close();
   }
 }

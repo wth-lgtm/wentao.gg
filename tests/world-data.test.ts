@@ -2,21 +2,17 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
+import { readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { DOTS_GRID } from "../app/components/map/worldDots";
 import { GLOBE_DOTS } from "../app/components/map/worldGlobe";
+import { OUTLINE } from "../app/components/map/worldOutline";
 import { DOTS_FRAME, GLOBE_STEP, MAP_ASPECT, MAP_ASPECT_CSS, OUTLINE_FRAME } from "../app/components/map/frames";
 import { equalEarthFrame, millerGrid, sphereLattice, toGrid, toUnit, unpackBits } from "../app/lib/mapProjection";
 
 // The baked world maps (scripts/gen-world.ts from Natural Earth 110m land). These hold the
 // data to the frames the page projects with, and hold the land where the world keeps it:
 // a regenerated file with a shifted row or a flipped bit fails here, not on a visitor's card.
-
-// The shipped outline is two static images (public/map/), painted as CSS masks.
-const LAND_SVG = readFileSync("public/map/land.svg", "utf8");
-const GRID_SVG = readFileSync("public/map/grid.svg", "utf8");
-const svgPaths = (svg: string) => [...svg.matchAll(/<path d="([^"]+)"/g)].map((m) => m[1]);
-const viewBoxOf = (svg: string) => svg.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/)?.slice(1).map(Number);
-const OUTLINE = { ...OUTLINE_FRAME, d: svgPaths(LAND_SVG)[0] ?? "", rings: +(LAND_SVG.match(/Land: (\d+) rings/)?.[1] ?? 0) };
 
 const dotsLand = unpackBits(DOTS_GRID.bits, DOTS_GRID.cols * DOTS_GRID.rows);
 const globeLand = unpackBits(GLOBE_DOTS.bits, GLOBE_DOTS.count);
@@ -70,14 +66,12 @@ test("the data files are baked to the page's frames", () => {
   assert.equal(DOTS_GRID.latBottom, DOTS_FRAME.latBottom);
   assert.equal(GLOBE_DOTS.step, GLOBE_STEP);
   assert.equal(GLOBE_DOTS.count, lattice.length);
-  // Both outline images at the frame's viewBox, stretched to the box (preserveAspectRatio
-  // none) — the marks are positioned in percent of the same box, so they sit on this land.
+  assert.equal(OUTLINE.width, OUTLINE_FRAME.width);
+  assert.equal(OUTLINE.latTop, OUTLINE_FRAME.latTop);
+  assert.equal(OUTLINE.latBottom, OUTLINE_FRAME.latBottom);
+  // The viewBox WorldMap draws in is the frame the marks are projected with.
   const fo = equalEarthFrame(OUTLINE_FRAME.width, OUTLINE_FRAME.latTop, OUTLINE_FRAME.latBottom);
-  for (const svg of [LAND_SVG, GRID_SVG]) {
-    assert.deepEqual(viewBoxOf(svg), [OUTLINE_FRAME.width, +fo.height.toFixed(1)]);
-    assert.ok(svg.includes('preserveAspectRatio="none"'));
-    assert.ok(svg.includes(`"width":${OUTLINE_FRAME.width},"latTop":${OUTLINE_FRAME.latTop},"latBottom":${OUTLINE_FRAME.latBottom}`));
-  }
+  assert.equal(OUTLINE.height, +fo.height.toFixed(1));
   // The box LocatorMap reserves before a treatment's chunk loads is that treatment's aspect.
   assert.equal(MAP_ASPECT.dots, DOTS_GRID.cols / DOTS_GRID.rows);
   const f = equalEarthFrame(OUTLINE.width, OUTLINE.latTop, OUTLINE.latBottom);
@@ -143,28 +137,35 @@ test("the outline path: one closed ring per M, every point inside the frame", ()
   assert.ok(minY < 0.05 * f.height && maxY > 0.95 * f.height);
 });
 
-test("the grid image: the sea at 0.4 alpha, 1 px lines, eleven meridians and four parallels", () => {
-  const [sea, grid] = svgPaths(GRID_SVG);
-  assert.ok(sea && grid, "two paths");
-  assert.match(GRID_SVG, /fill-opacity="0.4"/);
-  assert.equal((GRID_SVG.match(/vector-effect="non-scaling-stroke"/g) ?? []).length, 2);
-  assert.equal((grid.match(/M/g) ?? []).length, 11 + 4);
-  assert.ok(sea.endsWith("Z"));
+test("the sea and the graticule: the frame's outline, eleven meridians and four parallels", () => {
+  assert.ok(OUTLINE.sea.startsWith("M") && OUTLINE.sea.endsWith("Z"));
+  assert.equal((OUTLINE.grid.match(/M/g) ?? []).length, 11 + 4);
+  // The land, sea and grid are the HTML's weight now (twice: the markup and the RSC payload),
+  // so they stay small: the base's dot map cost the HTML ~76 KB more than this.
+  assert.ok(OUTLINE.d.length + OUTLINE.sea.length + OUTLINE.grid.length < 13_000, "outline under 13 KB");
 });
 
-test("the outline images stay small: no weight for the HTML, little for the network", () => {
-  // The land is ~11 KB of source (~4 KB gzipped); the grid ~6 KB. Neither is in the HTML.
-  assert.ok(LAND_SVG.length < 14_000, `land.svg ${LAND_SVG.length} B`);
-  assert.ok(GRID_SVG.length < 8_000, `grid.svg ${GRID_SVG.length} B`);
+// The outline's data rides in the server HTML only: the one module that imports it is a
+// server component, so it can never be pulled into a client bundle.
+test("the outline data is read by a server component only", () => {
+  const files: string[] = [];
+  const walk = (dir: string) => {
+    for (const f of readdirSync(dir)) {
+      const p = join(dir, f);
+      if (statSync(p).isDirectory()) walk(p);
+      else if (/\.(ts|tsx)$/.test(f)) files.push(p);
+    }
+  };
+  walk("app");
+  const importers = files.filter((f) => /from "\.\/worldOutline"|map\/worldOutline"/.test(readFileSync(f, "utf8")));
+  assert.deepEqual(importers, [join("app", "components", "map", "WorldMap.tsx")]);
+  assert.ok(!/^["']use client["']/m.test(readFileSync(importers[0], "utf8")), "WorldMap.tsx is a server component");
 });
 
 test("provenance: one source, one hash, the generator named in every file", () => {
-  const modules = ["worldDots", "worldGlobe"].map((n) => readFileSync(`app/components/map/${n}.ts`, "utf8"));
-  const images = [LAND_SVG, GRID_SVG];
-  const files = [...modules, ...images];
+  const files = ["worldDots", "worldGlobe", "worldOutline"].map((n) => readFileSync(`app/components/map/${n}.ts`, "utf8"));
   const hashes = files.map((t) => t.match(/Source sha256: ([0-9a-f]{64})/)?.[1]);
-  assert.ok(hashes.every((h) => h && h === hashes[0]), "all four baked from the same file");
-  assert.ok(modules.every((t) => t.startsWith("// AUTO-GENERATED by scripts/gen-world.ts")));
-  assert.ok(images.every((t) => t.includes("AUTO-GENERATED by scripts/gen-world.ts")));
+  assert.ok(hashes.every((h) => h && h === hashes[0]), "all three baked from the same file");
+  assert.ok(files.every((t) => t.startsWith("// AUTO-GENERATED by scripts/gen-world.ts")));
   assert.ok(files.every((t) => t.includes("Natural Earth 1:110m land (public domain)")));
 });

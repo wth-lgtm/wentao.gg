@@ -10,7 +10,7 @@ import SplitFlap from "./SplitFlap";
 // HeroAnimations — the two-column hero: identity (left) + visitor intel (right)
 // ============================================================================
 
-export default function HeroAnimations({ children }: { children: ReactNode }) {
+export default function HeroAnimations({ children, worldMap }: { children: ReactNode; worldMap?: ReactNode }) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => {
     setMounted(true);
@@ -43,7 +43,7 @@ export default function HeroAnimations({ children }: { children: ReactNode }) {
           pointer-events-auto wrapper caught it there. */}
       <div className="md:col-span-5 pointer-events-none">
         <div data-hero-card className="pointer-events-none relative mx-auto w-full max-w-sm md:mx-0 md:max-w-none">
-          <VisitorIntel />
+          <VisitorIntel worldMap={worldMap} />
           {/* The CTA's row spans the card's width but only the button takes the pointer: the
               rest of that strip is empty hero space, and it belongs to the fluid. On laptops the
               button sits at the card's right edge: the card grew with its type (~390 → 530 px),

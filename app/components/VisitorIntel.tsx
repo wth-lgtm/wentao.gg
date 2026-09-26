@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useId, useRef, useState } from "react";
+import { Fragment, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useReducedMotion } from "framer-motion";
 import LocatorMap from "./LocatorMap";
 import ScrambleText from "./ScrambleText";
@@ -128,7 +128,9 @@ async function fetchGeo(signal: AbortSignal): Promise<ApiGeo | null> {
 const LABEL = "font-mono uppercase tracking-[0.08em] text-legend text-[length:var(--vc-label)] leading-(--vc-lh)";
 const VALUE = "min-w-0 font-mono text-[length:var(--vc-meta)] leading-(--vc-lh) [overflow-wrap:break-word]";
 
-export default function VisitorIntel() {
+// worldMap: the outline map's land, sea and graticule, rendered by a server component
+// (map/WorldMap.tsx) and passed down from Hero.tsx, so they are in the server HTML.
+export default function VisitorIntel({ worldMap }: { worldMap?: ReactNode }) {
   const reduce = useReducedMotion() ?? false;
   const [data, setData] = useState<VisitorData | null>(null);
   const [api, setApi] = useState<ApiGeo | null>(null);
@@ -266,7 +268,7 @@ export default function VisitorIntel() {
 
       {/* The whole world, the pin, and a hairline home (LocatorMap). */}
       <div className="mt-(--vc-gap-map)">
-        <LocatorMap lat={lat} lon={lon} reduce={reduce} />
+        <LocatorMap lat={lat} lon={lon} reduce={reduce} outline={worldMap} />
       </div>
 
       {/* Readout: the place leads, the network follows. */}
