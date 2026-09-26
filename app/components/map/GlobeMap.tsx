@@ -152,9 +152,16 @@ function GlobeMap({ lat, lon, reduce }: { lat: number | null; lon: number | null
       const body = bodyRef.current;
       if (body) body.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 300, easing: "ease-out" });
     }
-    if (dist < 0.05 || !fix) {
+    if (!fix) {
       paint.current(target, fix);
       return;
+    }
+    if (dist < 0.05) {
+      // Already facing it (a refinement inside the tilt cap): no settle, but the pin still
+      // has to be told this fix is the one at rest — from a frame, not synchronously here.
+      paint.current(target, fix);
+      raf.current = requestAnimationFrame(() => setSettled(fixKey));
+      return () => cancelAnimationFrame(raf.current);
     }
     const start = performance.now();
     const origin = from;

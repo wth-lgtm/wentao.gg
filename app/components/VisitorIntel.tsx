@@ -117,7 +117,6 @@ async function fetchGeo(signal: AbortSignal): Promise<ApiGeo | null> {
   return coordsOnly;
 }
 
-
 // The card's type is one ramp of CSS variables on .vcard (globals.css "VISITOR CARD"),
 // stepped with the chapters' scale: a label, a headline a rung up, meta rows, a caption.
 const LABEL = "font-mono uppercase tracking-[0.08em] text-legend text-[length:var(--vc-label)] leading-snug";
@@ -222,7 +221,10 @@ export default function VisitorIntel() {
       <div className="flex items-baseline justify-between gap-3 font-mono text-[length:var(--vc-label)] uppercase leading-snug tracking-[0.14em] text-legend">
         <span className="flex min-w-0 items-center gap-2">
           <span aria-hidden>{"\u{1F4CD}"}</span>
-          <span className="text-legible">{header}</span>
+          {/* No .text-legible halo: the glass already separates it from the rain, and a 24 px
+              text-shadow grows a text's paint rect ~5× — enough to make this line's 1.5 s
+              flip a late largest-contentful-paint candidate ahead of the hero's own text. */}
+          <span>{header}</span>
         </span>
         <span className={`shrink-0 tabular-nums tracking-[0.04em] ${visibility("coords", "inline")}`}>
           {coords ?? <span aria-hidden>{"◎"}</span>}
