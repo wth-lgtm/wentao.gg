@@ -97,24 +97,22 @@ test("regionFromLocation: the edge cookie's middle part, or nothing", () => {
   assert.equal(regionFromLocation("Oakland, California, United States", "Berkeley"), "");
 });
 
-test("FIELDS: the place, the IP, the distance and the caption are on every screen", () => {
+test("FIELDS: every fact about you is on every screen; only the coordinates wait for a tablet", () => {
   const classes: ScreenClass[] = ["P", "T", "LS", "DS", "XL"];
-  const always: Field[] = ["status", "map", "city", "place", "ip", "isp", "dist", "peeks", "caption"];
+  const always: Field[] = ["status", "map", "city", "place", "ip", "isp", "org", "dist", "peeks", "caption"];
   for (const f of always) for (const c of classes) assert.ok(shownOn(f, c), `${f} on ${c}`);
-  // Phones drop the two second-order facts; tablets and up show them.
-  for (const f of ["coords", "org"] as Field[]) {
-    assert.ok(!shownOn(f, "P"), `${f} dropped on phones`);
-    for (const c of classes.slice(1)) assert.ok(shownOn(f, c), `${f} on ${c}`);
-  }
+  // The coordinates can't share the kicker's line on a phone; tablets and up show them.
+  assert.ok(!shownOn("coords", "P"), "coords dropped on phones");
+  for (const c of classes.slice(1)) assert.ok(shownOn("coords", c), `coords on ${c}`);
   // A field, once shown, stays shown on every wider class.
   for (const f of Object.keys(FIELDS) as Field[]) {
     const seen = classes.map((c) => shownOn(f, c));
     assert.ok(seen.every((s, i) => i === 0 || s || !seen[i - 1]), `${f} monotone`);
   }
   // The classes the card renders are literal Tailwind classes (the scanner sees them).
-  assert.equal(visibility("org", "contents"), "hidden md:contents");
+  assert.equal(visibility("org", "contents"), "contents"); // an every-class row keeps its display
   assert.equal(visibility("coords", "inline"), "hidden md:inline");
-  assert.equal(visibility("ip"), "");
+  assert.equal(visibility("ip"), "block");
 });
 
 // ── The type ramp (globals.css "VISITOR CARD") against the site scale ──────────────

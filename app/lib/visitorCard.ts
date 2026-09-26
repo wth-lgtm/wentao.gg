@@ -32,7 +32,11 @@ export const FIELDS: Record<Field, ScreenClass> = {
   place: "P",
   ip: "P",
   isp: "P",
-  org: "T", // a second network row; on a phone the carrier alone says it
+  // Every class. Often the most striking fact on the card (a company's name on office Wi-Fi,
+  // "Mercor.io Corporation" behind "Zayo Bandwidth"), and orgLine already drops the row when
+  // it repeats the ISP, the usual case on mobile data, so it only costs a line when it says
+  // something new.
+  org: "P",
   dist: "P",
   peeks: "P",
   caption: "P",
@@ -53,10 +57,11 @@ const FROM: Record<Exclude<ScreenClass, "P">, Record<Display, string>> = {
   XL: { contents: "hidden min-[1920px]:contents", flex: "hidden min-[1920px]:flex", block: "hidden min-[1920px]:block", inline: "hidden min-[1920px]:inline" },
 };
 
-/** Classes for an element shown from the field's first class up ("" = every class). */
+/** Classes for an element shown from the field's first class up: on every class that is the
+ *  display itself (a `contents` row stays `contents`, not a grid item). */
 export function visibility(field: Field, display: Display = "block"): string {
   const first = FIELDS[field];
-  return first === "P" ? "" : FROM[first][display];
+  return first === "P" ? display : FROM[first][display];
 }
 
 export function flagFromCode(cc: unknown): string {
