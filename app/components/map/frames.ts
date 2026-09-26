@@ -20,3 +20,11 @@ export const MAP_ASPECT: Record<MapTreatment, number> = {
   outline: outline.width / outline.height,
   globe: 16 / 9,
 };
+
+/** The same ratios as CSS `aspect-ratio` strings ("w / h"). A bare number is re-serialised by
+ *  the browser as "2.2864 / 1", which React then reports as a hydration mismatch. */
+export const MAP_ASPECT_CSS: Record<MapTreatment, string> = {
+  dots: `${dots.cols} / ${dots.rows}`,
+  outline: `${outline.width} / ${outline.height.toFixed(2)}`,
+  globe: "16 / 9",
+};

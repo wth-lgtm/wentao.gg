@@ -14,24 +14,36 @@
 //
 // No wheel zoom, no drag pan, no buttons any more. With the world always in frame they
 // had nothing left to find, and the wheel handler held the page's scroll hostage whenever
-// the cursor crossed the card. The map is decoration for sighted readers (aria-hidden):
-// every fact on it is also a line of text below it.
+// the cursor crossed the card. The map is decoration for sighted readers (aria-hidden on
+// the box): every fact on it is also a line of text below it.
 //
-// Each treatment is its own lazy chunk (client-only), so its land data never rides in the
-// home page's first chunk or its HTML, and a treatment nobody asked for is never fetched.
-// The box is reserved at the treatment's exact aspect ratio first, so nothing shifts when
-// the chunk lands. Its fill is 80 % background — more than the glass around it — so the
-// rain behind the card doesn't read as extra dots on the map.
+// OUTLINE's land, sea and graticule never change, so they are drawn with no JavaScript: two
+// static images (public/map/land.svg, public/map/grid.svg, baked by scripts/gen-world.ts)
+// painted as CSS MASKS over the card's theme tokens (globals.css "VISITOR CARD"). They are in
+// the server HTML, so on a phone on a slow connection the first glance is already a world
+// map, not an empty box under "LOCATING YOU…" (review round 2: the land used to wait ~2.1 s
+// for the page's JavaScript and a lazy chunk on slow 4G). The two files are preloaded from
+// <head> (react-dom preload) so they arrive with the stylesheet, and they cost the HTML
+// nothing but two empty divs. Only the pin and the tether wait for JavaScript (they need the
+// fix), and so do the `?map=dots | globe` review treatments, each its own client-only chunk
+// that is never fetched unless asked for. The box is reserved at the treatment's aspect ratio,
+// so nothing shifts when a chunk lands. Its fill is 80 % background — more than the glass
+// around it — so the rain behind the card doesn't read as extra dots on the map.
 
 import dynamic from "next/dynamic";
 import { useSyncExternalStore } from "react";
-import { MAP_ASPECT, TREATMENTS, type MapTreatment } from "./map/frames";
+import { preload } from "react-dom";
+import { MAP_ASPECT_CSS, TREATMENTS, type MapTreatment } from "./map/frames";
 
 export const DEFAULT_TREATMENT: MapTreatment = "outline";
 
+// Same URLs as the masks in globals.css. A CSS mask image is fetched in CORS mode, so the
+// preload is too, or the browser would fetch each file twice.
+export const OUTLINE_IMAGES = ["/map/land.svg", "/map/grid.svg"] as const;
+
 const DotsMap = dynamic(() => import("./map/DotsMap"), { ssr: false });
 const GlobeMap = dynamic(() => import("./map/GlobeMap"), { ssr: false });
-const OutlineMap = dynamic(() => import("./map/OutlineMap"), { ssr: false });
+const OutlineMarks = dynamic(() => import("./map/OutlineMarks"), { ssr: false });
 
 function readTreatment(): MapTreatment {
   const q = new URLSearchParams(window.location.search).get("map");
@@ -40,15 +52,23 @@ function readTreatment(): MapTreatment {
 const noSubscribe = () => () => {};
 
 export default function LocatorMap({ lat, lon, reduce }: { lat: number | null; lon: number | null; reduce: boolean }) {
+  for (const href of OUTLINE_IMAGES) preload(href, { as: "image", crossOrigin: "anonymous" });
   const treatment = useSyncExternalStore(noSubscribe, readTreatment, () => DEFAULT_TREATMENT);
   return (
     <div
       data-map={treatment}
-      className="relative overflow-hidden rounded-xl bg-background/80 ring-1 ring-border/60"
-      style={{ aspectRatio: MAP_ASPECT[treatment] }}
+      aria-hidden="true"
+      className="vc-map relative overflow-hidden rounded-xl bg-background/80 ring-1 ring-border/60"
+      style={{ aspectRatio: MAP_ASPECT_CSS[treatment] }}
     >
+      {treatment === "outline" && (
+        <>
+          <div className="vc-grid absolute inset-0" />
+          <div className="vc-land absolute inset-0" />
+          <OutlineMarks lat={lat} lon={lon} />
+        </>
+      )}
       {treatment === "dots" && <DotsMap lat={lat} lon={lon} />}
-      {treatment === "outline" && <OutlineMap lat={lat} lon={lon} />}
       {treatment === "globe" && <GlobeMap lat={lat} lon={lon} reduce={reduce} />}
     </div>
   );

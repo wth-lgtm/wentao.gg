@@ -1674,7 +1674,6 @@ input:focus {
   --vc-land: color-mix(in srgb, var(--foreground) 54%, transparent);
   --vc-land-2: color-mix(in srgb, var(--foreground) 34%, transparent);
   --vc-land-3: color-mix(in srgb, var(--foreground) 18%, transparent);
-  --vc-sea: color-mix(in srgb, var(--foreground) 5%, transparent);
   --vc-rule: color-mix(in srgb, var(--foreground) 12%, transparent);
   /* A dot covers ~a third of its cell, so dots need more ink than a filled shape to read
      as the same land. */
@@ -1684,7 +1683,6 @@ input:focus {
   --vc-land: color-mix(in srgb, var(--foreground) 46%, transparent);
   --vc-land-2: color-mix(in srgb, var(--foreground) 28%, transparent);
   --vc-land-3: color-mix(in srgb, var(--foreground) 14%, transparent);
-  --vc-sea: color-mix(in srgb, var(--foreground) 4%, transparent);
   --vc-rule: color-mix(in srgb, var(--foreground) 12%, transparent);
   --vc-dot: color-mix(in srgb, var(--foreground) 66%, transparent);
 }
@@ -1696,6 +1694,27 @@ input:focus {
 }
 @media (min-width: 1920px) {
   .vcard { --vc-label: 16px; --vc-head: 28px; --vc-meta: 18px; }
+}
+
+/* OUTLINE's land and grid: static images (public/map/*.svg) used as MASKS, so the colour is
+   the theme's token and the drawing is in the server HTML with no JavaScript. The grid image
+   carries the sea at 0.4 alpha and its lines at 1, so over --vc-rule (12 % ink) the sea reads
+   at ~5 % in both themes, as it did inline. Forced colours drop backgrounds, so there the land
+   takes the text colour and the grid goes (the map is decoration; its facts are all text). */
+.vc-land,
+.vc-grid {
+  -webkit-mask: url(/map/land.svg) 0 0 / 100% 100% no-repeat;
+  mask: url(/map/land.svg) 0 0 / 100% 100% no-repeat;
+  background: var(--vc-land);
+}
+.vc-grid {
+  -webkit-mask-image: url(/map/grid.svg);
+  mask-image: url(/map/grid.svg);
+  background: var(--vc-rule);
+}
+@media (forced-colors: active) {
+  .vc-land { forced-color-adjust: none; background: CanvasText; }
+  .vc-grid { display: none; }
 }
 
 /* The pin: a flat accent disc on a background-coloured keyline (so it reads over dots and
